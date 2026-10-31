@@ -1,11 +1,13 @@
 /**
- * ui.js · 设置面板 + 状态徽章 + 记录面板
+ * ui.js · 设置面板 + 状态徽章 + 浮动面板
  *
  * 三处入口：
  *   - 设置面板：渲染 settings.html，append 到 #extensions_settings2
- *   - 状态徽章：append 到 #leftSendForm，**两段**——左「主动」切当前对话的开关，右「被动」切全局的
- *     自动学习；有未处理的改动时带计数，被动挂上待学习时右段变成「待学」
- *   - 记录面板：浮动在右下角，两个分区——待确认（patch）+ 已写入（世界书历史）
+ *   - 状态徽章：append 到 #leftSendForm 的一个**固定尺寸**图标，只干一件事——开关浮动面板。
+ *     两个开关都搬进面板了：徽章挤在输入框旁再放「主动 / 被动」两段，既占地方又和 ST 的
+ *     其它方块按钮不一样大，而且徽章会跟着 #leftSendForm 一起被拉高
+ *   - 浮动面板：右下角，第一段是「模式」（主动 / 被动 两个开关），下面才是记录
+ *     （待确认 patch + 已写入历史）。没有记录时面板只剩模式，不再整块隐藏
  *
  * 所有事件处理器都在触发时现取 getContext()，理由见 index.js 的 context() 注释。
  */
@@ -70,7 +72,7 @@ const LOG = '[Thrive]';
 const BADGE_ID = 'thrive_badge';
 const PANEL_ID = 'thrive_panel';
 
-/** 记录面板的尺寸/透明度取值范围，设置页的滑块与这里的夹取必须一致 */
+/** 浮动面板的尺寸/透明度取值范围，设置页的滑块与这里的夹取必须一致 */
 const PANEL_MIN_WIDTH = 280;
 const PANEL_MAX_WIDTH = 900;
 const PANEL_MIN_HEIGHT = 200;
@@ -95,23 +97,19 @@ const DIAG_TRIGGERS = new Set([
 const SAVE_DELAY = 300;
 
 /**
- * 徽章拆成两段：左边「主动」（当前对话的手动开关），右边「被动」（全局的自动学习）。
+ * 徽章 = 一个方块图标 + 待确认计数，只作为浮动面板的开关。
  *
- * 两段各自是一个可点区，因为它们管的是两件不同的事、存在两处不同的地方；
- * 合成一个点击区就只能靠右键/长按区分，用户发现不了。外层只负责外壳与计数。
+ * 为什么把「主动 / 被动」两段从这里拿掉：它们挤在输入框旁边，宽度随文字变，和 ST 那一排
+ * 固定尺寸的方块按钮站不到一起；而且 #leftSendForm 是 flex 容器，徽章会跟着一起被拉高。
+ *
+ * 状态也不再用额外的点/圈去画——35px 的方块里塞什么都显脏。图标颜色本身就是状态
+ * （强调色 = 主动开着，Em 色 = 只有被动开着），「待学」让图标整体呼吸，
+ * 具体文案都在面板里，点一下就看见。
  */
 const BADGE_HTML = `
-<div id="thrive_badge" class="thrive-badge interactable" role="group" aria-label="学习模式">
-    <span class="thrive-badge__seg thrive-badge__seg--active" role="button" tabindex="0"
-        data-thrive-mode="active" aria-pressed="false">
-        <span class="thrive-badge__dot" aria-hidden="true"></span>
-        <span class="thrive-badge__label">主动</span>
-    </span>
-    <span class="thrive-badge__seg thrive-badge__seg--passive" role="button" tabindex="0"
-        data-thrive-mode="passive" aria-pressed="false">
-        <span class="thrive-badge__dot" aria-hidden="true"></span>
-        <span class="thrive-badge__label">被动</span>
-    </span>
+<div id="thrive_badge" class="thrive-badge interactable" role="button" tabindex="0"
+    aria-controls="${PANEL_ID}" aria-expanded="false" aria-label="学习模式：打开面板">
+    <i class="fa-solid fa-graduation-cap thrive-badge__icon" aria-hidden="true"></i>
     <span class="thrive-badge__count displayNone" aria-hidden="true"></span>
 </div>`;
 
@@ -470,9 +468,8 @@ function bindPatchControls() {
         // 只把开关拨回去——丢弃必须发生在面板里，用户得亲眼看一遍 diff
         if (!enabled && isUnresolved(getPatch(ctx))) {
             this.checked = true;
-            toast('还有一份待处理的描述改动：请先在记录面板里接受或拒绝');
-            panelExpanded = true;
-            refreshPanel(ctx);
+            toast('还有一份待处理的描述改动：请先在浮动面板里接受或拒绝');
+            setPanelOpen(true, ctx);
             document.getElementById(PANEL_ID)?.scrollIntoView({ block: 'nearest' });
             return;
         }
@@ -538,7 +535,7 @@ function updatePatchHint(ctx, settings) {
     }
 
     el.textContent = pending
-        ? '当前有一份待处理的改动，在记录面板的「待确认」里接受或拒绝。'
+        ? '当前有一份待处理的改动，在浮动面板的「待确认」里接受或拒绝。'
         : '模型的描述改动会先暂存成一份 diff，你接受后才写入角色卡；暂存期间模型读到的是暂存版。';
     el.classList.toggle('thrive-hint--warn', pending);
 }
@@ -663,20 +660,28 @@ function updateLimitHint(settings) {
     el.classList.toggle('thrive-hint--warn', entryClamped || descClamped);
 }
 
-/* ------------------------------------------------------------------ 记录面板 */
+/* ------------------------------------------------------------------ 浮动面板 */
 
 let patchBusy = false;
 let panelSignature = null;
-/** 用户展开/收起过面板没有。待确认一出现会强制展开，处理完不自动收起 */
-let panelExpanded = false;
-/** 已经被"强制展开"过的那份 patch。只在它第一次出现时展开，之后收起就是收起 */
+/**
+ * 面板开着没有。徽章是常驻入口：点一下开、再点一下关；`/thrive panel`
+ * 与"新出现一份待确认改动"也能把它打开。
+ *
+ * 以前这里叫 panelExpanded，还分一个"只剩标题栏"的收起态。徽章缩成方块之后，
+ * "收起"这件事交给徽章本身——面板要么完整打开，要么整块收起来，
+ * 不再留一条横杠横在聊天区上。
+ */
+let panelOpen = false;
+/** 已经被"强制打开"过的那份 patch。只在它第一次出现时打开，之后用户关掉就是关掉 */
 let forcedPatchId = null;
 /** 拖动会话：{ pointerId, offsetX, offsetY }，按下标题栏时建立，松手清空 */
 let dragSession = null;
 
 /**
- * 挂载记录面板。重复调用安全。
- * 面板是空壳，内容由 refreshPanel 填；没有东西可显示时整块隐藏。
+ * 挂载浮动面板。重复调用安全。
+ *
+ * 面板一开始是空的、收起的：模式那一段每次 refreshPanel 现画，记录有才画。
  */
 export function initPanel() {
     if (document.getElementById(PANEL_ID)) {
@@ -685,12 +690,12 @@ export function initPanel() {
 
     document.body.insertAdjacentHTML(
         'beforeend',
-        `<div id="${PANEL_ID}" class="thrive-panel displayNone" role="complementary" aria-live="polite" aria-label="Thrive 记录"></div>`,
+        `<div id="${PANEL_ID}" class="thrive-panel displayNone" role="dialog" aria-label="Thrive 面板"></div>`,
     );
 
     const panel = document.getElementById(PANEL_ID);
     if (!panel) {
-        console.warn(`${LOG} 记录面板创建失败`);
+        console.warn(`${LOG} 面板创建失败`);
         return;
     }
 
@@ -708,6 +713,23 @@ export function initPanel() {
         }
         applyPanelLayout(current);
     });
+}
+
+/**
+ * 开 / 关面板。
+ *
+ * 徽章、`/thrive panel`、新出现的待确认改动三条路径都走这里，
+ * 保证"面板开着没有"只有一份状态，不会出现徽章说开着、面板却没了。
+ *
+ * @param {boolean} open
+ * @param {object} [ctx]
+ */
+function setPanelOpen(open, ctx = getContext()) {
+    panelOpen = Boolean(open);
+    refreshPanel(ctx);
+    // 面板可见性变了，徽章的"已打开"外观与 aria-expanded 要跟上；
+    // 顺带把设置页那行状态也刷一遍，代价很小
+    refreshBadgeOnly(ctx);
 }
 
 /* -------------------------------------------------------------- 面板布局 */
@@ -748,7 +770,11 @@ function readPanelLayout(settings) {
 }
 
 /**
- * 把当前设置铺到面板上。收起时宽度交给内容，展开时才用设置里的宽度与最大高度。
+ * 把当前设置铺到面板上。
+ *
+ * 面板只有"开着 / 关着"两种状态，关着时整块 display:none，所以宽度与最大高度
+ * 不需要分情况处理——收起态不再存在（那条横杠的职责已经交给徽章）。
+ *
  * @param {HTMLElement} [panel]
  */
 function applyPanelLayout(panel = document.getElementById(PANEL_ID)) {
@@ -759,18 +785,10 @@ function applyPanelLayout(panel = document.getElementById(PANEL_ID)) {
 
     const layout = readPanelLayout(ensureSettings(getContext()));
 
-    panel.classList.toggle('thrive-panel--collapsed', !panelExpanded);
     panel.style.opacity = String(layout.opacity);
-
-    if (panelExpanded) {
-        // 再叠一个 vw/vh 上限：窗口窄于设置值时不该顶出屏幕
-        panel.style.width = `min(${layout.width}px, 92vw)`;
-        panel.style.maxHeight = `min(${layout.height}px, calc(100vh - 24px))`;
-    } else {
-        // 交给 .thrive-panel--collapsed 的 max-content，别留一条空荡荡的长条挡聊天
-        panel.style.width = '';
-        panel.style.maxHeight = '';
-    }
+    // 再叠一个 vw/vh 上限：窗口窄于设置值时不该顶出屏幕
+    panel.style.width = `min(${layout.width}px, 92vw)`;
+    panel.style.maxHeight = `min(${layout.height}px, calc(100vh - 24px))`;
 
     if (layout.pinned) {
         pinPanel(panel, layout.x, layout.y);
@@ -991,10 +1009,10 @@ function syncRange(id, value, format) {
 }
 
 /**
- * 重绘记录面板。
+ * 重绘浮动面板。
  *
- * 显示条件：有 patch、有写入记录、或有描述快照。三者都没有就整块消失——
- * 大多数对话从头到尾不会出现这块东西。
+ * 面板现在**总是有内容**：第一段是模式（主动 / 被动 两个开关），后面才是有才画的记录。
+ * 所以它不再是"有记录才出现"，而是由 panelOpen 决定——打开着就画，关着就整块隐藏。
  *
  * @param {object} [ctx]
  */
@@ -1028,35 +1046,48 @@ export function refreshPanel(ctx = getContext()) {
         && patch.status === PATCH_STATUS.APPLIED
         && isDescriptionEditorStale(ctx, patch.after);
 
-    if (!patch && backups.length === 0 && !descBackup) {
-        panelSignature = null;
-        forcedPatchId = null;
-        panel.innerHTML = '';
-        panel.classList.add('displayNone');
-        return;
-    }
-
-    panel.classList.remove('displayNone');
-
     /*
-     * 新出现的待确认改动必须直接把面板打开：否则徽章上多个数字，用户不知道在哪处理。
+     * 新出现的待确认改动必须把面板顶出来：否则徽章上多个数字，用户不知道在哪处理。
      *
-     * 但只在"这一份 patch 第一次出现"时展开。之前是每次重绘都展开，于是用户点「收起」
-     * 后 panelExpanded 先变 false、refreshPanel 又立刻把它改回 true——表现为"有时候
+     * 但只在"这一份 patch 第一次出现"时打开。之前是每次重绘都展开，于是用户点「收起」
+     * 后 panelOpen 先变 false、refreshPanel 又立刻把它改回 true——表现为"有时候
      * 收起按钮没反应"（有未处理改动时必现，刷新一次也会把它弹回来）。
      */
     if (isUnresolved(patch)) {
         if (patch.id !== forcedPatchId) {
             forcedPatchId = patch.id;
-            panelExpanded = true;
+            panelOpen = true;
         }
     } else {
         forcedPatchId = null;
     }
 
-    // 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等
+    panel.classList.toggle('displayNone', !panelOpen);
+    // 自动弹出也是"打开"，徽章的外观与 aria 必须跟上，否则会出现"面板明明在、
+    // 徽章却说没开"——点一下反而把面板关了
+    syncBadgeOpenState();
+    if (!panelOpen) {
+        // 关着就不画。签名一并丢掉，下次打开必然整体重画
+        panelSignature = null;
+        return;
+    }
+
+    const settings = ensureSettings(ctx);
+    const mode = readModeView(ctx, settings);
+
+    /*
+     * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
+     * 模式状态也在里面——面板里就摆着两个开关，它们变了必须重画。
+     */
     const signature = JSON.stringify([
-        panelExpanded,
+        mode.active,
+        mode.passive,
+        mode.usable,
+        mode.diag.code,
+        mode.pending ? [mode.pending.reason, mode.pending.keyword] : null,
+        mode.interval,
+        mode.since,
+        mode.keywordCount,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
         descBackup ? descBackup.at : null,
@@ -1068,10 +1099,41 @@ export function refreshPanel(ctx = getContext()) {
     }
     panelSignature = signature;
 
-    panel.innerHTML = renderPanel({ patch, backups, descBackup, drift, editorStale });
-    // 内容换了高度可能也变了，重新摆一次（收起/展开、拖动后的位置都在这里生效）
+    panel.innerHTML = renderPanel({ mode, patch, backups, descBackup, drift, editorStale });
+    // 内容换了高度可能也变了，重新摆一次（拖动后的位置在这里生效）
     applyPanelLayout(panel);
-    updatePatchHint(ctx, ensureSettings(ctx));
+    updatePatchHint(ctx, settings);
+}
+
+/**
+ * 面板「模式」那一段要用的所有状态，一次算齐。
+ *
+ * 徽章与面板都从同一份状态出发，省得两处各判一次、判出不一样的结果。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ */
+function readModeView(ctx, settings) {
+    const none = !hasAnyModule(settings);
+    const available = isChatAvailable(ctx);
+    const diag = diagnoseEnvironment(ctx);
+    const progress = intervalProgress(ctx, settings);
+    const keywords = parseKeywords(settings.passiveKeywords);
+
+    return {
+        active: isEnabled(ctx),
+        passive: settings.passiveEnabled === true,
+        pending: getPending(ctx),
+        // 三种"不可用"共用一档：没有可写模块、没有对话、环境不支持工具调用
+        usable: available && !none && diag.ok,
+        none,
+        available,
+        diag,
+        interval: progress.interval,
+        since: progress.since,
+        remaining: progress.remaining,
+        keywordCount: keywords.length,
+    };
 }
 
 /**
@@ -1099,7 +1161,7 @@ function isDescriptionEditorStale(ctx, applied) {
     return normalizeEol(textarea.value) !== normalizeEol(applied);
 }
 
-function renderPanel({ patch, backups, descBackup, drift = false, editorStale = false }) {
+function renderPanel({ mode, patch, backups, descBackup, drift = false, editorStale = false }) {
     const pending = isUnresolved(patch);
     const counts = [];
     if (pending) {
@@ -1114,20 +1176,112 @@ function renderPanel({ patch, backups, descBackup, drift = false, editorStale = 
     const bar = `
         <div class="thrive-panel__bar">
             <i class="fa-solid fa-grip-vertical thrive-panel__grip" title="按住拖动可移动面板" aria-hidden="true"></i>
-            <span class="thrive-panel__title">Thrive · 记录</span>
+            <span class="thrive-panel__title">Thrive</span>
             <span class="thrive-panel__summary">${escapeHtml(counts.join(' · '))}</span>
-            <div class="menu_button thrive-panel__toggle" data-thrive-action="toggle">${panelExpanded ? '收起' : '展开'}</div>
+            <div class="menu_button thrive-panel__toggle" data-thrive-action="hide-panel"
+                title="收起面板；输入框旁的徽章随时能把它叫回来">收起</div>
         </div>`;
 
-    if (!panelExpanded) {
-        return bar;
-    }
-
-    const body = [renderPatchSection(patch, drift, editorStale), renderHistorySection(backups, descBackup)]
-        .filter(Boolean)
-        .join('');
+    const body = [
+        renderModeSection(mode),
+        renderPatchSection(patch, drift, editorStale),
+        renderHistorySection(backups, descBackup),
+    ].filter(Boolean).join('');
 
     return `${bar}<div class="thrive-panel__body">${body}</div>`;
+}
+
+/**
+ * 模式分区：主动 / 被动两个开关。
+ *
+ * 这就是从徽章上搬下来的那两段。搬过来之后每个开关终于有地方写一句"它管什么"：
+ * 主动是当前对话的、被动是全局的——以前只能挤在 title 里，得悬停才知道。
+ *
+ * @param {ReturnType<typeof readModeView>} mode
+ */
+function renderModeSection(mode) {
+    const { active, passive, usable, none, available, diag, pending, interval, remaining, keywordCount } = mode;
+
+    const summary = active && passive
+        ? '主动 + 被动'
+        : active
+            ? '主动开着'
+            : passive
+                ? '被动待命'
+                : '都没开';
+
+    /*
+     * 被动那行的说明要跟着判据走：开了但一条判据都没有是最常见的空转状态，
+     * 只写"命中判据后借一轮"等于没说——用户以为开了就会自己学。
+     */
+    const passiveHint = !passive
+        ? '全局 · 命中判据后借一轮，回复完自动关'
+        : interval > 0
+            ? `全局 · 每 ${interval} 条借一轮，还差 ${remaining} 条`
+            : keywordCount > 0
+                ? `全局 · ${keywordCount} 个关键词命中就借一轮，回复完自动关`
+                : '全局 · 已开启，但还没有判据（间隔 0 且关键词为空），不会触发';
+
+    /*
+     * 不可用的原因只能写一条：三条同时列出来，用户还是不知道该先改哪个。
+     * 顺序和以前徽章的 tooltip 一致——先看模块，再看对话，最后看环境。
+     */
+    const blocked = none
+        ? '两个模块都关着，请先在扩展设置里开启至少一个。'
+        : !available
+            ? '请先打开一个对话。'
+            : !diag.ok
+                ? `工具调用不可用：${formatDiagnosis(diag)}`
+                : '';
+
+    return `
+        <section class="thrive-panel__section thrive-modes">
+            <div class="thrive-panel__head">
+                <span class="thrive-panel__section-title">模式</span>
+                <span class="thrive-panel__meta">${escapeHtml(summary)}</span>
+            </div>
+            ${renderModeRow({
+                action: 'toggle-active',
+                variant: 'active',
+                title: '主动学习',
+                hint: '只作用于当前对话 · 手动开关，开着就一直在学',
+                on: active,
+                usable,
+            })}
+            ${renderModeRow({
+                action: 'toggle-passive',
+                variant: 'passive',
+                title: '被动学习',
+                hint: passiveHint,
+                on: passive,
+                usable,
+            })}
+            ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
+            ${pending
+                ? `<div class="thrive-mode__pending">本次待学习：${escapeHtml(describePending(pending))}`
+                    + ' —— 下一轮对话临时开启，回复完自动关闭。</div>'
+                : ''}
+        </section>`;
+}
+
+/**
+ * 一行开关。灯亮 = 开，灭 = 关；不可用时整行压暗，点了会说明原因而不是静默。
+ *
+ * @param {{action: string, variant: 'active'|'passive', title: string, hint: string,
+ *     on: boolean, usable: boolean}} props
+ */
+function renderModeRow({ action, variant, title, hint, on, usable }) {
+    return `
+        <div class="thrive-mode thrive-mode--${variant}${on ? ' is-on' : ''}${usable ? '' : ' is-muted'}">
+            <span class="thrive-mode__led" aria-hidden="true"></span>
+            <span class="thrive-mode__text">
+                <span class="thrive-mode__title">${escapeHtml(title)}</span>
+                <span class="thrive-mode__hint">${escapeHtml(hint)}</span>
+            </span>
+            <span class="menu_button thrive-mode__switch${on ? ' is-on' : ''}" role="switch"
+                aria-checked="${on ? 'true' : 'false'}"
+                data-thrive-action="${action}">${on ? '开' : '关'}</span>
+        </div>`;
 }
 
 /**
@@ -1325,9 +1479,14 @@ function onPanelClick(event) {
             discardPatch(getContext());
             refreshPanel(getContext());
             break;
-        case 'toggle':
-            panelExpanded = !panelExpanded;
-            refreshPanel(getContext());
+        case 'hide-panel':
+            setPanelOpen(false);
+            break;
+        case 'toggle-active':
+            toggleActive(getContext(), ensureSettings(getContext()));
+            break;
+        case 'toggle-passive':
+            togglePassive(getContext(), ensureSettings(getContext()));
             break;
         case 'restore-lore':
             void restoreLoreAndReport(trigger.dataset.backupId);
@@ -1367,7 +1526,7 @@ async function applyAndReport(force) {
             // 编辑器里用户改过描述：不覆盖他的输入，但必须说清楚"保存会盖掉这次写入"
             if (edited) {
                 toast(`已写入${who}角色卡，但编辑框里的描述你改过，这次没覆盖它；`
-                    + '要换成新内容，点记录面板上的「刷新编辑框」');
+                    + '要换成新内容，点浮动面板上的「刷新编辑框」');
             } else if (reason === 'overwrote-edited') {
                 toast(`已写入${who}角色卡；编辑面板里未保存的旧描述被这次写入覆盖了`);
             } else {
@@ -1918,6 +2077,8 @@ function updateBlockHint(position) {
 
 /**
  * 挂载状态徽章。重复调用安全。
+ *
+ * 徽章只做一件事：开关面板。键盘 Enter / 空格等价于点一下。
  */
 export function initBadge() {
     const host = document.getElementById('leftSendForm');
@@ -1938,12 +2099,8 @@ export function initBadge() {
 
     badge.addEventListener('click', onBadgeClick);
 
-    // 键盘操作挂在两段上：Enter / 空格都算一次点击
     badge.addEventListener('keydown', event => {
         if (event.key !== 'Enter' && event.key !== ' ') {
-            return;
-        }
-        if (!event.target?.closest?.('[data-thrive-mode]')) {
             return;
         }
         event.preventDefault();
@@ -1969,45 +2126,58 @@ export function initBadge() {
 }
 
 /**
- * 徽章点击：点了哪一段就切哪个。
+ * 徽章点击：开 / 关面板。
  *
- * 两段管的东西不一样，所以守卫也分开：
- *   主动 —— 对话级开关，要求有对话、有可写模块、环境支持工具调用
- *   被动 —— 全局开关（判据在设置页里配），要求同上，另外没有对话就没有进度可谈
- *
- * 点在外壳留白上（不在任何一段里）时按「主动」处理：老用户早就习惯了"点徽章切开关"。
+ * 这里**不做任何守卫**：环境不可用时更需要能打开面板——原因就写在面板里，
+ * 比只弹一句 toast 有用。真正挡住切换的是面板里那两个开关（toggleActive / togglePassive）。
  *
  * @param {MouseEvent|KeyboardEvent} [event]
  */
 function onBadgeClick(event) {
-    const mode = event?.target?.closest?.('[data-thrive-mode]')?.dataset.thriveMode === 'passive'
-        ? 'passive'
-        : 'active';
+    event?.preventDefault?.();
+    setPanelOpen(!panelOpen, getContext());
+}
 
-    const ctx = getContext();
-    const settings = ensureSettings(ctx);
-
+/**
+ * 三个"这个开关现在点了也没用"的原因，只报第一条。
+ *
+ * 顺序：模块全关 → 没对话 → 环境不支持工具调用。以前徽章的 toast 就是这么排的，
+ * 用户已经习惯了这套说法。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ * @returns {boolean} 能不能切
+ */
+function guardModeToggle(ctx, settings) {
     // 模块全关时开关没有意义：点了只说原因，不切换状态
     if (!hasAnyModule(settings)) {
         toast('两个模块都关着，请先在扩展设置里开启至少一个');
-        return;
+        return false;
     }
 
     if (!isChatAvailable(ctx)) {
         toast('请先打开一个对话');
-        return;
+        return false;
     }
 
-    // 环境不支持工具调用时，开了也只是"徽章亮着、模型什么也看不到"。
+    // 环境不支持工具调用时，开了也只是"灯亮着、模型什么也看不到"。
     // 这里只报第一条没通过的原因，不替用户去改 ST 的设置（ADR-020）
     const diag = diagnoseEnvironment(ctx);
     if (!diag.ok) {
         toast(`工具调用不可用：${formatDiagnosis(diag)}`);
-        return;
+        return false;
     }
 
-    if (mode === 'passive') {
-        togglePassive(ctx, settings);
+    return true;
+}
+
+/**
+ * 主动开关（对话级，存在 chat_metadata 里）。
+ * @param {object} ctx
+ * @param {object} settings
+ */
+function toggleActive(ctx, settings) {
+    if (!guardModeToggle(ctx, settings)) {
         return;
     }
 
@@ -2024,6 +2194,10 @@ function onBadgeClick(event) {
  * 留着会出现"被动显示关闭、徽章却在闪待学"这种自相矛盾的状态。
  */
 function togglePassive(ctx, settings) {
+    if (!guardModeToggle(ctx, settings)) {
+        return;
+    }
+
     const next = settings.passiveEnabled !== true;
     settings.passiveEnabled = next;
     ctx.saveSettingsDebounced?.();
@@ -2050,27 +2224,20 @@ function togglePassive(ctx, settings) {
 /* ------------------------------------------------------------------ 面板入口 */
 
 /**
- * 把记录面板摊开，给 `/thrive panel` 用。
+ * 打开浮动面板，给 `/thrive panel` 用（徽章点击走的是同一套开关）。
  *
- * 没有内容时面板本来就是隐藏的，这时只回一句"没什么可看"，
- * 而不是弹出一个空壳——空壳会让人以为坏了。
+ * 面板里始终有「模式」这一段，所以"没有记录"不再是打不开的理由——
+ * 也正因为如此它不会再回声"没什么可看"。
  *
  * @param {object} [ctx]
- * @returns {boolean} 面板是否真的被打开
+ * @returns {boolean} 面板是否被打开（现在总是 true，返回值留给命令层）
  */
 export function openPanel(ctx = getContext()) {
-    refreshPanel(ctx);
+    setPanelOpen(true, ctx);
 
     const panel = document.getElementById(PANEL_ID);
-    if (!panel || panel.classList.contains('displayNone')) {
-        toast('现在没有待确认的改动，也没有写入记录');
-        return false;
-    }
-
-    panelExpanded = true;
-    refreshPanel(ctx);
-    panel.scrollIntoView({ block: 'nearest' });
-    return true;
+    panel?.scrollIntoView({ block: 'nearest' });
+    return Boolean(panel);
 }
 
 /**
@@ -2201,6 +2368,15 @@ export function refreshBadgeOnly(ctx = getContext()) {
     refreshBadge(ctx, settings, available, diag);
     refreshStatusText(ctx, settings, available);
     updatePassiveHint(ctx, settings);
+
+    /*
+     * 面板里也有这两个开关与「待学」提示。开着就顺手同步一次——
+     * 否则被动学习在发消息时触发了，徽章的灯在闪、面板里却还写着"都没开"。
+     * 关着的时候 refreshPanel 会直接返回，不会白算。
+     */
+    if (panelOpen) {
+        refreshPanel(ctx);
+    }
 }
 
 /**
@@ -2228,6 +2404,27 @@ function refreshDiagnostics(ctx, diag = diagnoseEnvironment(ctx)) {
     fix.classList.toggle('displayNone', diag.ok || !diag.fix);
 }
 
+/**
+ * 只把"面板开着没有"同步到徽章的 aria-expanded 上，不重算状态、不碰面板——
+ * 所以可以放心在 refreshPanel 里调用。
+ *
+ * 不额外画"已打开"的样式：面板就摆在眼前，再给图标描一圈只会让它和同一排的
+ * 其它图标又不一样了。
+ */
+function syncBadgeOpenState() {
+    const badge = document.getElementById(BADGE_ID);
+    if (!badge) {
+        return;
+    }
+    badge.setAttribute('aria-expanded', String(panelOpen));
+}
+
+/**
+ * 刷新徽章：颜色、计数、tooltip。
+ *
+ * 徽章不再承载开关，状态全靠图标本身：强调色 = 主动开着，Em 色 = 只有被动开着，
+ * 「待学」让图标呼吸；具体文案另有 tooltip，面板里还有完整说明。
+ */
 function refreshBadge(ctx, settings, available, diag) {
     const badge = document.getElementById(BADGE_ID);
     if (!badge) {
@@ -2248,12 +2445,11 @@ function refreshBadge(ctx, settings, available, diag) {
     badge.classList.toggle('displayNone', !settings.showBadge);
     // 三种"不可用"共用同一档置灰：没有可写模块、没有对话、环境不支持工具调用
     badge.classList.toggle('thrive-badge--muted', !usable);
+    badge.classList.toggle('thrive-badge--active', activeOn);
+    badge.classList.toggle('thrive-badge--passive', passiveOn);
     badge.classList.toggle('thrive-badge--armed', Boolean(pending));
     badge.classList.toggle('thrive-badge--pending', patchPending > 0);
-
-    updateSegment(badge, 'active', activeOn, false);
-    // 待学只挂在被动那一段上：主动没有"等待"这个状态，开着就是在学
-    updateSegment(badge, 'passive', passiveOn, Boolean(pending));
+    syncBadgeOpenState();
 
     const count = badge.querySelector('.thrive-badge__count');
     if (count) {
@@ -2269,8 +2465,8 @@ function refreshBadge(ctx, settings, available, diag) {
     } else if (unsupported) {
         lines.push(`工具调用不可用：${formatDiagnosis(diag)}`);
     } else {
-        lines.push(`主动学习：${activeOn ? '已开启（点击关闭）' : '已关闭（点击开启）'}`);
-        lines.push(`被动学习：${passiveOn ? '已开启（点击关闭）' : '已关闭（点击开启）'}`);
+        lines.push(`主动学习：${activeOn ? '已开启' : '已关闭'}`);
+        lines.push(`被动学习：${passiveOn ? '已开启' : '已关闭'}`);
 
         const progress = intervalProgress(ctx, settings);
         if (passiveOn && progress.interval > 0) {
@@ -2289,51 +2485,11 @@ function refreshBadge(ctx, settings, available, diag) {
         lines.push(`有 ${patchPending} 份待确认的描述改动`);
     }
 
+    // 点徽章只会开 / 关面板，说清楚，省得用户以为它还像以前那样切开关
+    lines.push(panelOpen ? '点击收起面板' : '点击打开面板（模式开关在里面）');
+
     badge.title = lines.join('\n');
     badge.setAttribute('aria-label', lines.join('；'));
-
-    const activeSeg = badge.querySelector('[data-thrive-mode="active"]');
-    if (activeSeg) {
-        activeSeg.title = activeOn ? '主动学习：已开启，点击关闭' : '主动学习：已关闭，点击开启';
-    }
-    const passiveSeg = badge.querySelector('[data-thrive-mode="passive"]');
-    if (passiveSeg) {
-        passiveSeg.title = pending
-            ? `被动学习：本轮已触发（${describePending(pending)}），下一轮对话临时开启`
-            : passiveOn
-                ? '被动学习：已开启，点击关闭'
-                : '被动学习：已关闭，点击开启';
-    }
-}
-
-/**
- * 更新一侧区段的显示。
- *
- * 文案只有两三个字，靠"有没有底色/有没有虚线/闪不闪"来区分状态本来就够呛，
- * 所以开启时多给一个字面上的信号：待学直接写成「待学」，比任何配色都直白。
- *
- * @param {HTMLElement} badge
- * @param {'active'|'passive'} mode
- * @param {boolean} on
- * @param {boolean} armed 这一次待学习是不是挂在它身上
- */
-function updateSegment(badge, mode, on, armed) {
-    const seg = badge.querySelector(`[data-thrive-mode="${mode}"]`);
-    if (!seg) {
-        return;
-    }
-
-    seg.classList.toggle('is-on', on);
-    seg.classList.toggle('is-armed', armed);
-    seg.setAttribute('aria-pressed', String(on || armed));
-
-    const label = seg.querySelector('.thrive-badge__label');
-    if (label) {
-        const text = armed ? '待学' : (mode === 'active' ? '主动' : '被动');
-        if (label.textContent !== text) {
-            label.textContent = text;
-        }
-    }
 }
 
 function refreshStatusText(ctx, settings, available) {

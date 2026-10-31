@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.15.0</span>
+                <span class="thrive-version">v0.16.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -44,10 +44,12 @@
 
                     <label class="checkbox_label" for="thrive_show_badge">
                         <input id="thrive_show_badge" type="checkbox">
-                        <span>在输入框旁显示状态徽章</span>
+                        <span>在输入框旁显示徽章（浮动面板的开关）</span>
                     </label>
                     <small class="thrive-hint">
-                        徽章分成「主动」「被动」两段，点哪段切哪个：有底色 = 开启，虚线空框 = 关闭，闪动的「待学」= 已经挂上一次临时学习。
+                        徽章只是一个固定大小的图标：点一下打开 / 收起浮动面板，主动与被动两个开关都在面板里。
+                        图标变强调色 = 主动开着，右下角亮起小灯 = 对应模式开着，灯在闪 = 已经挂上一次临时学习；
+                        右上角的数字是待确认的描述改动。
                     </small>
                 </div>
             </div>
@@ -325,7 +327,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>日志与面板</b>
-                        <small class="thrive-group__hint">旧日志清理 · 记录面板外观</small>
+                        <small class="thrive-group__hint">旧日志清理 · 浮动面板外观</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -339,9 +341,10 @@
                     </div>
 
                     <div class="thrive-field">
-                        <span class="thrive-field-title">记录面板</span>
+                        <span class="thrive-field-title">浮动面板</span>
                         <small class="thrive-hint thrive-hint--muted">
-                            面板出现时拖动它的标题栏就能挪到任意位置；位置、大小和透明度按屏幕记住，与具体对话无关。
+                            面板里是模式开关与写入记录。点输入框旁的徽章打开 / 收起；打开后拖动它的标题栏能挪到任意位置，
+                            位置、大小和透明度按屏幕记住，与具体对话无关。
                         </small>
 
                         <div class="thrive-row">

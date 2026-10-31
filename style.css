@@ -7,117 +7,64 @@
 /* ---------------------------------------------------------------- 状态徽章 */
 
 /*
- * ST 给 `#leftSendForm>div` 定了固定方块尺寸（width/height = --bottomFormBlockSize）
- * 和 opacity: 0.7。徽章是胶囊形，被塞进方块里就会把文字和计数溢出到相邻图标下面；
- * 状态透明度也会被那条规则顶掉。所以凡是尺寸与状态，都用 ID + class 提权。
+ * 徽章现在只是一个方块图标：点一下开 / 关浮动面板，主动 / 被动两个开关都搬进面板了。
  *
- * 结构：外层胶囊 + 两个可点区段（主动 / 被动）+ 待确认计数。
- * 两段各自是独立开关，所以状态必须画在段上，不能画在原地儿上——否则"主动开着、
- * 被动关着"只能二选一地显示，用户根本看不出另一段是什么状态。
+ * 尺寸必须跟 ST 那一排图标一致（--bottomFormBlockSize / --bottomFormIconSize）：
+ * #leftSendForm 是 flex 容器，之前那个胶囊用 `width: auto; height: auto`，
+ * 会被拉成和输入框一样高、横向还占掉一大截。样式也照 ST 的做法——无边框、默认 70% 透明、
+ * hover 回到 100%，这样和旁边的发送 / 续写按钮站在一起是同一套语言。
+ *
+ * 状态只用图标颜色表达，不再加小圆点：35px 的方块里塞额外的点，比不加更像"外来物"。
  */
 #leftSendForm > .thrive-badge {
-    display: inline-flex;
-    align-items: stretch;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
-    width: auto;
-    height: auto;
-    margin-right: 6px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 999px;
-    overflow: hidden;
-    font-size: calc(var(--mainFontSize, 15px) * 0.8);
-    line-height: 1.6;
+    /* 只认方块尺寸，不跟着父容器拉伸 */
+    width: var(--bottomFormBlockSize, 30px);
+    min-width: var(--bottomFormBlockSize, 30px);
+    height: var(--bottomFormBlockSize, 30px);
+    max-width: var(--bottomFormBlockSize, 30px);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background-color: transparent;
     color: var(--SmartThemeBodyColor);
-    opacity: 1;
+    /*
+     * 比同一排的图标小一档：ST 那几个图标（汉堡 / 魔法棒）本身很细，
+     * 学位帽是整块实心，同样字号看着会重一倍。
+     */
+    font-size: calc(var(--bottomFormIconSize, 16px) * 0.75);
+    line-height: 1;
+    opacity: 0.7;
     cursor: pointer;
     user-select: none;
-    white-space: nowrap;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: opacity var(--animation-duration-2x, 0.2s), color 0.15s ease;
 }
 
-/* 一段 = 一个开关。关闭态统一是"虚线分隔 + 半透明 + 空心点" */
-.thrive-badge__seg {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 7px;
-    border: 0;
-    border-left: 1px dashed var(--SmartThemeBorderColor);
-    background-color: transparent;
-    opacity: 0.5;
-    transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease,
-        border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.thrive-badge__seg:first-child {
-    border-left: 0;
-}
-
-.thrive-badge__seg:hover {
-    opacity: 0.85;
-}
-
-.thrive-badge__seg:focus-visible {
-    outline: 1px solid var(--SmartThemeQuoteColor);
-    outline-offset: -1px;
-}
-
-/*
- * 开启：整段铺一层强调色底 + 同色文字 + 实心发光点。
- * 底色只用 20% 左右，浅色主题下不会糊成一块，深色主题下也还看得见。
- *
- * 被动那一段不用纯 EmColor 当文字色：很多主题里 EmColor 是"次要灰"，
- * 在深色底上跟关闭态（BodyColor 半透明）亮度几乎一样，开了也看不出来。
- * 所以往 BodyColor 掺一半——浅色主题变深、深色主题变亮，两种主题都保证对比。
- */
-.thrive-badge__seg.is-on,
-.thrive-badge__seg.is-armed {
+#leftSendForm > .thrive-badge:hover {
     opacity: 1;
-    font-weight: 600;
-    border-left-style: solid;
+    filter: brightness(1.2);
 }
 
-.thrive-badge__seg--active.is-on {
-    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent);
-    border-left-color: var(--SmartThemeQuoteColor);
+#leftSendForm > .thrive-badge:focus-visible {
+    outline: 1px solid var(--SmartThemeQuoteColor);
+    outline-offset: -2px;
+}
+
+/* 主动开着：图标换成强调色，和"真在学"这件事对上号 */
+#leftSendForm > .thrive-badge.thrive-badge--active {
     color: var(--SmartThemeQuoteColor);
+    opacity: 1;
 }
 
-.thrive-badge__seg--passive.is-on {
-    background-color: color-mix(in srgb, var(--SmartThemeEmColor) 26%, transparent);
-    border-left-color: var(--SmartThemeEmColor);
+/* 只有被动开着：走 Em 色，和主动一眼能分开 */
+#leftSendForm > .thrive-badge.thrive-badge--passive:not(.thrive-badge--active) {
     color: color-mix(in srgb, var(--SmartThemeEmColor) 45%, var(--SmartThemeBodyColor));
-}
-
-/*
- * 待学：已经挂上一次临时学习，下一轮就会用掉。
- * 这是"被动学习真的触发了"的唯一常驻信号，所以给它最重的样式——实底 + 呼吸动画，
- * 文案也换成「待学」。只靠颜色区分不够，扫一眼聊天区根本注意不到。
- */
-.thrive-badge__seg.is-armed {
-    font-weight: 700;
-    border-left-color: var(--SmartThemeEmColor);
-    color: color-mix(in srgb, var(--SmartThemeEmColor) 25%, var(--SmartThemeBodyColor));
-    animation: thrive-armed 1.2s ease-in-out infinite;
-}
-
-@keyframes thrive-armed {
-    0%,
-    100% {
-        background-color: color-mix(in srgb, var(--SmartThemeEmColor) 32%, transparent);
-    }
-
-    50% {
-        background-color: color-mix(in srgb, var(--SmartThemeEmColor) 62%, transparent);
-    }
-}
-
-/* 系统开了"减少动态效果"就别闪，改成常亮 */
-@media (prefers-reduced-motion: reduce) {
-    .thrive-badge__seg.is-armed {
-        animation: none;
-        background-color: color-mix(in srgb, var(--SmartThemeEmColor) 55%, transparent);
-    }
+    opacity: 0.95;
 }
 
 /* 三种"不可用"（没有可写模块 / 没有对话 / 工具调用不可用）共用一档置灰 */
@@ -126,20 +73,38 @@
     opacity: 0.32;
 }
 
-.thrive-badge__dot {
-    flex: 0 0 auto;
-    width: 6px;
-    height: 6px;
-    border: 1px solid currentColor;
-    border-radius: 50%;
-    background-color: transparent;
-    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+.thrive-badge__icon {
+    pointer-events: none;
 }
 
-.thrive-badge__seg.is-on .thrive-badge__dot,
-.thrive-badge__seg.is-armed .thrive-badge__dot {
-    background-color: currentColor;
-    box-shadow: 0 0 5px currentColor;
+/*
+ * 待学：已经挂上一次临时学习，下一轮就会用掉。
+ * 这是"被动学习真的触发了"的唯一常驻信号，所以让图标整体呼吸——
+ * 扫一眼聊天区就能注意到，又不用额外画点。
+ */
+.thrive-badge--armed .thrive-badge__icon {
+    animation: thrive-armed 1.4s ease-in-out infinite;
+}
+
+@keyframes thrive-armed {
+    0%,
+    100% {
+        opacity: 1;
+        text-shadow: 0 0 6px currentColor;
+    }
+
+    50% {
+        opacity: 0.45;
+        text-shadow: none;
+    }
+}
+
+/* 系统开了"减少动态效果"就别闪，改成常亮 */
+@media (prefers-reduced-motion: reduce) {
+    .thrive-badge--armed .thrive-badge__icon {
+        animation: none;
+        text-shadow: 0 0 6px currentColor;
+    }
 }
 
 /* ---------------------------------------------------------------- 设置面板 */
@@ -366,7 +331,13 @@
     opacity: 0.5;
 }
 
-/* ---------------------------------------------------------------- 记录面板 */
+/* ------------------------------------------------------------ 浮动面板 */
+
+/*
+ * 一块面板装两件事：上面是模式开关，下面是记录。徽章是它的开关，
+ * 所以它只有"打开 / 收起"两种状态——不保留"只剩标题栏"的中间态，
+ * 那种状态本来就是徽章现在扮演的角色。
+ */
 
 .thrive-panel {
     /*
@@ -397,15 +368,6 @@
     backdrop-filter: blur(6px);
     box-shadow: 0 6px 24px rgb(0 0 0 / 25%);
     font-size: calc(var(--mainFontSize, 15px) * 0.9);
-}
-
-/*
- * 收起时只剩标题栏。宽度交给内容（`max-content`），否则一条"Thrive · 记录"也要
- * 占掉 480px 的聊天区。行内宽度在收起时会被清掉，所以这里不需要 !important。
- */
-.thrive-panel--collapsed {
-    width: max-content;
-    max-width: min(480px, 92vw);
 }
 
 /* 拖动中：别让浏览器把拖拽当成选中文字，也别让面板跟手时还带过渡 */
@@ -474,6 +436,129 @@ body.thrive-panel-dragging {
     gap: 10px;
     min-height: 0;
     overflow-y: auto;
+}
+
+/* ------------------------------------------------------ 面板里的模式开关 */
+
+/* 模式永远在最上面，底下才是记录：一条分隔线把"设置"和"流水账"分开 */
+.thrive-modes {
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.thrive-mode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+    transition: border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+/*
+ * 开着：铺一层很淡的强调色。不用整块实色，面板本身是半透明的，
+ * 两层叠加在浅色主题下会糊成一片。
+ */
+.thrive-mode.is-on {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 45%, var(--SmartThemeBorderColor));
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 10%, transparent);
+}
+
+/*
+ * 被动那一行的"开"不用 EmColor 铺底：这个主题里 EmColor 是深灰，
+ * 铺在深色面板上等于没铺。改用正文色掺一点——浅色主题变深、深色主题变亮，
+ * 两种主题下都和底色分得开。
+ */
+.thrive-mode--passive.is-on {
+    border-color: color-mix(in srgb, var(--SmartThemeBodyColor) 38%, var(--SmartThemeBorderColor));
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+}
+
+/* 不可用时整行压暗；点击仍然给原因，不是静默的禁用按钮 */
+.thrive-mode.is-muted {
+    opacity: 0.55;
+}
+
+.thrive-mode__led {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 50%;
+    background-color: transparent;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.thrive-mode.is-on .thrive-mode__led {
+    border-color: var(--SmartThemeQuoteColor);
+    background-color: var(--SmartThemeQuoteColor);
+    box-shadow: 0 0 5px var(--SmartThemeQuoteColor);
+}
+
+.thrive-mode--passive.is-on .thrive-mode__led {
+    border-color: color-mix(in srgb, var(--SmartThemeBodyColor) 70%, var(--SmartThemeEmColor));
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 70%, var(--SmartThemeEmColor));
+}
+
+.thrive-mode__text {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.thrive-mode__title {
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.thrive-mode__hint {
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    line-height: 1.35;
+    opacity: 0.62;
+}
+
+/*
+ * 关着的按钮压暗一档。ST 原生 .menu_button 本身挺显眼（浅边框 + 浅字），
+ * 如果"开"只加个淡底色，反而比"关"还弱，一眼看不出区别。
+ */
+.thrive-mode__switch {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 2.6em;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    text-align: center;
+    opacity: 0.62;
+    transition: opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.thrive-mode__switch.is-on {
+    border-color: var(--SmartThemeQuoteColor);
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 26%, transparent);
+    color: var(--SmartThemeBodyColor);
+    font-weight: 600;
+    opacity: 1;
+}
+
+/*
+ * 被动那个按钮不用纯 EmColor 认状态：很多主题里 EmColor 是"次要灰"，
+ * 和关闭态的正文色亮度几乎一样，开了也看不出差别。改用"底色 + 加粗"来认，
+ * 颜色只当点缀——深色、浅色主题下都分得清。
+ */
+.thrive-mode--passive .thrive-mode__switch.is-on {
+    border-color: color-mix(in srgb, var(--SmartThemeBodyColor) 45%, var(--SmartThemeBorderColor));
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 16%, transparent);
+    color: var(--SmartThemeBodyColor);
+}
+
+.thrive-mode__pending {
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--SmartThemeEmColor) 35%, var(--SmartThemeBodyColor));
 }
 
 .thrive-panel__section {
@@ -661,16 +746,23 @@ body.thrive-panel-dragging {
 
 /* ---------------------------------------------------------- 徽章的待确认计数 */
 
-.thrive-badge__count {
-    align-self: center;
-    margin: 0 5px 0 2px;
-    min-width: 1.1em;
+/* 挂在方块的右上角：徽章只有一个图标，数字浮在角上不占额外宽度 */
+#leftSendForm > .thrive-badge > .thrive-badge__count {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 11px;
+    height: 11px;
     padding: 0 3px;
-    border: 1px solid currentColor;
     border-radius: 999px;
-    color: var(--SmartThemeQuoteColor);
-    font-size: calc(var(--mainFontSize, 15px) * 0.7);
+    background-color: var(--SmartThemeQuoteColor);
+    /* 用发送栏的底色描一圈，数字才不会和图标粘在一起 */
+    box-shadow: 0 0 0 2px var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBlurTintColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.54);
     font-variant-numeric: tabular-nums;
-    line-height: 1.3;
+    font-weight: 600;
+    line-height: 11px;
     text-align: center;
+    pointer-events: none;
 }

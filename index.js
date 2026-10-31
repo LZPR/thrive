@@ -1,9 +1,10 @@
 /**
  * Thrive · 学习模式 —— 入口
  *
- * 当前进度（Step 15）：
+ * 当前进度（Step 16）：
  *   1. 扩展能被 ST 加载
- *   2. 对话级开关（chat_metadata.thrive.enabled）+ 输入框旁的双段状态徽章（带待确认计数）
+ *   2. 对话级开关（chat_metadata.thrive.enabled）+ 输入框旁的方块徽章（只开关浮动面板，
+ *      主动 / 被动两个开关在面板里，待确认改动在徽章角上带计数）
  *   3. 开启时注入学习块，关闭时彻底清空
  *   4. 工具 desc_read / desc_write / lore_read / lore_write
  *   5. 描述改动先暂存成 patch；世界书写入留快照，面板里可恢复
@@ -58,7 +59,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 step 15 · 设置项分组折叠`);
+    console.log(`${LOG} 启动 step 16 · 模式开关搬进浮动面板`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -106,7 +107,7 @@ async function initSlashCommand() {
             name: 'thrive',
             helpString: '学习模式：`/thrive on` 开启、`off` 关闭（都只作用于当前对话）、'
                 + '`passive` 切换被动学习、`once` 让下一轮临时学一次、'
-                + '`status` 看主动/被动/模块/可写书/待确认、`panel` 打开右下角的记录面板。不写动作等于 `status`。',
+                + '`status` 看主动/被动/模块/可写书/待确认、`panel` 打开浮动面板（模式开关 + 记录）。不写动作等于 `status`。',
             returns: '一行状态说明',
             unnamedArgumentList: [
                 SlashCommandArgument.fromProps({
@@ -169,10 +170,8 @@ function runThriveCommand(raw) {
         }
 
         case 'panel': {
-            const opened = openPanel(ctx);
-            return opened
-                ? report('记录面板已展开')
-                : report('现在没有待确认的改动，也没有写入记录');
+            openPanel(ctx);
+            return report('面板已打开：模式开关在最上面，记录在下面');
         }
 
         /*
