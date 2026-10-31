@@ -21,9 +21,7 @@ export const COMPACT_PROMPT_LIMIT = 500;
  */
 export const DEFAULT_COMPACT_PROMPT = `超出上限的内容需要压短才能继续保留，否则之后的补充会一直被拒绝。
 
-压缩一定会丢细节，这是预期之内的：压完之后，让内容里承认自己有事记不清了，不要把没保住的细节当成还记得。
-
-留哪些、删哪些、按什么顺序重排，你自己判断，不必沿用原来的结构。`;
+压缩一定会丢细节，这是预期之内的：压完之后，让内容里承认自己有事记不清了，不要把没保住的细节当成还记得。`;
 
 /** 实际生效的文本。空 = 用默认 */
 export function getCompactPrompt(settings) {
