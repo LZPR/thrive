@@ -1,0 +1,228 @@
+<div id="thrive_settings" class="thrive-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <div class="flex-container alignitemscenter margin0">
+                <b>Thrive · 学习模式</b>
+                <span class="thrive-version">v0.13.0</span>
+            </div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <!-- 环境诊断：为什么工具没生效、去哪改。结论来自 ctx.isToolCallingSupported() -->
+            <div id="thrive_diag" class="thrive-diag" role="status">
+                <span class="thrive-diag__dot" aria-hidden="true"></span>
+                <div class="thrive-diag__body">
+                    <span id="thrive_diag_reason" class="thrive-diag__reason">正在检查工具调用是否可用…</span>
+                    <small id="thrive_diag_fix" class="thrive-hint"></small>
+                </div>
+            </div>
+
+            <div class="thrive-row">
+                <span>当前对话</span>
+                <span id="thrive_chat_status" class="thrive-status">—</span>
+            </div>
+            <small class="thrive-hint">这个开关按对话保存：在 A 对话开启，切到 B 对话仍是关闭。</small>
+
+            <label class="checkbox_label" for="thrive_enabled_by_default">
+                <input id="thrive_enabled_by_default" type="checkbox">
+                <span>新对话默认开启</span>
+            </label>
+
+            <label class="checkbox_label" for="thrive_show_badge">
+                <input id="thrive_show_badge" type="checkbox">
+                <span>在输入框旁显示状态徽章</span>
+            </label>
+            <small class="thrive-hint">
+                徽章分成「主动」「被动」两段，点哪段切哪个：有底色 = 开启，虚线空框 = 关闭，闪动的「待学」= 已经挂上一次临时学习。
+            </small>
+
+            <hr>
+
+            <div class="thrive-field">
+                <span class="thrive-field-title">被动学习</span>
+
+                <label class="checkbox_label" for="thrive_passive_enabled">
+                    <input id="thrive_passive_enabled" type="checkbox">
+                    <span>自动学习（与手动开关互不影响）</span>
+                </label>
+                <small id="thrive_passive_hint" class="thrive-hint"></small>
+
+                <div class="thrive-row">
+                    <label for="thrive_passive_interval">每 N 条消息触发一次</label>
+                    <span id="thrive_passive_progress" class="thrive-count">—</span>
+                </div>
+                <input id="thrive_passive_interval" class="text_pole" type="number" min="0" max="500" step="1"
+                    inputmode="numeric" placeholder="0">
+                <small class="thrive-hint">
+                    0 = 不用这条判据。只数聊天消息本身（工具日志等系统消息不算），一问一答算 2 条。
+                </small>
+
+                <label for="thrive_passive_keywords">关键词</label>
+                <textarea id="thrive_passive_keywords" class="text_pole thrive-block-text" rows="3" spellcheck="false"
+                    placeholder="记住，设定，补充设定"></textarea>
+                <small id="thrive_passive_keyword_hint" class="thrive-hint"></small>
+
+                <small class="thrive-hint thrive-hint--muted">
+                    两条判据是「或」的关系：任一条命中就触发。触发时会在下一轮对话临时打开学习模式，那一轮回复结束后立刻关闭；
+                    手动开关已经开着的时候不重复触发。
+                </small>
+
+                <div class="thrive-actions">
+                    <div id="thrive_passive_once" class="menu_button thrive-reset"
+                        title="不等判据，立刻给下一轮挂一次学习">
+                        <i class="fa-solid fa-bolt"></i>
+                        <span>现在触发一次</span>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            <div class="thrive-field">
+                <span class="thrive-field-title">允许模型写入哪些内容</span>
+
+                <label class="checkbox_label" for="thrive_module_worldbook">
+                    <input id="thrive_module_worldbook" type="checkbox">
+                    <span>世界书</span>
+                </label>
+                <small id="thrive_module_worldbook_hint" class="thrive-hint"></small>
+
+                <label class="checkbox_label" for="thrive_module_description">
+                    <input id="thrive_module_description" type="checkbox">
+                    <span>角色描述</span>
+                </label>
+                <small id="thrive_module_description_hint" class="thrive-hint"></small>
+            </div>
+
+            <small id="thrive_module_note" class="thrive-hint thrive-hint--warn displayNone">
+                两个模块都关着：学习模式没有可写的地方，请先开启至少一个。
+            </small>
+
+            <hr>
+
+            <div class="thrive-field">
+                <label class="checkbox_label" for="thrive_patch_enabled">
+                    <input id="thrive_patch_enabled" type="checkbox">
+                    <span>描述改动先暂存，确认后写入</span>
+                </label>
+                <small id="thrive_patch_hint" class="thrive-hint"></small>
+            </div>
+
+            <hr>
+
+            <div class="thrive-field">
+                <label class="checkbox_label" for="thrive_drop_traces">
+                    <input id="thrive_drop_traces" type="checkbox">
+                    <span>把旧工具日志移出上下文</span>
+                </label>
+                <small id="thrive_drop_traces_hint" class="thrive-hint"></small>
+            </div>
+
+            <hr>
+
+            <div class="thrive-field">
+                <label for="thrive_writable_book">可写书</label>
+                <select id="thrive_writable_book" class="text_pole">
+                    <option value="">（未选择 · 世界书功能不启用）</option>
+                </select>
+                <small id="thrive_book_hint" class="thrive-hint">世界书工具只会写这一本。</small>
+            </div>
+
+            <div class="thrive-field">
+                <label for="thrive_read_scope">读取范围</label>
+                <select id="thrive_read_scope" class="text_pole">
+                    <option value="writable">只看这本可写书</option>
+                    <option value="bound">这本 + 角色绑定的其他书</option>
+                </select>
+                <small id="thrive_scope_hint" class="thrive-hint"></small>
+            </div>
+
+            <div class="thrive-field">
+                <label for="thrive_block_position">学习块注入位置</label>
+                <select id="thrive_block_position" class="text_pole">
+                    <option value="tail">尾部（推荐）</option>
+                    <option value="head">头部（system 区）</option>
+                    <option value="none">不注入</option>
+                </select>
+                <small id="thrive_block_hint" class="thrive-hint thrive-hint--muted"></small>
+            </div>
+
+            <div class="thrive-field">
+                <div class="thrive-row">
+                    <label for="thrive_block_text">学习块正文</label>
+                    <span id="thrive_block_count" class="thrive-count">—</span>
+                </div>
+                <textarea id="thrive_block_text" class="text_pole thrive-block-text" rows="14" spellcheck="false"
+                    placeholder="留空表示使用默认文本"></textarea>
+                <div class="thrive-actions">
+                    <div id="thrive_block_reset" class="menu_button thrive-reset" title="用回 spec 里的默认文本">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>恢复默认</span>
+                    </div>
+                </div>
+                <small class="thrive-hint">
+                    支持 &#123;&#123;char&#125;&#125; 与 &#123;&#123;user&#125;&#125;，注入前会替换成实际名字。留空 = 使用默认文本。
+                </small>
+            </div>
+
+            <div class="thrive-field">
+                <div class="thrive-row">
+                    <label for="thrive_compact_prompt">超长时的压缩指令</label>
+                    <span id="thrive_compact_count" class="thrive-count">—</span>
+                </div>
+                <textarea id="thrive_compact_prompt" class="text_pole thrive-block-text" rows="8" spellcheck="false"
+                    placeholder="留空表示使用默认文本"></textarea>
+                <div class="thrive-actions">
+                    <div id="thrive_compact_reset" class="menu_button thrive-reset" title="用回内置的默认压缩指令">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>恢复默认</span>
+                    </div>
+                </div>
+                <small id="thrive_compact_hint" class="thrive-hint">
+                    描述或世界书条目超过长度上限时，这段文字会接在「已超多少字、append 还能不能写」后面发给模型。
+                    建议 500 字以内：话越少，模型越会自己判断怎么压。留空 = 使用默认文本。
+                </small>
+            </div>
+
+            <hr>
+
+            <div class="thrive-field">
+                <span class="thrive-field-title">记录面板</span>
+                <small class="thrive-hint thrive-hint--muted">
+                    面板出现时拖动它的标题栏就能挪到任意位置；位置、大小和透明度按屏幕记住，与具体对话无关。
+                </small>
+
+                <div class="thrive-row">
+                    <label for="thrive_panel_width">宽度</label>
+                    <span id="thrive_panel_width_value" class="thrive-count">—</span>
+                </div>
+                <input id="thrive_panel_width" class="thrive-range" type="range" min="280" max="900" step="20">
+
+                <div class="thrive-row">
+                    <label for="thrive_panel_height">最大高度</label>
+                    <span id="thrive_panel_height_value" class="thrive-count">—</span>
+                </div>
+                <input id="thrive_panel_height" class="thrive-range" type="range" min="200" max="900" step="20">
+
+                <div class="thrive-row">
+                    <label for="thrive_panel_opacity">透明度</label>
+                    <span id="thrive_panel_opacity_value" class="thrive-count">—</span>
+                </div>
+                <input id="thrive_panel_opacity" class="thrive-range" type="range" min="0.3" max="1" step="0.05">
+
+                <div class="thrive-actions">
+                    <div id="thrive_panel_reset" class="menu_button thrive-reset" title="回到右下角、默认大小、不透明">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>重置面板位置与大小</span>
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+
+            <small class="thrive-hint">
+                工具只在当前对话开启、且对应模块开启时才注册。两个模块都关时，模型看不到任何 Thrive 工具。
+            </small>
+        </div>
+    </div>
+</div>

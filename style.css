@@ -1,0 +1,616 @@
+/**
+ * Thrive · 学习模式 —— 样式
+ *
+ * 只用 ST 的主题变量，深浅色主题下都能跟着走，不写死颜色。
+ */
+
+/* ---------------------------------------------------------------- 状态徽章 */
+
+/*
+ * ST 给 `#leftSendForm>div` 定了固定方块尺寸（width/height = --bottomFormBlockSize）
+ * 和 opacity: 0.7。徽章是胶囊形，被塞进方块里就会把文字和计数溢出到相邻图标下面；
+ * 状态透明度也会被那条规则顶掉。所以凡是尺寸与状态，都用 ID + class 提权。
+ *
+ * 结构：外层胶囊 + 两个可点区段（主动 / 被动）+ 待确认计数。
+ * 两段各自是独立开关，所以状态必须画在段上，不能画在原地儿上——否则"主动开着、
+ * 被动关着"只能二选一地显示，用户根本看不出另一段是什么状态。
+ */
+#leftSendForm > .thrive-badge {
+    display: inline-flex;
+    align-items: stretch;
+    flex: 0 0 auto;
+    width: auto;
+    height: auto;
+    margin-right: 6px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    line-height: 1.6;
+    color: var(--SmartThemeBodyColor);
+    opacity: 1;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* 一段 = 一个开关。关闭态统一是"虚线分隔 + 半透明 + 空心点" */
+.thrive-badge__seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border: 0;
+    border-left: 1px dashed var(--SmartThemeBorderColor);
+    background-color: transparent;
+    opacity: 0.5;
+    transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease,
+        border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.thrive-badge__seg:first-child {
+    border-left: 0;
+}
+
+.thrive-badge__seg:hover {
+    opacity: 0.85;
+}
+
+.thrive-badge__seg:focus-visible {
+    outline: 1px solid var(--SmartThemeQuoteColor);
+    outline-offset: -1px;
+}
+
+/*
+ * 开启：整段铺一层强调色底 + 同色文字 + 实心发光点。
+ * 底色只用 20% 左右，浅色主题下不会糊成一块，深色主题下也还看得见。
+ *
+ * 被动那一段不用纯 EmColor 当文字色：很多主题里 EmColor 是"次要灰"，
+ * 在深色底上跟关闭态（BodyColor 半透明）亮度几乎一样，开了也看不出来。
+ * 所以往 BodyColor 掺一半——浅色主题变深、深色主题变亮，两种主题都保证对比。
+ */
+.thrive-badge__seg.is-on,
+.thrive-badge__seg.is-armed {
+    opacity: 1;
+    font-weight: 600;
+    border-left-style: solid;
+}
+
+.thrive-badge__seg--active.is-on {
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 22%, transparent);
+    border-left-color: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-badge__seg--passive.is-on {
+    background-color: color-mix(in srgb, var(--SmartThemeEmColor) 26%, transparent);
+    border-left-color: var(--SmartThemeEmColor);
+    color: color-mix(in srgb, var(--SmartThemeEmColor) 45%, var(--SmartThemeBodyColor));
+}
+
+/*
+ * 待学：已经挂上一次临时学习，下一轮就会用掉。
+ * 这是"被动学习真的触发了"的唯一常驻信号，所以给它最重的样式——实底 + 呼吸动画，
+ * 文案也换成「待学」。只靠颜色区分不够，扫一眼聊天区根本注意不到。
+ */
+.thrive-badge__seg.is-armed {
+    font-weight: 700;
+    border-left-color: var(--SmartThemeEmColor);
+    color: color-mix(in srgb, var(--SmartThemeEmColor) 25%, var(--SmartThemeBodyColor));
+    animation: thrive-armed 1.2s ease-in-out infinite;
+}
+
+@keyframes thrive-armed {
+    0%,
+    100% {
+        background-color: color-mix(in srgb, var(--SmartThemeEmColor) 32%, transparent);
+    }
+
+    50% {
+        background-color: color-mix(in srgb, var(--SmartThemeEmColor) 62%, transparent);
+    }
+}
+
+/* 系统开了"减少动态效果"就别闪，改成常亮 */
+@media (prefers-reduced-motion: reduce) {
+    .thrive-badge__seg.is-armed {
+        animation: none;
+        background-color: color-mix(in srgb, var(--SmartThemeEmColor) 55%, transparent);
+    }
+}
+
+/* 三种"不可用"（没有可写模块 / 没有对话 / 工具调用不可用）共用一档置灰 */
+#leftSendForm > .thrive-badge.thrive-badge--muted {
+    cursor: default;
+    opacity: 0.32;
+}
+
+.thrive-badge__dot {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    background-color: transparent;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.thrive-badge__seg.is-on .thrive-badge__dot,
+.thrive-badge__seg.is-armed .thrive-badge__dot {
+    background-color: currentColor;
+    box-shadow: 0 0 5px currentColor;
+}
+
+/* ---------------------------------------------------------------- 设置面板 */
+
+.thrive-settings .thrive-version {
+    margin-left: 6px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    opacity: 0.6;
+}
+
+.thrive-settings .thrive-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.thrive-settings .thrive-status {
+    opacity: 0.7;
+}
+
+.thrive-settings .thrive-status--on {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+/* ------------------------------------------------------------ 环境诊断 */
+
+/*
+ * 设置页顶部的一条状态：能用就用中性色，不能用就转强调色 + 描边。
+ * 这里不藏起来：用户找不到"为什么不工作"才会去翻控制台。
+ */
+.thrive-settings .thrive-diag {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 5px 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    line-height: 1.45;
+}
+
+.thrive-settings .thrive-diag__dot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    margin-top: 0.55em;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+}
+
+.thrive-settings .thrive-diag--warn {
+    border-color: var(--SmartThemeQuoteColor);
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 10%, transparent);
+    color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-settings .thrive-diag--warn .thrive-diag__dot {
+    opacity: 1;
+    box-shadow: 0 0 5px currentColor;
+}
+
+.thrive-settings .thrive-diag__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.thrive-settings .thrive-diag__reason {
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+}
+
+.thrive-settings .thrive-diag .thrive-hint {
+    margin-bottom: 0;
+}
+
+.thrive-settings .thrive-hint {
+    display: block;
+    opacity: 0.6;
+    margin-bottom: 6px;
+}
+
+.thrive-settings .thrive-hint--warn {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 0.95;
+}
+
+/* -------------------------------------------------------- 学习块编辑区 */
+
+.thrive-settings .thrive-field {
+    margin-bottom: 10px;
+}
+
+/*
+ * 只作用于"字段名"那一行的 label。必须排除 .checkbox_label：
+ * ST 给它的规则是 `display:flex` + 行内排列，而这条 `display:block`
+ * 的选择器权重更高，会把勾选框和文字拆成上下两行（实测截图才看得出来）。
+ */
+.thrive-settings .thrive-field > label:not(.checkbox_label) {
+    display: block;
+    margin-bottom: 4px;
+}
+
+/* 分组标题（不是 label，所以不走上面那条） */
+.thrive-settings .thrive-field-title {
+    display: block;
+    margin-bottom: 4px;
+    opacity: 0.85;
+}
+
+.thrive-settings .thrive-block-text {
+    width: 100%;
+    min-height: 8em;
+    resize: vertical;
+    font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.thrive-settings .thrive-count {
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.55;
+}
+
+/* 超过参考字数：只换个颜色提示，不拦输入 */
+.thrive-settings .thrive-count--warn {
+    opacity: 0.95;
+    color: var(--SmartThemeQuoteColor);
+}
+
+/* 记录面板的尺寸/透明度滑块：占满一行，用主题强调色当填充，不写死颜色 */
+.thrive-settings .thrive-range {
+    display: block;
+    width: 100%;
+    margin: 0 0 8px;
+    accent-color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-settings .thrive-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.thrive-settings .thrive-reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    padding: 2px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+}
+
+.thrive-settings hr {
+    margin: 8px 0;
+    border: 0;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    opacity: 0.5;
+}
+
+/* ---------------------------------------------------------------- 记录面板 */
+
+.thrive-panel {
+    /*
+     * 用 absolute 而不是 fixed：ST 给 html 设了 `-webkit-transform: translateZ(0)`
+     * （public/style.css 的 html 规则，为避免模糊层闪烁），任何 transform 都会让该元素
+     * 成为 fixed 后代的包含块。html 的内容盒高度是 0，于是 `position: fixed; bottom: 88px`
+     * 会把面板算到视口上方（实测 getBoundingClientRect().y = -387），整块面板看不见。
+     *
+     * ST 的页面本身不滚动（聊天区自己滚），所以相对初始包含块定位与 fixed 的观感一致。
+     *
+     * 位置、宽度、最大高度、透明度都由 ui.js 的 applyPanelLayout 按设置写到行内样式；
+     * 这里的 right/bottom 只是"还没拖过"时的默认落点。
+     */
+    position: absolute;
+    right: 16px;
+    bottom: 88px;
+    z-index: 4000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(480px, 92vw);
+    max-height: min(70vh, 620px);
+    padding: 8px 12px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 6px 24px rgb(0 0 0 / 25%);
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+}
+
+/*
+ * 收起时只剩标题栏。宽度交给内容（`max-content`），否则一条"Thrive · 记录"也要
+ * 占掉 480px 的聊天区。行内宽度在收起时会被清掉，所以这里不需要 !important。
+ */
+.thrive-panel--collapsed {
+    width: max-content;
+    max-width: min(480px, 92vw);
+}
+
+/* 拖动中：别让浏览器把拖拽当成选中文字，也别让面板跟手时还带过渡 */
+.thrive-panel--dragging {
+    cursor: grabbing;
+    user-select: none;
+}
+
+body.thrive-panel-dragging {
+    user-select: none;
+}
+
+/*
+ * 处理中：只关交互并压暗标题栏。不能整体降 opacity——那会和用户设置的透明度
+ * （行内 style.opacity）打架，行内优先级更高，效果等于没变。
+ */
+.thrive-panel--busy {
+    pointer-events: none;
+}
+
+.thrive-panel--busy .thrive-panel__bar {
+    opacity: 0.6;
+}
+
+.thrive-panel__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: grab;
+    /* 手机上按住标题栏是拖动，不是滚页面 */
+    touch-action: none;
+}
+
+.thrive-panel__grip {
+    flex: 0 0 auto;
+    opacity: 0.45;
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+}
+
+.thrive-panel__title {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.thrive-panel__summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-panel__toggle {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+}
+
+.thrive-panel__body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.thrive-panel__section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+}
+
+.thrive-panel__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.thrive-panel__section-title {
+    font-weight: 600;
+}
+
+.thrive-panel__meta {
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+    white-space: nowrap;
+}
+
+.thrive-panel__notice {
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    opacity: 0.75;
+}
+
+.thrive-panel__notice--warn {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+.thrive-panel .thrive-diff {
+    flex: 1 1 auto;
+    /* 兜住底：两条记录 + 一份 patch 同时在场时，diff 不该被挤成一行 */
+    min-height: 4.5em;
+    max-height: 36vh;
+    overflow-y: auto;
+    padding: 4px 0;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    line-height: 1.5;
+}
+
+.thrive-panel .thrive-diff__row {
+    display: flex;
+    gap: 6px;
+    padding: 0 4px;
+    border-left: 2px solid transparent;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.thrive-panel .thrive-diff__sign {
+    flex: 0 0 auto;
+    width: 1ch;
+    opacity: 0.55;
+    user-select: none;
+}
+
+.thrive-panel .thrive-diff__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* 新增：用主题强调色描边 + 淡底，深浅色主题下都跟着走 */
+.thrive-panel .thrive-diff__row--add {
+    border-left-color: var(--SmartThemeQuoteColor);
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent);
+}
+
+/* 删除：只压暗，不做删除线——中文长句加删除线会看不清 */
+.thrive-panel .thrive-diff__row--del {
+    opacity: 0.55;
+}
+
+.thrive-panel .thrive-diff__row--fold {
+    justify-content: center;
+    padding: 2px 0;
+    opacity: 0.45;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+}
+
+.thrive-panel .thrive-diff__empty {
+    padding: 4px 6px;
+    opacity: 0.55;
+    font-family: var(--mainFontFamily, sans-serif);
+}
+
+.thrive-panel__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.thrive-panel__actions .thrive-hint {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    opacity: 0.5;
+}
+
+.thrive-panel__button {
+    width: auto;
+    padding: 2px 10px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+}
+
+.thrive-panel__button--danger {
+    border-color: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeQuoteColor);
+}
+
+/* ------------------------------------------------------------ 已写入列表 */
+
+.thrive-history {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.thrive-history__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 4px;
+    border-radius: 4px;
+}
+
+/* 悬停高亮用中性灰，不掺主题色：这里不是可点区域，只是让行与行分开 */
+.thrive-history__row:hover {
+    background-color: rgb(128 128 128 / 10%);
+}
+
+.thrive-history__main {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.thrive-history__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-history__row--desc .thrive-history__title {
+    font-weight: 400;
+    opacity: 0.85;
+}
+
+.thrive-history__meta {
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.55;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-history__restore {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+}
+
+.thrive-history__done {
+    flex: 0 0 auto;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    opacity: 0.5;
+    white-space: nowrap;
+}
+
+/* ---------------------------------------------------------- 徽章的待确认计数 */
+
+.thrive-badge__count {
+    align-self: center;
+    margin: 0 5px 0 2px;
+    min-width: 1.1em;
+    padding: 0 3px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    color: var(--SmartThemeQuoteColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.7);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+    text-align: center;
+}
