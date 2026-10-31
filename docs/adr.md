@@ -478,3 +478,44 @@
   这是拿掉两段文字的直接代价。
 - `showBadge` 关掉之后页面上没有常驻入口，只能靠 `/thrive panel`。
 - 面板不再有"只留标题栏"的省地方形态：需要腾出聊天区就只能整块收起。
+
+---
+
+## ADR-030 · 界面按块拆进 `ui/`，刷新走登记表而不是互相 import
+
+**背景**：`src/ui.js` 涨到 2582 行，里面同时住着设置页、状态徽章、浮动面板。
+改一个设置项的说明要通读两千行，改面板要先跳过一堆设置绑定——两件事明明互不相干。
+
+**决策**：
+
+- **一块界面一个文件**：`ui/settings.js`（settings.html 的绑定与回填）、`ui/panel.js`（重绘 / 交互 / 模式开关）、
+  `ui/panel-layout.js`（位置 / 尺寸 / 透明度 / 拖拽）、`ui/badge.js`、`ui/status.js`；
+  共用件在 `ui/shared.js`，刷新编排在 `ui/refresh.js`。`src/ui.js` 退成门面，只重新导出
+  `index.js` 与回归脚本用到的那几个名字。
+- **界面之间不互相 import 具体模块**：谁需要在"状态变了"时刷自己，就把刷新函数登记到
+  `refresh.js` 的 `SURFACES`（controls / diagnostics / status / passiveHint / books / badge / panel），
+  `refreshUI` 按下表逐个刷，`view` 对象统一传（`{ ctx, settings, available, diag }`）。
+- **共享可变状态只留一个**：面板开合状态放 `ui/shared.js`，读 `isPanelOpen()`、写 `markPanelOpen()`；
+  "改状态 + 刷界面"的出口只有 `refresh.js` 的 `setPanelOpen`。
+- **徽章不调面板**：点击发 `PANEL_TOGGLE_EVENT`，由 `panel.js` 接（沿用 `events.js` 已有的事件解耦）。
+- 纯判定 `hasAnyModule` 挪到 `store.js`：设置页、徽章、面板、状态摘要都要用它，
+  放在任何一处界面文件里都会让其余几处反向依赖那一处。
+
+**理由**：
+
+- 拆之前设置页与面板是**双向**依赖：设置页的绑定改完要 `refreshUI`（顺带刷面板），
+  面板里的布局滑块与「现在触发一次」要回写设置页。直接 import 必然成环——ESM 环能跑，
+  但读的人得先在脑子里把环捋直。
+- 登记表让 `refresh.js` 变成**完全的叶子**：它不 import 任何界面模块，所以任何界面模块都能放心
+  import 它。加一块界面只改两处（自己的文件 + 一个键），不用动别人的参数表。
+- 面板几何单独成文件，是因为设置页的滑块与面板自己都要动它；两条路径共用一个
+  `applyPanelLayout` 出口，避免"拖动改了 left、滑块改了 width，谁也不知道该以谁为准"。
+
+**后果 / 代价**：
+
+- 读代码要在 8 个文件之间跳；`refreshUI` 具体刷了什么，得看登记表而不是顺着调用栈。
+- 登记表按字符串键匹配，拼错只会 `console.warn` 一句，那块界面就不刷新了（已加告警）。
+- `src/ui.js` 仍导出 `refreshPanel` 这类内部入口，纯粹是为了 `.workbuddy/` 下的回归脚本不用改；
+  业务代码不该用它。
+- 四个回归脚本原先按 `src/ui.js` 的源码文本做断言（compact / limits），已改成扫整层
+  `src/ui.js + src/ui/*.js`，以后再挪文件不会失效。

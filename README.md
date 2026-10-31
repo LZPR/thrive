@@ -18,7 +18,7 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 
 ## 当前进度
 
-**Step 16 · 徽章收缩为面板入口**（本版本 v0.16.0）
+**Step 17 · 界面拆成 `src/ui/`**（本版本 v0.17.0）
 
 已完成：
 
@@ -30,6 +30,7 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 - **被动学习**：两条判据（每 N 条消息 / 关键词命中）任一成立就「借」一轮——下一轮临时打开学习模式，那一轮回复完立刻关闭；主动已经开着时不重复触发
 - 触发时有明显提示：toast 说清原因、徽章图标呼吸、面板里的被动一行写出「本次待学习：…」、注入的学习块末尾追加「本轮为自动触发」的说明；`/thrive once` 与设置页「现在触发一次」可以手动借一轮
 - 设置面板：默认开启、徽章显示、被动学习的开关 / 间隔 / 关键词、两个模块开关、可写世界书、读范围、注入位置、学习块正文、超长时的压缩指令、日志清理、**数值与上限**
+- **界面按块拆分**：`src/ui.js` 从 2582 行退成门面，设置页 / 浮动面板 / 面板几何 / 徽章 / 状态文本 / 刷新编排 / 共用件各自一个文件（`src/ui/*.js`）；改设置项不用再看面板代码，改面板不用再翻设置绑定
 - **设置项按六组折叠**（基本开关 / 被动学习 / 写入目标 / 数值与上限 / 提示词 / 日志与面板），默认全部收起，点标题展开；环境诊断固定在最上面，不参与折叠。复用 ST 原生 `.inline-drawer`，没有自定义折叠脚本
 - 开启时把学习块注入提示词，关闭时写空串让它彻底消失
 - 工具 `desc_read` / `desc_write`，先读后写 + 内容哈希 + 1 版快照
@@ -511,7 +512,7 @@ ST 这一步做的事就是 `git clone --depth 1` 到扩展目录，所以几条
 - **必须是 git 仓库地址**（HTTP/HTTPS）。`…/tree/main`、`?tab=readme` 这类页面链接和 zip 包都不行；要装别的分支或标签，填弹窗里单独的「Branch or tag name」。
 - **仓库公开**。clone 不带任何凭证，私有库会失败。
 - **`manifest.json` 在仓库根目录**，插件本体就是仓库根（ST 没有子目录安装参数，monorepo 里的一条子路径装不上）。
-- **仓库名用 `thrive`**。安装后的文件夹名取自 URL 最后一段，扩展 id 随之变成 `third-party/<文件夹名>`，而设置面板模板按 `third-party/thrive` 渲染（`src/ui.js`）——换个名字装上去，设置面板会是空白。
+- **仓库名用 `thrive`**。安装后的文件夹名取自 URL 最后一段，扩展 id 随之变成 `third-party/<文件夹名>`，而设置面板模板按 `third-party/thrive` 渲染（`src/ui/settings.js`）——换个名字装上去，设置面板会是空白。
 - 首次安装非官方仓库会弹一次第三方警告，确认即可；非管理员看不到「为所有用户安装」。
 
 装完在扩展列表里启用 Thrive，刷新页面。之后列表里的「更新」就是 `git pull`；发版时 bump `manifest.json` 的 `version`，列表里才看得出更新。
@@ -547,11 +548,18 @@ src/patch.js           描述 patch：暂存合并、接受/拒绝、冲突判�
 src/targets.js         目标解析：角色描述读写、世界书读写（upsert、字段映射、条目默认值、快照恢复）
 src/trace.js           工具日志压缩（mes → 一行纯文本）与清理（删 tool_invocations）
 src/diagnostics.js     环境诊断（isToolCallingSupported 的四类细分原因）与错误码兜底文案
-src/events.js          面板重绘事件（patch / 写入记录 / 快照变化统一广播）
+src/events.js          界面事件（面板重绘、被动学习状态、徽章点击开合）
 src/util.js            哈希（FNV-1a）、截断、段落拼接、HTML 转义
-src/ui.js              设置面板 + 状态徽章 + 浮动面板（模式 / 待确认 / 已写入）
+src/ui.js              界面门面：只重新导出下面几个入口（index.js 与回归脚本从这里拿）
+src/ui/settings.js     扩展设置页：settings.html 的绑定与回填（各 updateXxx）
+src/ui/panel.js        浮动面板：重绘、接受 / 拒绝 / 恢复 / 重写、模式开关、入口
+src/ui/panel-layout.js 面板的位置 / 尺寸 / 透明度与拖拽（唯一出口 applyPanelLayout）
+src/ui/badge.js        输入框旁的状态徽章（点击只发一个开合事件，不认识面板）
+src/ui/status.js       状态摘要文本（/thrive status 与设置页那一行）
+src/ui/refresh.js      刷新编排：分区登记表 + refreshUI / refreshBadgeOnly + 面板开关
+src/ui/shared.js       共用常量、toast、确认弹窗、面板开合状态
 docs/spec.md           功能规格（工具契约、读写一致性、权限矩阵）
-docs/adr.md            架构决策记录（29 条，含激活与否、被动学习为何只借一轮、上限为何集中一处、设置页为何复用原生抽屉、徽章为何退成面板入口）
+docs/adr.md            架构决策记录（30 条，含激活与否、被动学习为何只借一轮、上限为何集中一处、设置页为何复用原生抽屉、徽章为何退成面板入口、界面为何按块拆分）
 docs/user_stories.md   用户故事与验收标准
 docs/acceptance-log.md 验收记录（30 条故事 + 7 个边界的实测结论与偏差判定）
 ```

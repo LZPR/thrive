@@ -178,6 +178,18 @@ export function ensureSettings(ctx) {
 }
 
 /**
+ * 至少有一个可写模块。两个都关时整个扩展没有意义，开关要置灰。
+ *
+ * 纯判定、不碰 DOM，所以放在 store 而不是界面层：设置页、徽章、面板、状态摘要
+ * 都要用它，放在任何一处界面文件里都会让其余几处反过来依赖那一处。
+ *
+ * @param {object} settings
+ */
+export function hasAnyModule(settings) {
+    return settings?.moduleWorldbook !== false || settings?.moduleDescription !== false;
+}
+
+/**
  * 被动学习的对话状态。
  *   baseline            上一次"学过 / 已同步"时的可见消息条数；-1 = 还没初始化
  *   pending             已经触发、等待下一轮消耗的一次性学习；null = 没有

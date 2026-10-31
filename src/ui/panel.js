@@ -1,0 +1,968 @@
+/**
+ * ui/panel.js · 浮动面板
+ *
+ * 三件事：
+ *   - 重绘：refreshPanel 现算状态，签名没变就不碰 DOM
+ *   - 交互：接受 / 拒绝 / 恢复 / 重写，以及第一段那两个模式开关
+ *   - 入口：initPanel 挂载，openPanel 给 `/thrive panel` 用
+ *
+ * 位置、尺寸、拖动这些几何细节在 ui/panel-layout.js；面板开没开的状态在 ui/shared.js
+ * （徽章也要读它）。
+ */
+
+import { getContext } from '../../../../../extensions.js';
+import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
+import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
+import { describePending, intervalProgress, parseKeywords } from '../passive.js';
+import {
+    PATCH_STATUS,
+    applyPatch,
+    buildDiffRows,
+    discardPatch,
+    diskDescription,
+    getPatch,
+    isUnresolved,
+    restoreDescBackup,
+    rewriteAppliedDescription,
+} from '../patch.js';
+import { syncFromContext } from '../prompt.js';
+import {
+    clearReadHash,
+    ensureSettings,
+    findLoreBackup,
+    getDescBackup,
+    getLoreBackups,
+    getPending,
+    getState,
+    hasAnyModule,
+    isChatAvailable,
+    isEnabled,
+    loreReadKey,
+    markLoreBackupRestored,
+    saveChat,
+    setEnabled,
+} from '../store.js';
+import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '../targets.js';
+import { escapeHtml, normalizeEol } from '../util.js';
+import { syncBadgeOpenState } from './badge.js';
+import { applyPanelLayout, bindDrag } from './panel-layout.js';
+import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
+import { updatePatchHint } from './settings.js';
+import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
+
+/* ------------------------------------------------------------------ 浮动面板 */
+
+let patchBusy = false;
+let panelSignature = null;
+/** 已经被"强制打开"过的那份 patch。只在它第一次出现时打开，之后用户关掉就是关掉 */
+let forcedPatchId = null;
+
+/**
+ * 挂载浮动面板。重复调用安全。
+ *
+ * 面板一开始是空的、收起的：模式那一段每次 refreshPanel 现画，记录有才画。
+ */
+export function initPanel() {
+    if (document.getElementById(PANEL_ID)) {
+        return;
+    }
+
+    document.body.insertAdjacentHTML(
+        'beforeend',
+        `<div id="${PANEL_ID}" class="thrive-panel displayNone" role="dialog" aria-label="Thrive 面板"></div>`,
+    );
+
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) {
+        console.warn(`${LOG} 面板创建失败`);
+        return;
+    }
+
+    // 事件挂在外壳上：内容每次整块重绘，挂在里面会跟着一起没
+    panel.addEventListener('click', onPanelClick);
+    document.addEventListener(PANEL_EVENT, () => refreshPanel());
+    // 徽章点击只是发了个事件，开合由这里接（badge.js 不认识面板）
+    document.addEventListener(PANEL_TOGGLE_EVENT, () => setPanelOpen(!isPanelOpen(), getContext()));
+
+    bindDrag();
+
+    // 窗口变小后原来拖到右下角的面板可能整个跑到屏幕外，重新摆一次
+    window.addEventListener('resize', () => {
+        const current = document.getElementById(PANEL_ID);
+        if (!current || current.classList.contains('displayNone')) {
+            return;
+        }
+        applyPanelLayout(current);
+    });
+}
+
+/**
+ * 重绘浮动面板。
+ *
+ * 面板现在**总是有内容**：第一段是模式（主动 / 被动 两个开关），后面才是有才画的记录。
+ * 所以它不再是"有记录才出现"，而是由面板的开关状态决定——打开着就画，关着就整块隐藏。
+ *
+ * @param {object} [ctx]
+ */
+export function refreshPanel(ctx = getContext()) {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) {
+        return;
+    }
+
+    const patch = getPatch(ctx);
+    const backups = getLoreBackups(ctx);
+    const descBackup = getDescBackup(ctx);
+
+    /*
+     * "已写入"但角色卡上的描述已经不是那份内容了 —— 实测最常见的原因是：
+     * 角色编辑面板里还停着写入前的文本，用户点了一下保存，旧文本把新内容盖了回去。
+     * 这时候面板如果继续说"已写入"，就会出现"面板说写了、编辑器里什么都没有"。
+     * 所以单独算一个状态：内容还在聊天记录里（patch.after），给一个「重新写入」的出口。
+     */
+    const drift = Boolean(patch)
+        && patch.status === PATCH_STATUS.APPLIED
+        && Boolean(getActiveCharacter(ctx))
+        && diskDescription(ctx) !== patch.after;
+
+    /*
+     * 另一种"已写入但对不上"：盘上是对的，编辑框里还停着别的文本。
+     * 用户改过、或者写入那一刻正在框里打字，同步就会被跳过（不能盖掉正在敲的字）。
+     * 这时给一个「刷新编辑框」的出口，省得为了让它显示新内容还得先关掉面板。
+     */
+    const editorStale = Boolean(patch)
+        && patch.status === PATCH_STATUS.APPLIED
+        && isDescriptionEditorStale(ctx, patch.after);
+
+    /*
+     * 新出现的待确认改动必须把面板顶出来：否则徽章上多个数字，用户不知道在哪处理。
+     *
+     * 但只在"这一份 patch 第一次出现"时打开。早先是每次重绘都展开，于是用户刚收起、
+     * refreshPanel 又立刻把它顶开——表现为"关不掉"（有未处理改动时必现，刷新一次也会弹回来）。
+     */
+    if (isUnresolved(patch)) {
+        if (patch.id !== forcedPatchId) {
+            forcedPatchId = patch.id;
+            markPanelOpen(true);
+        }
+    } else {
+        forcedPatchId = null;
+    }
+
+    panel.classList.toggle('displayNone', !isPanelOpen());
+    // 自动弹出也是"打开"，徽章的外观与 aria 必须跟上，否则会出现"面板明明在、
+    // 徽章却说没开"——点一下反而把面板关了
+    syncBadgeOpenState();
+    if (!isPanelOpen()) {
+        // 关着就不画。签名一并丢掉，下次打开必然整体重画
+        panelSignature = null;
+        return;
+    }
+
+    const settings = ensureSettings(ctx);
+    const mode = readModeView(ctx, settings);
+
+    /*
+     * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
+     * 模式状态也在里面——面板里就摆着两个开关，它们变了必须重画。
+     */
+    const signature = JSON.stringify([
+        mode.active,
+        mode.passive,
+        mode.usable,
+        mode.diag.code,
+        mode.pending ? [mode.pending.reason, mode.pending.keyword] : null,
+        mode.interval,
+        mode.since,
+        mode.keywordCount,
+        patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
+        backups.map(item => [item.id, item.restoredAt]),
+        descBackup ? descBackup.at : null,
+        drift,
+        editorStale,
+    ]);
+    if (signature === panelSignature) {
+        return;
+    }
+    panelSignature = signature;
+
+    panel.innerHTML = renderPanel({ mode, patch, backups, descBackup, drift, editorStale });
+    // 内容换了高度可能也变了，重新摆一次（拖动后的位置在这里生效）
+    applyPanelLayout(panel);
+    updatePatchHint(ctx, settings);
+}
+
+/**
+ * 面板「模式」那一段要用的所有状态，一次算齐。
+ *
+ * 徽章与面板都从同一份状态出发，省得两处各判一次、判出不一样的结果。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ */
+function readModeView(ctx, settings) {
+    const none = !hasAnyModule(settings);
+    const available = isChatAvailable(ctx);
+    const diag = diagnoseEnvironment(ctx);
+    const progress = intervalProgress(ctx, settings);
+    const keywords = parseKeywords(settings.passiveKeywords);
+
+    return {
+        active: isEnabled(ctx),
+        passive: settings.passiveEnabled === true,
+        pending: getPending(ctx),
+        // 三种"不可用"共用一档：没有可写模块、没有对话、环境不支持工具调用
+        usable: available && !none && diag.ok,
+        none,
+        available,
+        diag,
+        interval: progress.interval,
+        since: progress.since,
+        remaining: progress.remaining,
+        keywordCount: keywords.length,
+    };
+}
+
+/* -------------------------------------------------------------- 模式开关 */
+
+/**
+ * 三个"这个开关现在点了也没用"的原因，只报第一条。
+ *
+ * 顺序：模块全关 → 没对话 → 环境不支持工具调用。以前徽章的 toast 就是这么排的，
+ * 用户已经习惯了这套说法。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ * @returns {boolean} 能不能切
+ */
+function guardModeToggle(ctx, settings) {
+    // 模块全关时开关没有意义：点了只说原因，不切换状态
+    if (!hasAnyModule(settings)) {
+        toast('两个模块都关着，请先在扩展设置里开启至少一个');
+        return false;
+    }
+
+    if (!isChatAvailable(ctx)) {
+        toast('请先打开一个对话');
+        return false;
+    }
+
+    // 环境不支持工具调用时，开了也只是"灯亮着、模型什么也看不到"。
+    // 这里只报第一条没通过的原因，不替用户去改 ST 的设置（ADR-020）
+    const diag = diagnoseEnvironment(ctx);
+    if (!diag.ok) {
+        toast(`工具调用不可用：${formatDiagnosis(diag)}`);
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * 主动开关（对话级，存在 chat_metadata 里）。
+ * @param {object} ctx
+ * @param {object} settings
+ */
+function toggleActive(ctx, settings) {
+    if (!guardModeToggle(ctx, settings)) {
+        return;
+    }
+
+    // 切换只改变注入与 shouldRegister 的依据，不重载页面、不插消息
+    setEnabled(ctx, !isEnabled(ctx));
+    syncFromContext(ctx);
+    refreshUI(ctx);
+}
+
+/**
+ * 被动学习的总开关（全局设置，不按对话保存）。
+ *
+ * 关掉时把已经挂上的待学习一并丢掉：它本来就是被动学习攒出来的，
+ * 留着会出现"被动显示关闭、徽章却在闪待学"这种自相矛盾的状态。
+ */
+function togglePassive(ctx, settings) {
+    if (!guardModeToggle(ctx, settings)) {
+        return;
+    }
+
+    const next = settings.passiveEnabled !== true;
+    settings.passiveEnabled = next;
+    ctx.saveSettingsDebounced?.();
+
+    if (!next) {
+        getState(ctx).passive.pending = null;
+        saveChat(ctx);
+    }
+
+    syncFromContext(ctx);
+    refreshUI(ctx);
+
+    if (!next) {
+        toast('被动学习已关闭（主动开关不受影响）');
+        return;
+    }
+
+    const hasRule = Number(settings.passiveInterval) > 0 || parseKeywords(settings.passiveKeywords).length > 0;
+    toast(hasRule
+        ? '被动学习已开启：命中判据后会在下一轮临时开启一次'
+        : '被动学习已开启，但还没有判据（间隔 0 且关键词为空），不会触发。请到扩展设置里填一个');
+}
+
+/* ------------------------------------------------------------------ 面板入口 */
+
+/**
+ * 打开浮动面板，给 `/thrive panel` 用（徽章点击走的是同一套开关）。
+ *
+ * 面板里始终有「模式」这一段，所以"没有记录"不再是打不开的理由——
+ * 也正因为如此它不会再回声"没什么可看"。
+ *
+ * @param {object} [ctx]
+ * @returns {boolean} 面板是否被打开（现在总是 true，返回值留给命令层）
+ */
+export function openPanel(ctx = getContext()) {
+    setPanelOpen(true, ctx);
+
+    const panel = document.getElementById(PANEL_ID);
+    panel?.scrollIntoView({ block: 'nearest' });
+    return Boolean(panel);
+}
+
+/**
+ * 角色编辑框里是不是还停着"不是这次写入"的文字。
+ *
+ * 页面刷新后编辑框是空的、面板没开时也可能取不到元素 —— 这两种都不算 stale，
+ * 别在没事的时候挂一个按钮在那儿。
+ *
+ * @param {object} ctx
+ * @param {string} applied 已写入的全文（patch.after）
+ */
+function isDescriptionEditorStale(ctx, applied) {
+    const textarea = document.getElementById('description_textarea');
+    if (!textarea) {
+        return false;
+    }
+
+    // 面板正在编辑别的角色：那个框跟这次写入无关
+    const nameField = document.getElementById('character_name_pole');
+    const character = getActiveCharacter(ctx);
+    if (nameField && character?.name && nameField.value && nameField.value !== character.name) {
+        return false;
+    }
+
+    return normalizeEol(textarea.value) !== normalizeEol(applied);
+}
+
+function renderPanel({ mode, patch, backups, descBackup, drift = false, editorStale = false }) {
+    const pending = isUnresolved(patch);
+    const counts = [];
+    if (pending) {
+        counts.push('待确认 1');
+    } else if (drift) {
+        counts.push('描述已变');
+    }
+    if (backups.length > 0) {
+        counts.push(`已写入 ${backups.length}`);
+    }
+
+    const bar = `
+        <div class="thrive-panel__bar">
+            <i class="fa-solid fa-grip-vertical thrive-panel__grip" title="按住拖动可移动面板" aria-hidden="true"></i>
+            <span class="thrive-panel__title">Thrive</span>
+            <span class="thrive-panel__summary">${escapeHtml(counts.join(' · '))}</span>
+            <div class="menu_button thrive-panel__toggle" data-thrive-action="hide-panel"
+                title="收起面板；输入框旁的徽章随时能把它叫回来">收起</div>
+        </div>`;
+
+    const body = [
+        renderModeSection(mode),
+        renderPatchSection(patch, drift, editorStale),
+        renderHistorySection(backups, descBackup),
+    ].filter(Boolean).join('');
+
+    return `${bar}<div class="thrive-panel__body">${body}</div>`;
+}
+
+/**
+ * 模式分区：主动 / 被动两个开关。
+ *
+ * 这就是从徽章上搬下来的那两段。搬过来之后每个开关终于有地方写一句"它管什么"：
+ * 主动是当前对话的、被动是全局的——以前只能挤在 title 里，得悬停才知道。
+ *
+ * @param {ReturnType<typeof readModeView>} mode
+ */
+function renderModeSection(mode) {
+    const { active, passive, usable, none, available, diag, pending, interval, remaining, keywordCount } = mode;
+
+    const summary = active && passive
+        ? '主动 + 被动'
+        : active
+            ? '主动开着'
+            : passive
+                ? '被动待命'
+                : '都没开';
+
+    /*
+     * 被动那行的说明要跟着判据走：开了但一条判据都没有是最常见的空转状态，
+     * 只写"命中判据后借一轮"等于没说——用户以为开了就会自己学。
+     */
+    const passiveHint = !passive
+        ? '全局 · 命中判据后借一轮，回复完自动关'
+        : interval > 0
+            ? `全局 · 每 ${interval} 条借一轮，还差 ${remaining} 条`
+            : keywordCount > 0
+                ? `全局 · ${keywordCount} 个关键词命中就借一轮，回复完自动关`
+                : '全局 · 已开启，但还没有判据（间隔 0 且关键词为空），不会触发';
+
+    /*
+     * 不可用的原因只能写一条：三条同时列出来，用户还是不知道该先改哪个。
+     * 顺序和以前徽章的 tooltip 一致——先看模块，再看对话，最后看环境。
+     */
+    const blocked = none
+        ? '两个模块都关着，请先在扩展设置里开启至少一个。'
+        : !available
+            ? '请先打开一个对话。'
+            : !diag.ok
+                ? `工具调用不可用：${formatDiagnosis(diag)}`
+                : '';
+
+    return `
+        <section class="thrive-panel__section thrive-modes">
+            <div class="thrive-panel__head">
+                <span class="thrive-panel__section-title">模式</span>
+                <span class="thrive-panel__meta">${escapeHtml(summary)}</span>
+            </div>
+            ${renderModeRow({
+                action: 'toggle-active',
+                variant: 'active',
+                title: '主动学习',
+                hint: '只作用于当前对话 · 手动开关，开着就一直在学',
+                on: active,
+                usable,
+            })}
+            ${renderModeRow({
+                action: 'toggle-passive',
+                variant: 'passive',
+                title: '被动学习',
+                hint: passiveHint,
+                on: passive,
+                usable,
+            })}
+            ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
+            ${pending
+                ? `<div class="thrive-mode__pending">本次待学习：${escapeHtml(describePending(pending))}`
+                    + ' —— 下一轮对话临时开启，回复完自动关闭。</div>'
+                : ''}
+        </section>`;
+}
+
+/**
+ * 一行开关。灯亮 = 开，灭 = 关；不可用时整行压暗，点了会说明原因而不是静默。
+ *
+ * @param {{action: string, variant: 'active'|'passive', title: string, hint: string,
+ *     on: boolean, usable: boolean}} props
+ */
+function renderModeRow({ action, variant, title, hint, on, usable }) {
+    return `
+        <div class="thrive-mode thrive-mode--${variant}${on ? ' is-on' : ''}${usable ? '' : ' is-muted'}">
+            <span class="thrive-mode__led" aria-hidden="true"></span>
+            <span class="thrive-mode__text">
+                <span class="thrive-mode__title">${escapeHtml(title)}</span>
+                <span class="thrive-mode__hint">${escapeHtml(hint)}</span>
+            </span>
+            <span class="menu_button thrive-mode__switch${on ? ' is-on' : ''}" role="switch"
+                aria-checked="${on ? 'true' : 'false'}"
+                data-thrive-action="${action}">${on ? '开' : '关'}</span>
+        </div>`;
+}
+
+/**
+ * 待确认分区。没有 patch 时整段不渲染。
+ * @param {object|null} patch
+ * @param {boolean} [drift] 已写入，但角色卡上已经不是这份内容
+ * @param {boolean} [editorStale] 已写入，但角色编辑框里还停着别的文字
+ */
+function renderPatchSection(patch, drift = false, editorStale = false) {
+    if (!patch) {
+        return '';
+    }
+
+    const conflict = patch.status === PATCH_STATUS.CONFLICT;
+    const applied = patch.status === PATCH_STATUS.APPLIED;
+    const name = getActiveCharacter(getContext())?.name;
+
+    const title = applied ? '角色描述 · 已写入' : conflict ? '角色描述 · 冲突' : '角色描述 · 待确认';
+    const delta = patch.after.length - patch.before.length;
+    const deltaText = `${delta > 0 ? '+' : ''}${delta}`;
+    const meta = `${formatTime(patch.createdAt)} · ${patch.before.length} → ${patch.after.length} 字（${deltaText}）`;
+    const when = patch.appliedAt ? `（${formatTime(patch.appliedAt)}）` : '';
+
+    const notice = applied
+        ? drift
+            ? '角色卡上的描述已经和这次写入不一致了：可能是你在编辑器里自己改过，'
+                + '也可能是编辑面板还停着旧文本、一次保存把它盖了回去。'
+                + '这份内容只留在记录里，需要的话点「重新写入」再落一次盘（当前这版会先进上一版快照）。'
+            : editorStale
+                ? '角色卡上已经是这份内容了，但编辑面板的文本框里还是别的文字'
+                    + '（你改过，或者写入时正在框里输入）。直接保存会把这次写入盖回去；'
+                    + '点「刷新编辑框」就能把它换成这份内容，不用关面板。'
+                : `已写入${name ? `「${name}」的` : ''}角色卡${when}，下一轮请求开始生效。`
+        : conflict
+            ? '磁盘上的描述在暂存之后被改动过。这里不做自动合并：要么整份覆盖，要么拒绝。'
+            : '还没写入角色卡。接受后从下一轮请求开始生效。';
+
+    const body = applied ? '' : renderDiff(buildDiffRows(patch.before, patch.after));
+    const actions = applied ? renderAppliedActions(drift, editorStale) : renderPendingActions(conflict);
+    const hint = applied
+        ? (drift
+            ? '重写只动角色描述；当前这一版会先进「上一版」快照。'
+            : editorStale
+                ? '刷新编辑框会用这次写入的内容覆盖框里的文字。'
+                : '这条记录只是留痕：关掉它不会改回任何内容。')
+        : '面板只读：只能整份接受或拒绝，不能在这里改文本。';
+
+    const noticeClass = conflict || drift || editorStale
+        ? 'thrive-panel__notice thrive-panel__notice--warn'
+        : 'thrive-panel__notice';
+
+    return `
+        <section class="thrive-panel__section">
+            <div class="thrive-panel__head">
+                <span class="thrive-panel__section-title">${title}</span>
+                <span class="thrive-panel__meta">${escapeHtml(meta)}</span>
+            </div>
+            <div class="${noticeClass}">${escapeHtml(notice)}</div>
+            ${body}
+            <div class="thrive-panel__actions">
+                <small class="thrive-hint">${hint}</small>
+                ${actions}
+            </div>
+        </section>`;
+}
+
+/**
+ * 已写入分区：世界书写入记录 + 描述上一版。
+ *
+ * 记录只读，唯一的动作是恢复——世界书没有 patch，写错了只能靠这条退路。
+ * @param {Array<object>} backups
+ * @param {{ before: string, at: number }|null} descBackup
+ */
+function renderHistorySection(backups, descBackup) {
+    if (backups.length === 0 && !descBackup) {
+        return '';
+    }
+
+    const rows = backups.map(renderHistoryRow).join('');
+    const desc = renderDescBackupRow(descBackup);
+    const meta = backups.length > 0 ? `最近 ${backups.length} 次` : '';
+
+    return `
+        <section class="thrive-panel__section">
+            <div class="thrive-panel__head">
+                <span class="thrive-panel__section-title">已写入</span>
+                <span class="thrive-panel__meta">${escapeHtml(meta)}</span>
+            </div>
+            <div class="thrive-history">${rows}${desc}</div>
+        </section>`;
+}
+
+function renderHistoryRow(item) {
+    const created = item.action === 'created';
+    const meta = [
+        item.book,
+        created ? '新建' : '改写',
+        `${item.chars} 字`,
+        formatTime(item.at),
+    ].filter(Boolean).join(' · ');
+
+    const restored = Number(item.restoredAt) > 0;
+    const action = restored
+        ? `<span class="thrive-history__done">已恢复 ${escapeHtml(formatTime(item.restoredAt))}</span>`
+        : `<div class="menu_button thrive-panel__button thrive-history__restore" data-thrive-action="restore-lore" data-backup-id="${escapeHtml(item.id)}">${created ? '撤销新建' : '恢复写入前'}</div>`;
+
+    return `
+        <div class="thrive-history__row">
+            <div class="thrive-history__main">
+                <span class="thrive-history__title">${escapeHtml(item.title || '（无标题）')}</span>
+                <span class="thrive-history__meta">${escapeHtml(meta)}</span>
+            </div>
+            ${action}
+        </div>`;
+}
+
+function renderDescBackupRow(descBackup) {
+    if (!descBackup) {
+        return '';
+    }
+
+    const chars = String(descBackup.before ?? '').length;
+    const meta = ['角色描述 · 上一版', `${chars} 字`, formatTime(descBackup.at)].filter(Boolean).join(' · ');
+
+    return `
+        <div class="thrive-history__row thrive-history__row--desc">
+            <div class="thrive-history__main">
+                <span class="thrive-history__title">角色描述</span>
+                <span class="thrive-history__meta">${escapeHtml(meta)}</span>
+            </div>
+            <div class="menu_button thrive-panel__button" data-thrive-action="restore-desc">恢复上一版</div>
+        </div>`;
+}
+
+function renderDiff(rows) {
+    if (rows.length === 0) {
+        return '<div class="thrive-diff"><div class="thrive-diff__empty">与磁盘上的描述完全一致，没有可显示的差异。</div></div>';
+    }
+
+    const html = rows.map(row => {
+        if (row.type === 'fold') {
+            return `<div class="thrive-diff__row thrive-diff__row--fold">⋯ ${row.count} 行未改动</div>`;
+        }
+
+        const sign = row.type === 'add' ? '+' : row.type === 'del' ? '−' : ' ';
+        // 空行也要占一行高度，否则 diff 的段落结构会看不出来
+        const text = row.text === '' ? '&nbsp;' : escapeHtml(row.text);
+
+        return `<div class="thrive-diff__row thrive-diff__row--${row.type}">`
+            + `<span class="thrive-diff__sign">${sign}</span>`
+            + `<span class="thrive-diff__text">${text}</span>`
+            + '</div>';
+    });
+
+    return `<div class="thrive-diff">${html.join('')}</div>`;
+}
+
+function renderPendingActions(conflict) {
+    const primary = conflict
+        ? '<div class="menu_button thrive-panel__button thrive-panel__button--danger" data-thrive-action="force">强制覆盖</div>'
+        : '<div class="menu_button thrive-panel__button" data-thrive-action="accept">接受</div>';
+
+    return `${primary}<div class="menu_button thrive-panel__button" data-thrive-action="discard">拒绝</div>`;
+}
+
+function renderAppliedActions(drift = false, editorStale = false) {
+    const sync = editorStale
+        ? '<div class="menu_button thrive-panel__button" data-thrive-action="sync-editor"'
+            + ' title="用已写入的内容覆盖角色编辑框里的文字">刷新编辑框</div>'
+        : '';
+    const rewrite = drift
+        ? '<div class="menu_button thrive-panel__button thrive-panel__button--danger" data-thrive-action="rewrite-desc">重新写入</div>'
+        : '';
+    return `${sync}${rewrite}<div class="menu_button thrive-panel__button" data-thrive-action="close">关闭</div>`;
+}
+
+function onPanelClick(event) {
+    const trigger = event.target.closest('[data-thrive-action]');
+    const action = trigger?.dataset.thriveAction;
+    if (!action) {
+        return;
+    }
+
+    switch (action) {
+        case 'accept':
+            void applyAndReport(false);
+            break;
+        case 'force':
+            void applyAndReport(true);
+            break;
+        case 'discard':
+            void discardAndReport();
+            break;
+        case 'close':
+            discardPatch(getContext());
+            refreshPanel(getContext());
+            break;
+        case 'hide-panel':
+            setPanelOpen(false);
+            break;
+        case 'toggle-active':
+            toggleActive(getContext(), ensureSettings(getContext()));
+            break;
+        case 'toggle-passive':
+            togglePassive(getContext(), ensureSettings(getContext()));
+            break;
+        case 'restore-lore':
+            void restoreLoreAndReport(trigger.dataset.backupId);
+            break;
+        case 'restore-desc':
+            void restoreDescAndReport();
+            break;
+        case 'rewrite-desc':
+            void rewriteDescAndReport();
+            break;
+        case 'sync-editor':
+            syncEditorAndReport();
+            break;
+        default:
+            break;
+    }
+}
+
+/** 接受 / 强制覆盖。失败时把原因说清楚，别让按钮看起来"没反应" */
+async function applyAndReport(force) {
+    if (patchBusy) {
+        return;
+    }
+
+    patchBusy = true;
+    setPanelBusy(true);
+
+    try {
+        const result = await applyPatch(getContext(), { force });
+
+        if (result.ok) {
+            const name = getActiveCharacter(getContext())?.name;
+            const reason = result.editor?.reason;
+            const edited = result.editor?.synced === false && reason === 'edited';
+            const who = name ? `「${name}」的` : '';
+
+            // 编辑器里用户改过描述：不覆盖他的输入，但必须说清楚"保存会盖掉这次写入"
+            if (edited) {
+                toast(`已写入${who}角色卡，但编辑框里的描述你改过，这次没覆盖它；`
+                    + '要换成新内容，点浮动面板上的「刷新编辑框」');
+            } else if (reason === 'overwrote-edited') {
+                toast(`已写入${who}角色卡；编辑面板里未保存的旧描述被这次写入覆盖了`);
+            } else {
+                toast(`已写入${who}角色卡，下一轮请求生效`);
+            }
+            return;
+        }
+
+        if (result.error === 'CONFLICT') {
+            toast('描述在暂存之后被改动过，请选择强制覆盖或拒绝');
+        } else if (result.error === 'NO_CHAR') {
+            toast('当前没有选中角色，无法写入描述');
+        } else {
+            toast(`写入失败：${result.hint ?? result.error}`);
+        }
+    } finally {
+        patchBusy = false;
+        setPanelBusy(false);
+        refreshPanel();
+    }
+}
+
+async function discardAndReport() {
+    if (patchBusy) {
+        return;
+    }
+
+    const confirmed = await askDiscardPatch();
+    if (!confirmed) {
+        return;
+    }
+
+    discardPatch(getContext());
+    refreshPanel(getContext());
+    toast('已拒绝这份改动，角色描述没有变化');
+}
+
+/**
+ * 把一条世界书条目恢复成写入前。
+ *
+ * 恢复要写盘、要覆盖用户可能已经手改过的内容，所以先确认一次；
+ * 恢复完再作废读取登记——书被插件动过，模型下一次写入必须重新读。
+ */
+async function restoreLoreAndReport(backupId) {
+    if (patchBusy) {
+        return;
+    }
+
+    const ctx = getContext();
+    const backup = findLoreBackup(ctx, backupId);
+
+    if (!backup) {
+        toast('这条记录已经不在对话框里了');
+        refreshPanel(ctx);
+        return;
+    }
+
+    const created = backup.action === 'created';
+    const message = created
+        ? `「${backup.book}」里的「${backup.title}」会被删掉，回到写入前（没有这条）的状态。确定吗？`
+        : `「${backup.book}」里的「${backup.title}」会被改回 ${backup.before.length} 字的旧内容，之后的修改都会丢。确定吗？`;
+
+    const confirmed = await askConfirm(message);
+    if (!confirmed) {
+        return;
+    }
+
+    patchBusy = true;
+    setPanelBusy(true);
+
+    try {
+        const result = await restoreLoreEntry(ctx, backup);
+
+        if (!result.ok) {
+            toast(result.hint ?? `恢复失败：${result.error}`);
+            return;
+        }
+
+        markLoreBackupRestored(ctx, backup.id);
+        clearReadHash(ctx, loreReadKey(backup.book, backup.title));
+        saveChat(ctx);
+
+        toast(result.action === 'gone'
+            ? `「${backup.title}」已经不在「${backup.book}」里了`
+            : created
+                ? `已从「${backup.book}」删掉「${backup.title}」`
+                : `已把「${backup.title}」恢复到写入前`);
+    } finally {
+        patchBusy = false;
+        setPanelBusy(false);
+        refreshPanel(ctx);
+    }
+}
+
+async function restoreDescAndReport() {
+    if (patchBusy) {
+        return;
+    }
+
+    const ctx = getContext();
+    const backup = getDescBackup(ctx);
+
+    if (!backup) {
+        toast('还没有可恢复的上一版');
+        refreshPanel(ctx);
+        return;
+    }
+
+    const confirmed = await askConfirm(`角色描述会被改回 ${backup.before.length} 字的上一版，当前的描述会被覆盖。确定吗？`);
+    if (!confirmed) {
+        return;
+    }
+
+    patchBusy = true;
+    setPanelBusy(true);
+
+    try {
+        const result = await restoreDescBackup(ctx);
+
+        if (!result.ok) {
+            if (result.error === 'NO_CHANGE') {
+                toast('当前描述已经和上一版一致');
+            } else if (result.error === 'PATCH_PENDING') {
+                toast('还有一份待确认的描述改动，先处理它');
+            } else {
+                toast(result.hint ?? `恢复失败：${result.error}`);
+            }
+            return;
+        }
+
+        toast(`已恢复到上一版（${result.chars} 字）`);
+    } finally {
+        patchBusy = false;
+        setPanelBusy(false);
+        refreshPanel(ctx);
+    }
+}
+
+/**
+ * 把"已写入"的那份内容重新写回角色卡（见 renderPatchSection 的 drift 说明）。
+ *
+ * 覆盖前确认一次：这次会把角色卡上现在这一版盖掉，但会先存进「上一版」快照，
+ * 所以点错了还能再恢复回来。
+ */
+async function rewriteDescAndReport() {
+    if (patchBusy) {
+        return;
+    }
+
+    const ctx = getContext();
+    const patch = getPatch(ctx);
+    if (!patch) {
+        refreshPanel(ctx);
+        return;
+    }
+
+    const current = diskDescription(ctx);
+    const name = getActiveCharacter(ctx)?.name;
+    const confirmed = await askConfirm(`「${name ?? '当前角色'}」的描述会被改回 ${patch.after.length} 字的那份内容，`
+        + `现在的 ${current.length} 字会被覆盖（会先存进「上一版」快照，随时能恢复）。确定吗？`);
+    if (!confirmed) {
+        return;
+    }
+
+    patchBusy = true;
+    setPanelBusy(true);
+
+    try {
+        const result = await rewriteAppliedDescription(ctx);
+
+        if (!result.ok) {
+            toast(result.error === 'NO_CHANGE'
+                ? '角色卡上已经是这份内容，不用重写'
+                : `写入失败：${result.hint ?? result.error}`);
+            return;
+        }
+
+        const edited = result.editor?.synced === false && result.editor?.reason === 'edited';
+        toast(edited
+            ? `已重新写入${name ? `「${name}」的` : ''}角色卡；编辑框里你改过的内容没被覆盖，要同步点面板上的「刷新编辑框」`
+            : `已重新写入${name ? `「${name}」的` : ''}角色卡（${patch.after.length} 字）`);
+    } finally {
+        patchBusy = false;
+        setPanelBusy(false);
+        refreshPanel(ctx);
+    }
+}
+
+/**
+ * 把已写入的内容推进角色编辑框，不管框里现在是什么。
+ *
+ * 只有用户点「刷新编辑框」才会走到这里 —— 这是"我知道会覆盖我刚才敲的字"的显式动作，
+ * 所以不弹确认。写入路径自己遇到用户改过的框是不动的（见 applyDescriptionLocally），
+ * 这个按钮就是给它留的出口：不关面板也能让框里看到新内容。
+ */
+function syncEditorAndReport() {
+    const ctx = getContext();
+    const patch = getPatch(ctx);
+
+    if (!patch || patch.status !== PATCH_STATUS.APPLIED) {
+        refreshPanel(ctx);
+        return;
+    }
+
+    const result = refreshDescriptionEditor(getActiveCharacter(ctx), patch.after);
+
+    if (!result.synced) {
+        toast(result.reason === 'no-editor'
+            ? '没找到角色描述的文本框：先把角色编辑面板打开'
+            : '没能刷新编辑框');
+        return;
+    }
+
+    toast(`编辑框已换成这次写入的内容（${patch.after.length} 字）`);
+    refreshPanel(ctx);
+}
+
+async function askDiscardPatch() {
+    return askConfirm('拒绝后这份改动就没了，角色描述保持原样。确定拒绝吗？');
+}
+
+function setPanelBusy(busy) {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) {
+        return;
+    }
+    panel.classList.toggle('thrive-panel--busy', busy);
+    panel.setAttribute('aria-busy', String(busy));
+}
+
+function formatTime(timestamp) {
+    const value = Number(timestamp);
+    if (!Number.isFinite(value) || value <= 0) {
+        return '';
+    }
+
+    const date = new Date(value);
+    const pad = number => String(number).padStart(2, '0');
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const today = new Date().toDateString() === date.toDateString();
+
+    return today ? time : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`;
+}
+
+/* 登记给刷新编排：面板的刷新入口就这一个 */
+registerSurfaces({
+    panel: ({ ctx }) => refreshPanel(ctx),
+});

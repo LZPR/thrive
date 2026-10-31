@@ -1,7 +1,7 @@
 /**
  * Thrive · 学习模式 —— 入口
  *
- * 当前进度（Step 16）：
+ * 当前进度（Step 17）：
  *   1. 扩展能被 ST 加载
  *   2. 对话级开关（chat_metadata.thrive.enabled）+ 输入框旁的方块徽章（只开关浮动面板，
  *      主动 / 被动两个开关在面板里，待确认改动在徽章角上带计数）
@@ -14,6 +14,7 @@
  *   9. 超长时的压缩指令可配（src/compact.js）
  *  10. 字数上限 / 返回条数 / 记录槽位 / 日志长度等数值全部可配（src/limits.js）
  *  11. 设置项按用途分成六组折叠，默认全收起（settings.html + style.css）
+ *  12. 界面按块拆分：src/ui/ 下一块界面一个文件，src/ui.js 只做门面（src/ui/*.js）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -59,7 +60,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 step 16 · 模式开关搬进浮动面板`);
+    console.log(`${LOG} 启动 step 17 · 界面拆成 src/ui/`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
