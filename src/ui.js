@@ -61,6 +61,7 @@ import {
     rewriteAppliedDescription,
 } from './patch.js';
 import { PANEL_EVENT, PASSIVE_EVENT } from './events.js';
+import { clampLimit, LIMIT_SPECS, readLimits } from './limits.js';
 import { armManual, describePending, intervalProgress, parseKeywords } from './passive.js';
 import { diagnoseEnvironment, formatDiagnosis } from './diagnostics.js';
 import { escapeHtml, normalizeEol } from './util.js';
@@ -195,6 +196,7 @@ function bindPanelEvents() {
     bindBlockControls();
     bindCompactControls();
     bindLoreControls();
+    bindLimitControls();
     bindModuleControls();
     bindPassiveControls();
     bindPatchControls();
@@ -539,6 +541,126 @@ function updatePatchHint(ctx, settings) {
         ? '当前有一份待处理的改动，在记录面板的「待确认」里接受或拒绝。'
         : '模型的描述改动会先暂存成一份 diff，你接受后才写入角色卡；暂存期间模型读到的是暂存版。';
     el.classList.toggle('thrive-hint--warn', pending);
+}
+
+/* ------------------------------------------------------------ 数值与上限 */
+
+/**
+ * 设置页「数值与上限」的输入框：`[元素 id, limits.js 的键]`。
+ *
+ * min / max / step 不写死在 HTML 里，绑定时从 LIMIT_SPECS 灌进去：
+ * 范围只有一份定义，否则模板里改了一半、夹取逻辑还是老值，用户会看到
+ * "输入框允许填 5000、实际被夹到 2000"这种自相矛盾的界面。
+ */
+const LIMIT_FIELDS = Object.freeze([
+    ['thrive_limit_soft_entry', 'softLimitEntry'],
+    ['thrive_limit_hard_entry', 'hardLimitEntry'],
+    ['thrive_limit_max_keywords', 'maxKeywords'],
+    ['thrive_limit_title_chars', 'titleMaxChars'],
+    ['thrive_limit_soft_desc', 'softLimitDesc'],
+    ['thrive_limit_hard_desc', 'hardLimitDesc'],
+    ['thrive_limit_query_entries', 'maxQueryEntries'],
+    ['thrive_limit_content_chars', 'maxContentChars'],
+    ['thrive_limit_max_titles', 'maxTitles'],
+    ['thrive_limit_entry_count', 'softEntryCount'],
+    ['thrive_limit_backup', 'loreBackupLimit'],
+    ['thrive_limit_trace_chars', 'traceMaxChars'],
+]);
+
+function bindLimitControls() {
+    for (const [id, key] of LIMIT_FIELDS) {
+        const input = document.getElementById(id);
+        if (!input) {
+            continue;
+        }
+
+        const spec = LIMIT_SPECS[key];
+        input.min = String(spec.min);
+        input.max = String(spec.max);
+        input.step = String(spec.step);
+
+        // input 只刷提示，change（失焦 / 回车）才落值：
+        // 边打字边存盘会把 "1600" 中间那个 "1" 先存成 1，再被夹成下限
+        input.addEventListener('input', () => {
+            const settings = ensureSettings(getContext());
+            updateLimitHint({ ...settings, [key]: clampLimit(key, input.value) });
+        });
+
+        input.addEventListener('change', () => {
+            const ctx = getContext();
+            const settings = ensureSettings(ctx);
+            const value = clampLimit(key, input.value);
+
+            settings[key] = value;
+            input.value = String(value);
+            ctx.saveSettingsDebounced?.();
+            updateLimitHint(settings);
+        });
+    }
+
+    const reset = document.getElementById('thrive_limits_reset');
+    reset?.addEventListener('click', () => {
+        const ctx = getContext();
+        const settings = ensureSettings(ctx);
+
+        for (const [, key] of LIMIT_FIELDS) {
+            settings[key] = LIMIT_SPECS[key].default;
+        }
+
+        ctx.saveSettingsDebounced?.();
+        syncLimitControls(settings);
+        toast('数值与上限已恢复默认');
+    });
+}
+
+function syncLimitControls(settings) {
+    for (const [id, key] of LIMIT_FIELDS) {
+        const input = document.getElementById(id);
+        // 正在这个框里打字时不要回写，否则光标和没落盘的输入会被冲掉
+        if (!input || document.activeElement === input) {
+            continue;
+        }
+
+        const value = clampLimit(key, settings[key]);
+        if (input.value !== String(value)) {
+            input.value = String(value);
+        }
+    }
+
+    updateLimitHint(settings);
+}
+
+/**
+ * 一句"现在实际生效的是什么"。
+ *
+ * 设置页里的输入框是用户的**意愿**，这里给的是**结果**——两者可能不一样：
+ * 软提醒高于硬上限时会被硬上限封顶，填了 0 或超范围的值会回落到默认值。
+ * 只把结果写出来，不去改用户填的数字：改一个框同时动另一个框是最难理解的交互。
+ */
+function updateLimitHint(settings) {
+    const el = document.getElementById('thrive_limits_hint');
+    if (!el) {
+        return;
+    }
+
+    const limits = readLimits(settings);
+    const entryClamped = Number(settings.softLimitEntry) > limits.hardLimitEntry;
+    const descClamped = Number(settings.softLimitDesc) > limits.hardLimitDesc;
+
+    const parts = [
+        `条目 ${limits.softLimitEntry} / ${limits.hardLimitEntry} 字`,
+        `描述 ${limits.softLimitDesc} / ${limits.hardLimitDesc} 字`,
+        `关键词 ${limits.maxKeywords} 个`,
+        `单次读 ${limits.maxQueryEntries} 条、每条 ${limits.maxContentChars} 字`,
+        `总览 ${limits.maxTitles} 个标题`,
+        `记录留 ${limits.loreBackupLimit} 条`,
+    ];
+
+    el.textContent = `当前生效：${parts.join('；')}。`
+        + (entryClamped || descClamped
+            ? ' 软提醒高于硬上限，已按硬上限计算；被拒之前不会再有单独的提醒。'
+            : '');
+    el.classList.toggle('thrive-hint--warn', entryClamped || descClamped);
 }
 
 /* ------------------------------------------------------------------ 记录面板 */
@@ -2255,6 +2377,7 @@ function refreshPanelControls(ctx, settings) {
     syncCheckbox('thrive_patch_enabled', settings.patchEnabled);
     syncCheckbox('thrive_drop_traces', settings.dropTraces);
     syncPanelLayoutControls(settings);
+    syncLimitControls(settings);
     updateModuleHints(ctx, settings);
     updatePassiveControls(ctx, settings);
     updatePatchHint(ctx, settings);

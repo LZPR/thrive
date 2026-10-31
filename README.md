@@ -18,7 +18,7 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 
 ## 当前进度
 
-**Step 13 · 压缩指令可配**（本版本 v0.13.1）
+**Step 15 · 设置页分组折叠**（本版本 v0.15.0）
 
 已完成：
 
@@ -28,11 +28,12 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 - 主动开关按对话保存：A 对话开启后切到 B 对话，B 仍是关闭
 - **被动学习**：两条判据（每 N 条消息 / 关键词命中）任一成立就「借」一轮——下一轮临时打开学习模式，那一轮回复完立刻关闭；主动已经开着时不重复触发
 - 触发时有明显提示：toast 说清原因、徽章被动段变成「待学」并呼吸闪烁、注入的学习块末尾追加「本轮为自动触发」的说明；`/thrive once` 与设置页「现在触发一次」可以手动借一轮
-- 设置面板：默认开启、徽章显示、被动学习的开关 / 间隔 / 关键词、两个模块开关、可写世界书、读范围、注入位置、学习块正文、超长时的压缩指令、日志清理
+- 设置面板：默认开启、徽章显示、被动学习的开关 / 间隔 / 关键词、两个模块开关、可写世界书、读范围、注入位置、学习块正文、超长时的压缩指令、日志清理、**数值与上限**
+- **设置项按六组折叠**（基本开关 / 被动学习 / 写入目标 / 数值与上限 / 提示词 / 日志与面板），默认全部收起，点标题展开；环境诊断固定在最上面，不参与折叠。复用 ST 原生 `.inline-drawer`，没有自定义折叠脚本
 - 开启时把学习块注入提示词，关闭时写空串让它彻底消失
 - 工具 `desc_read` / `desc_write`，先读后写 + 内容哈希 + 1 版快照
 - 工具 `lore_read`：标题总览 / 关键词检索 / 跨书读取 / 换书提醒
-- 工具 `lore_write`：按标题 upsert、整条改写、即时落盘、10 条快照
+- 工具 `lore_write`：按标题 upsert、整条改写、即时落盘、可配条数的快照（默认 10 条）
 - 可写书未激活时，工具返回与设置面板都会说明"写了不会生效"（ADR-021）
 - 世界书 / 角色描述两个模块独立开关，工具按模块注册，越界请求明确拒绝
 - 两个模块都关时徽章置灰、点击只给原因，已开启的对话会被自动关闭
@@ -53,6 +54,7 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 - **环境诊断**：设置页顶部一句话说清"工具能不能用、去哪改"；工具不可用时徽章置灰，点击只给原因
 - **超软阈值时给建议**：`desc_read` / `lore_read` 返回 `over_limit` 与 `hint`（"多少字、超了哪个阈值"+设置里的压缩指令），append 仍然可写，硬上限才拒
 - **压缩指令可配**：描述或世界书条目超限时发给模型的那段话由设置里的「超长时的压缩指令」决定，默认约 90 字——只说目的、提醒压完要承认记忆有损，怎么压交给模型
+- **数值上限全部可配**：条目 / 描述的字数软提醒与硬上限、关键词与标题长度、单次读取返回多少条 / 每条多少字 / 总览几个标题、整本提醒阈值、写入记录槽位、工具日志单行长度——统一在 `src/limits.js` 定义默认值与范围，设置页一处可调，读到时统一夹取（软提醒不会高于硬上限）
 - **换书确认**：切换可写书前说明"新书里没有旧书的内容"，确认后 `lastBook` 置空
 - **斜杠命令** `/thrive on|off|passive|once|status|panel`，`status` 一行给出主动 / 被动 / 模块 / 可写书 / 待确认数
 - 错误码统一兜底 hint（`src/diagnostics.js` 的 `ERROR_HINTS`），术语统一成「可写书 / 暂存 / 接受·拒绝」
@@ -81,11 +83,11 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 |---|---|---|---|
 | `desc_read` | 无 | `{ ok, chars, over_limit, text, hint? }` | 读 `description` 全文，不截断；有 patch 时返回暂存版并带 `staged: true`；超软阈值时带 `hint`（事实 + 压缩指令） |
 | `desc_write` | `mode`, `text` | `{ ok, mode, added, staged \| applied, chars, note }` | `append` 追加 / `rewrite` 整段替换；`staged` 待确认，`applied` 已写入 |
-| `lore_read` | 可省 `query` | 总览 `{ titles }` / 检索 `{ entries, hint? }` | 省略 query 只给标题，最多 20 个；检索时超软阈值的条目带 `over_limit`，`hint` 说明超了几条并附压缩指令 |
+| `lore_read` | 可省 `query` | 总览 `{ titles }` / 检索 `{ entries, hint? }` | 省略 query 只给标题，最多 `maxTitles` 个（默认 20）；检索时超软阈值的条目带 `over_limit`，`hint` 说明超了几条并附压缩指令 |
 | `lore_write` | `title`, `content`, 可省 `keys` / `logic` | `{ ok, title, action, chars, keys, note }` | 按标题 upsert，`action` 为 `created` / `rewritten` |
 
 - 目标由插件解析（当前选中的角色 / 设置里的可写书），工具参数里没有"角色 id""书名"这类字段。
-- `over_limit = chars >= softLimitDesc`（默认 1600），只做提醒，不拦截。
+- `over_limit = chars >= softLimitDesc`（默认 1600，可调），只做提醒，不拦截。
 - 出错统一返回 `{ ok: false, error, hint }`，错误码清单见 `src/diagnostics.js` 的 `ERROR_HINTS`。
   另外补四个：`INVALID_MODE`（mode 不是 append/rewrite）、`INVALID_TITLE`（标题为空）、
   `WRITE_FAILED`（服务端拒绝或网络失败）、`PATCH_CONFLICT`（描述有一份冲突的改动等着用户处理）。
@@ -346,7 +348,7 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 
 **记录与快照是同一份数据**。`backups.lore` 的每一条既要在写错时能退回，也要在面板上占一行，
 所以两件事合成一条：`{ id, book, title, action, before, beforeKeys, chars, at }`。
-10 条上限因此同时是"能退几步"和"面板显示几行"。
+10 条上限（`loreBackupLimit`，可调）因此同时是"能退几步"和"面板显示几行"。
 
 **两种恢复语义**，因为"写入前"的形态不同：
 
@@ -458,6 +460,35 @@ JSON 的 HTML，`extra.tool_invocations` 是同一批调用的结构化数组。
 
 生效的四个时机：`desc_read` 超软阈值、`desc_write` 超硬上限、`lore_read` 检索到超软阈值的条目、`lore_write` 单条超硬上限。
 
+## 数值与上限
+
+所有"写多少 / 读多少 / 留多少"的数字都在设置页「数值与上限」里，定义只有一份：
+`src/limits.js` 的 `LIMIT_SPECS`（默认值 + 可输入范围 + 步进）。设置页的输入框按它渲染，
+工具侧统一走 `readLimits(settings)` 取一套值，改完对下一次工具调用生效。
+
+| 分组 | 设置项 | 默认 | 作用 |
+|---|---|---|---|
+| 世界书条目 | `softLimitEntry` | 800 字 | 单条正文的软提醒：`lore_read` / `lore_write` 的 `over_limit` 与 hint 按它判，不拦写入 |
+| 世界书条目 | `hardLimitEntry` | 1200 字 | 单条正文硬上限：`lore_write` 写入后整条超过直接 `TOO_LONG` |
+| 世界书条目 | `maxKeywords` | 8 个 | 关键词超过就截断（不拒绝），`note` 里说明截了几个 |
+| 世界书条目 | `titleMaxChars` | 60 字 | 标题超过报 `TITLE_TOO_LONG` |
+| 角色描述 | `softLimitDesc` | 1600 字 | 超过时 `desc_read` 返回 `over_limit` |
+| 角色描述 | `hardLimitDesc` | 2400 字 | 写入后总长超过直接 `TOO_LONG`（append 也算总长） |
+| 读取返回 | `maxQueryEntries` | 8 条 | 一次 `lore_read` 检索最多返回几条正文 |
+| 读取返回 | `maxContentChars` | 300 字 | 每条正文最多给多少字，超出截断并标 `over_limit` |
+| 读取返回 | `maxTitles` | 20 个 | 不带 query 时标题总览最多列几个 |
+| 读取返回 | `softEntryCount` | 200 条 | 整本书条目数超过它就在返回里提醒合并 |
+| 记录与日志 | `loreBackupLimit` | 10 条 | 面板「已写入」保留几条，也是能恢复几步；调小会裁掉多余旧记录 |
+| 记录与日志 | `traceMaxChars` | 200 字 | 工具日志单行超过就截断 |
+
+三条约定：
+
+- **软提醒不高于硬上限**：两边随便填，但 `readLimits` 会把软提醒封顶到硬上限。软 > 硬意味着
+  一条内容在被拒之前根本收不到提醒，这种组合没有意义；设置页底部会显示"当前生效"的实际值并标出这种情况，
+  但不会去改用户填的数字。
+- **0 / 空 / 超范围 = 回默认**：设置文件能手改，读到脏数据时照默认来，而不是让所有写入突然被拒。
+- **改完不用重启**：每次工具调用现取设置；记录槽位在下次 `getState` 时按新值裁剪。
+
 ## 安装
 
 ### 从仓库安装（推荐）
@@ -501,6 +532,7 @@ style.css              徽章与面板样式
 src/store.js           设置（extension_settings.thrive）与对话状态（chat_metadata.thrive）读写
 src/prompt.js          学习块默认文本、注入位置、宏替换、一次性学习说明与注入同步
 src/compact.js         超限时的压缩指令：默认文本、空串兜底、拼进 hint
+src/limits.js          所有可调数值上限：默认值、可输入范围、夹取与"软不高于硬"
 src/passive.js         被动学习：关键词解析、消息计数、两条判据的评估与结算
 src/tools.js           工具注册与分发（desc_read / desc_write / lore_read / lore_write）
 src/tool-names.js      工具名常量（tools.js 与 trace.js 共用，避免互相 import）
@@ -512,7 +544,7 @@ src/events.js          面板重绘事件（patch / 写入记录 / 快照变化�
 src/util.js            哈希（FNV-1a）、截断、段落拼接、HTML 转义
 src/ui.js              设置面板 + 状态徽章 + 记录面板（待确认 / 已写入）
 docs/spec.md           功能规格（工具契约、读写一致性、权限矩阵）
-docs/adr.md            架构决策记录（25 条，含激活与否、被动学习为何只借一轮）
+docs/adr.md            架构决策记录（28 条，含激活与否、被动学习为何只借一轮、上限为何集中一处、设置页为何复用原生抽屉）
 docs/user_stories.md   用户故事与验收标准
 docs/acceptance-log.md 验收记录（30 条故事 + 7 个边界的实测结论与偏差判定）
 ```

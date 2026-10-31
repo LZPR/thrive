@@ -20,10 +20,8 @@
  * 替别人决定日志长什么样（甚至把它们的调用记录一起删掉）不是本插件该做的事。
  */
 
+import { readLimit } from './limits.js';
 import { isThriveTool } from './tool-names.js';
-
-/** 一行日志的总长度上限（spec §13.1） */
-export const TRACE_MAX_CHARS = 200;
 
 /** 结果里的短字符串原样保留；超过这个长度只留长度，别把一整段描述塞进日志 */
 const SHORT_STRING_MAX = 40;
@@ -35,9 +33,10 @@ const PREFIX = '[thrive]';
  *
  * @param {object} ctx getContext() 的返回值（只用 ctx.chat）
  * @param {Array<object>} invocations ST 传进来的调用列表
+ * @param {object} [settings] extension_settings.thrive（取日志截断字数）
  * @returns {boolean} 是否真的改写了
  */
-export function compressToolTrace(ctx, invocations) {
+export function compressToolTrace(ctx, invocations, settings) {
     if (!Array.isArray(invocations) || invocations.length === 0) {
         return false;
     }
@@ -51,7 +50,7 @@ export function compressToolTrace(ctx, invocations) {
         return false;
     }
 
-    target.mes = buildTraceText(invocations);
+    target.mes = buildTraceText(invocations, settings);
     return true;
 }
 
@@ -100,23 +99,25 @@ export function pruneToolTraces(ctx) {
  * 失败用 ✗ 而不是 →，扫一眼就能看出哪次没成。
  *
  * @param {Array<object>} invocations
+ * @param {object} [settings]
  * @returns {string}
  */
-export function buildTraceText(invocations) {
-    return invocations.map(formatLine).join('\n');
+export function buildTraceText(invocations, settings) {
+    return invocations.map(invocation => formatLine(invocation, settings)).join('\n');
 }
 
 /**
  * 单条调用 → 一行文本（不含换行）。
  * @param {object} invocation
+ * @param {object} [settings]
  * @returns {string}
  */
-export function formatLine(invocation) {
+export function formatLine(invocation, settings) {
     const name = String(invocation?.name ?? 'tool');
     const mark = invocation?.error === true ? '✗' : '→';
     const body = summarize(rawResult(invocation));
 
-    return clip(`${PREFIX} ${name} ${mark} ${body}`);
+    return clip(`${PREFIX} ${name} ${mark} ${body}`, readLimit(settings, 'traceMaxChars'));
 }
 
 /* ------------------------------------------------------------------ 内部 */
@@ -231,7 +232,13 @@ function summarize(text) {
     }
 }
 
-function clip(text) {
+/**
+ * 截断到一行。
+ *
+ * 上限来自设置项 `traceMaxChars`（默认 200）：日志留在上下文里的目的只是
+ * "看得出这轮调了什么"，不是复述工具返回值，所以超长只留开头加省略号。
+ */
+function clip(text, max) {
     const value = String(text ?? '');
-    return value.length <= TRACE_MAX_CHARS ? value : `${value.slice(0, TRACE_MAX_CHARS - 1)}…`;
+    return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }

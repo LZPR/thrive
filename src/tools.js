@@ -26,6 +26,7 @@ import {
     setReadHash,
 } from './store.js';
 import { compactHint } from './compact.js';
+import { readLimits } from './limits.js';
 import {
     applyDescriptionLocally,
     findLoreEntry,
@@ -36,7 +37,6 @@ import {
     readDescription,
     readLore,
     saveDescription,
-    TITLE_MAX_CHARS,
     writeLoreEntry,
 } from './targets.js';
 import {
@@ -51,10 +51,6 @@ import { hintFor } from './diagnostics.js';
 import { appendParagraph, fnv1a, isBlank, normalizeEol } from './util.js';
 
 const LOG = '[Thrive]';
-const DEFAULT_SOFT_LIMIT_DESC = 1600;
-const DEFAULT_HARD_LIMIT_DESC = 2400;
-const DEFAULT_HARD_LIMIT_ENTRY = 1200;
-const DEFAULT_MAX_KEYWORDS = 8;
 const WRITE_MODES = new Set(['append', 'rewrite']);
 
 export { TOOL_NAMES };
@@ -230,7 +226,8 @@ async function handleDescRead() {
     }
 
     const settings = ensureSettings(ctx);
-    const softLimit = Number(settings.softLimitDesc) > 0 ? Number(settings.softLimitDesc) : DEFAULT_SOFT_LIMIT_DESC;
+    const limits = readLimits(settings);
+    const softLimit = limits.softLimitDesc;
     const result = readDescription(ctx, { softLimit });
 
     if (!result.ok) {
@@ -253,7 +250,7 @@ async function handleDescRead() {
     // 已经硬超限时要说实话——这张卡 append 永远会被拒，只能整段改写。
     // 具体的"该怎么压"是可配的（设置里的压缩指令），这里只负责把事实说准
     if (overLimit) {
-        const hardLimit = Number(settings.hardLimitDesc) > 0 ? Number(settings.hardLimitDesc) : DEFAULT_HARD_LIMIT_DESC;
+        const hardLimit = limits.hardLimitDesc;
         payload.hint = compactHint(settings, chars > hardLimit
             ? `描述已 ${chars} 字，超过硬上限 ${hardLimit} 字；append 会被直接拒绝，只能整段改写（mode=rewrite）。`
             : `描述已 ${chars} 字，超过软提醒 ${softLimit} 字；append 仍可写入，写到总长超过 ${hardLimit} 字才会被拒绝。`);
@@ -331,7 +328,7 @@ async function handleDescWrite(params) {
 
     const next = mode === 'rewrite' ? incoming.trim() : appendParagraph(base, incoming);
 
-    const hardLimit = Number(settings.hardLimitDesc) > 0 ? Number(settings.hardLimitDesc) : DEFAULT_HARD_LIMIT_DESC;
+    const hardLimit = readLimits(settings).hardLimitDesc;
     if (next.length > hardLimit) {
         return errorResult('TOO_LONG', compactHint(settings,
             `写入后共 ${next.length} 字，超过上限 ${hardLimit} 字。`));
@@ -462,6 +459,9 @@ async function handleLoreRead(params) {
 async function handleLoreWrite(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
+    // 三个上限（标题、正文、关键词条数）一次取齐：这一次调用里必须用同一套值，
+    // 否则中途改设置会让"标题按新值判、正文按旧值判"
+    const limits = readLimits(settings);
 
     if (!isWorldbookModuleActive(ctx)) {
         return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
@@ -473,8 +473,8 @@ async function handleLoreWrite(params) {
     if (!title) {
         return errorResult('INVALID_TITLE', '标题不能为空：它既是同书内的唯一标识，也会显示在世界书列表里。请用短的专有名词。');
     }
-    if (title.length > TITLE_MAX_CHARS) {
-        return errorResult('TITLE_TOO_LONG', `标题 ${title.length} 字，超过 ${TITLE_MAX_CHARS} 字上限。请精简成一个短的专有名词。`);
+    if (title.length > limits.titleMaxChars) {
+        return errorResult('TITLE_TOO_LONG', `标题 ${title.length} 字，超过 ${limits.titleMaxChars} 字上限。请精简成一个短的专有名词。`);
     }
 
     const loaded = await loadWritableBook(ctx, settings);
@@ -508,13 +508,13 @@ async function handleLoreWrite(params) {
         return errorResult('EMPTY_CONTENT', '正文为空。世界书条目不能写成空内容，否则等同于删除。');
     }
 
-    const hardLimit = Number(settings.hardLimitEntry) > 0 ? Number(settings.hardLimitEntry) : DEFAULT_HARD_LIMIT_ENTRY;
+    const hardLimit = limits.hardLimitEntry;
     if (content.length > hardLimit) {
         return errorResult('TOO_LONG', compactHint(settings,
             `正文 ${content.length} 字，超过单条上限 ${hardLimit} 字；世界书是整条替换、不能分段追加。`));
     }
 
-    const maxKeywords = Number(settings.maxKeywords) > 0 ? Number(settings.maxKeywords) : DEFAULT_MAX_KEYWORDS;
+    const maxKeywords = limits.maxKeywords;
     const normalized = normalizeKeys(params?.keys);
     const keys = normalized.keys.length > 0 ? normalized.keys.slice(0, maxKeywords) : null;
     const droppedKeys = Math.max(0, normalized.keys.length - maxKeywords);

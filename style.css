@@ -167,6 +167,44 @@
     opacity: 1;
 }
 
+/* ------------------------------------------------------------ 折叠分组 */
+
+/*
+ * 每个分组就是一个 ST 原生的 .inline-drawer：SCRIPT.JS 里那条 document 委托
+ * 用 closest('.inline-drawer') 找外壳，所以嵌套写法天然可用，图标与内容各自独立。
+ * 默认收起是 ST 的 .inline-drawer-content { display: none }，这里不用自己实现。
+ */
+.thrive-settings .thrive-group {
+    margin-bottom: 8px;
+    padding: 0 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+}
+
+.thrive-settings .thrive-group > .inline-drawer-header {
+    padding: 6px 0;
+}
+
+.thrive-settings .thrive-group > .inline-drawer-content {
+    padding-bottom: 8px;
+}
+
+.thrive-settings .thrive-group__title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+/* 收起时也能看出这组管什么；窄屏放不下就省略，不换行撑高标题栏 */
+.thrive-settings .thrive-group__hint {
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    opacity: 0.5;
+}
+
 /* ------------------------------------------------------------ 环境诊断 */
 
 /*
@@ -252,6 +290,28 @@
     display: block;
     margin-bottom: 4px;
     opacity: 0.85;
+}
+
+/* 「数值与上限」里的小组标题：比字段标题轻一级，起分段作用 */
+.thrive-settings .thrive-limit-title {
+    display: block;
+    margin: 8px 0 4px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.5;
+}
+
+/*
+ * 数值输入框：靠右、定宽。
+ * 不定宽的话 .thrive-row 的 space-between 会把它拉到和文字一样长，
+ * 一个"800"占满半行，看起来像文本域。
+ */
+.thrive-settings .thrive-number {
+    flex: 0 0 auto;
+    width: 110px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
 .thrive-settings .thrive-block-text {

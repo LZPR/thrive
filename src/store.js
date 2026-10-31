@@ -10,6 +10,7 @@
  */
 
 import { notifyPanel } from './events.js';
+import { LIMIT_DEFAULTS, readLimit } from './limits.js';
 
 export const MODULE_NAME = 'thrive';
 
@@ -53,16 +54,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
     readScope: 'writable',
     /** 新建条目的插入位置：0 角色定义前 / 1 角色定义后 / 2 作者注释顶 / 3 作者注释底 */
     entryPosition: 0,
-    /** 单条目关键词上限，超出截断（不是拒绝） */
-    maxKeywords: 8,
-    /** 条目软提醒阈值（字） */
-    softLimitEntry: 800,
-    /** 条目硬上限（字），写入后整条正文超过直接拒绝 */
-    hardLimitEntry: 1200,
-    /** 描述软提醒阈值（字），超过时 desc_read 返回 over_limit */
-    softLimitDesc: 1600,
-    /** 描述 append 硬上限（字），写入后总长超过直接拒绝 */
-    hardLimitDesc: 2400,
+    /**
+     * 所有"写多少 / 读多少"的数值上限。默认值与取值范围由 limits.js 定义，
+     * 设置页「数值与上限」直接对着它渲染；这里铺开是为了让 ensureSettings
+     * 的类型补全也覆盖到它们（老用户没有这些键，缺一个就会被当成 0）。
+     */
+    ...LIMIT_DEFAULTS,
     /**
      * 超过软/硬上限时追加的压缩指令。
      * 空串 = 使用 compact.js 里的 DEFAULT_COMPACT_PROMPT（理由同 blockText）。
@@ -107,8 +104,13 @@ function isPatchState(patch) {
 /**
  * 世界书快照 / 写入记录保留条数。
  * 一份快照同时充当"已写入"列表里的一行，所以这个数字既是备份槽位数，也是面板条数。
+ *
+ * 具体条数由设置项 `loreBackupLimit` 决定（limits.js 里默认 10）；
+ * 这里只在读状态与写入时取一次，不缓存——用户改完设置下一笔写入就生效。
  */
-export const LORE_BACKUP_LIMIT = 10;
+function loreBackupLimit(settings) {
+    return readLimit(settings, 'loreBackupLimit');
+}
 
 /**
  * 规范一条世界书快照。
@@ -298,7 +300,7 @@ export function getState(ctx) {
         state.backups.lore = state.backups.lore
             .map(normalizeLoreBackup)
             .filter(Boolean)
-            .slice(0, LORE_BACKUP_LIMIT);
+            .slice(0, loreBackupLimit(settings));
     }
     if (!Array.isArray(state.backups.desc)) {
         state.backups.desc = [];
@@ -537,6 +539,7 @@ export function rememberDescBackup(ctx, before) {
  */
 export function rememberLoreBackup(ctx, snapshot = {}) {
     const list = getState(ctx).backups.lore;
+    const limit = loreBackupLimit(ensureSettings(ctx));
 
     const record = normalizeLoreBackup({
         id: createBackupId(),
@@ -552,8 +555,8 @@ export function rememberLoreBackup(ctx, snapshot = {}) {
     list.unshift(record);
 
     // 超出上限丢最旧的。unshift 之后尾部就是最旧的
-    if (list.length > LORE_BACKUP_LIMIT) {
-        list.length = LORE_BACKUP_LIMIT;
+    if (list.length > limit) {
+        list.length = limit;
     }
 
     // 写入发生在生成过程中，面板不会自己知道有新记录

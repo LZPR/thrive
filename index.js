@@ -1,7 +1,7 @@
 /**
  * Thrive · 学习模式 —— 入口
  *
- * 当前进度（Step 13）：
+ * 当前进度（Step 15）：
  *   1. 扩展能被 ST 加载
  *   2. 对话级开关（chat_metadata.thrive.enabled）+ 输入框旁的双段状态徽章（带待确认计数）
  *   3. 开启时注入学习块，关闭时彻底清空
@@ -11,6 +11,8 @@
  *   7. 环境诊断（设置页顶部 + 徽章置灰）+ `/thrive on|off|passive|once|status|panel`
  *   8. 被动学习：条数 / 关键词任一命中就"借"一轮，回复完自动关闭（src/passive.js）
  *   9. 超长时的压缩指令可配（src/compact.js）
+ *  10. 字数上限 / 返回条数 / 记录槽位 / 日志长度等数值全部可配（src/limits.js）
+ *  11. 设置项按用途分成六组折叠，默认全收起（settings.html + style.css）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -56,7 +58,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 step 13 · 压缩指令可配`);
+    console.log(`${LOG} 启动 step 15 · 设置项分组折叠`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -353,7 +355,8 @@ function bindEvents() {
     if (types.TOOL_CALLS_PERFORMED) {
         events.on(types.TOOL_CALLS_PERFORMED, invocations => {
             try {
-                if (!compressToolTrace(context(), invocations)) {
+                const next = context();
+                if (!compressToolTrace(next, invocations, ensureSettings(next))) {
                     return;
                 }
                 console.debug(`${LOG} 工具日志已压缩`, invocations.map(item => item?.name));

@@ -8,6 +8,7 @@
  */
 
 import { compactHint } from './compact.js';
+import { LIMIT_SPECS, readLimits } from './limits.js';
 import { normalizeEol } from './util.js';
 
 /**
@@ -48,7 +49,9 @@ export function readDescription(ctx, options = {}) {
         ? character.description
         : String(character.description ?? ''));
     const chars = text.length;
-    const softLimit = Number.isFinite(options.softLimit) && options.softLimit > 0 ? options.softLimit : 1600;
+    const softLimit = Number.isFinite(options.softLimit) && options.softLimit > 0
+        ? options.softLimit
+        : LIMIT_SPECS.softLimitDesc.default;
 
     return {
         ok: true,
@@ -225,12 +228,10 @@ export function refreshDescriptionEditor(character, text) {
 
 /* ------------------------------------------------------------------ 世界书 */
 
-/** desc_read 返回上限 / 总览上限（数值以本文件为准，spec 不再列总表） */
-const MAX_QUERY_ENTRIES = 8;
-const MAX_CONTENT_CHARS = 300;
-const MAX_TITLES = 20;
-const SOFT_ENTRY_COUNT = 200;
-const DEFAULT_SOFT_LIMIT_ENTRY = 800;
+/*
+ * 读取侧的数值上限（返回几条、每条给多少字、总览列几个标题、多少条开始提醒合并）
+ * 都在 limits.js 里定义，设置页可调；这里只负责按传进来的那套值裁剪。
+ */
 
 /** 可写世界书名；空串表示未就绪 */
 export function getWritableBook(settings) {
@@ -385,15 +386,13 @@ export async function readLore(ctx, settings, params = {}) {
     items.sort((a, b) => (books.indexOf(a.book) - books.indexOf(b.book)) || (uidOf(a.entry) - uidOf(b.entry)));
 
     const query = String(params?.query ?? '').trim();
+    const limits = readLimits(settings);
 
     if (query) {
-        const softLimit = Number(settings?.softLimitEntry) > 0
-            ? Number(settings.softLimitEntry)
-            : DEFAULT_SOFT_LIMIT_ENTRY;
-        return buildSearchResult(items, query, writable, scopeBound, softLimit, settings);
+        return buildSearchResult(items, query, writable, scopeBound, limits, settings);
     }
 
-    return buildOverviewResult(items, writable);
+    return buildOverviewResult(items, writable, limits);
 }
 
 /**
@@ -402,22 +401,23 @@ export async function readLore(ctx, settings, params = {}) {
  * `over_limit` 只看返回正文的长度，不拦截任何写入——条目是整条替换，
  * 长正文照样能写，只是提醒模型"这条该压缩了"，否则世界书会越写越肿。
  */
-function buildSearchResult(items, query, writable, scopeBound, softLimit, settings) {
+function buildSearchResult(items, query, writable, scopeBound, limits, settings) {
     const needle = query.toLowerCase();
     const matched = items.filter(({ entry }) => matchesNeedle(entry, needle));
-    const picked = matched.slice(0, MAX_QUERY_ENTRIES);
+    const picked = matched.slice(0, limits.maxQueryEntries);
 
+    const softLimit = limits.softLimitEntry;
     let overLimit = 0;
 
     const entries = picked.map(({ book, entry }) => {
         const full = String(entry.content ?? '');
-        const truncatedContent = full.length > MAX_CONTENT_CHARS;
+        const truncatedContent = full.length > limits.maxContentChars;
         const item = {
             title: entryTitle(entry),
             keys: Array.isArray(entry.key) ? entry.key.map(String) : [],
             chars: full.length,
             // 截断留个省略号，模型才看得出这不是全文
-            content: truncatedContent ? `${full.slice(0, MAX_CONTENT_CHARS)}…` : full,
+            content: truncatedContent ? `${full.slice(0, limits.maxContentChars)}…` : full,
         };
         if (full.length >= softLimit) {
             item.over_limit = true;
@@ -448,7 +448,7 @@ function buildSearchResult(items, query, writable, scopeBound, softLimit, settin
             `有 ${overLimit} 条正文超过 ${softLimit} 字；世界书条目是整条替换，没有追加。`);
     }
 
-    const note = overCountNote(items.length);
+    const note = overCountNote(items.length, limits.softEntryCount);
     if (note) {
         payload.note = note;
     }
@@ -463,11 +463,11 @@ function buildSearchResult(items, query, writable, scopeBound, softLimit, settin
     return { ok: true, payload, registrations };
 }
 
-function buildOverviewResult(items, writable) {
-    const titles = items.slice(0, MAX_TITLES).map(({ entry }) => entryTitle(entry));
+function buildOverviewResult(items, writable, limits) {
+    const titles = items.slice(0, limits.maxTitles).map(({ entry }) => entryTitle(entry));
     const notes = ['需要正文请带 query 查询。'];
 
-    const overCount = overCountNote(items.length);
+    const overCount = overCountNote(items.length, limits.softEntryCount);
     if (overCount) {
         notes.push(overCount);
     }
@@ -478,7 +478,7 @@ function buildOverviewResult(items, writable) {
             ok: true,
             book: writable,
             count: items.length,
-            truncated: items.length > MAX_TITLES,
+            truncated: items.length > limits.maxTitles,
             titles,
             note: notes.join(' '),
         },
@@ -491,10 +491,10 @@ function noBook(hint) {
     return { ok: false, error: 'NO_BOOK', hint };
 }
 
-function overCountNote(total) {
+function overCountNote(total, softEntryCount) {
     // 只提示"可以合并"——这是模型自己对书该做的动作。
     // "请用户清理过时内容"那种话是在替模型组织台词，不写。
-    return total > SOFT_ENTRY_COUNT ? `条目已经有 ${total} 条，考虑合并重复条目。` : '';
+    return total > softEntryCount ? `条目已经有 ${total} 条，考虑合并重复条目。` : '';
 }
 
 function uidOf(entry) {
@@ -534,8 +534,10 @@ function matchesNeedle(entry, needle) {
 /** `logic` 参数 → `selectiveLogic` */
 const SELECTIVE_LOGIC = Object.freeze({ any: 0, not_all: 1, not_any: 2, all: 3 });
 
-/** 标题上限：comment 会显示在世界书列表里，太长就没法一眼扫过去 */
-export const TITLE_MAX_CHARS = 60;
+/*
+ * 标题上限（默认 60 字）也走 limits.js 的 `titleMaxChars`：comment 会显示在
+ * 世界书列表里，太长就没法一眼扫过去，但"多长算太长"由用户自己定。
+ */
 
 /**
  * 取可写书的数据。
