@@ -26,6 +26,15 @@ const PANEL_MAX_HEIGHT = 900;
 const PANEL_MIN_OPACITY = 0.3;
 /** 拖动时面板与视口边缘留的空隙：全贴边会让边框看不清，也不好再抓起来 */
 const PANEL_MARGIN = 8;
+/**
+ * 没拖过时面板底边离视口底部的距离。
+ *
+ * 这是**兜底值**：正常会去量发送区（`#send_form`）的实际高度。写死 88 是照着桌面端
+ * 定的，竖屏手机上发送区会高出一大截，照着 88 摆就会压在输入框上面。
+ */
+const DEFAULT_BOTTOM_GAP = 88;
+/** 面板再怎么挤也要留下这么高（标题栏 + 一行内容），否则连「收起」都点不到 */
+const PANEL_MIN_VISIBLE = 160;
 
 /* -------------------------------------------------------------- 面板布局 */
 
@@ -65,10 +74,54 @@ function readPanelLayout(settings) {
 }
 
 /**
+ * 视口尺寸。用 innerWidth/innerHeight 而不是 visualViewport：
+ * 面板是 absolute 定位在初始包含块里的，坐标口径必须和它一致（见下面 pinPanel 的说明）。
+ */
+function viewportSize() {
+    return {
+        width: Number(window.innerWidth) || 0,
+        height: Number(window.innerHeight) || 0,
+    };
+}
+
+/**
+ * 发送区（输入框那一排）在视口里占掉多少高度。
+ *
+ * 面板默认贴在右下角，让出的空隙是照着"桌面端发送区大约这么高"估的。竖屏手机上
+ * 输入框会折行、按钮会换行，发送区高出一大截，按估的值摆就会和它叠在一起。
+ * 所以能量就量：拿发送区顶边算实际要让出多少。
+ *
+ * 三个回落条件，都是为了别量出一个荒谬的值把面板压成一条缝：
+ *   - 找不到发送区（没有对话、ST 还没画完）
+ *   - 顶边在视口外或贴在最上面（被滚走了 / 拿到了别的容器）
+ *   - 占掉超过视口 40%（正常发送区不可能这么高，多半是量错了对象）
+ *
+ * @param {number} vh 视口高度
+ */
+function bottomGap(vh) {
+    const form = document.getElementById('send_form');
+    const rect = form?.getBoundingClientRect?.();
+
+    if (rect && rect.height > 0 && rect.top > vh * 0.2 && rect.top < vh) {
+        const gap = Math.round(vh - rect.top + PANEL_MARGIN);
+        if (gap < vh * 0.4) {
+            return gap;
+        }
+    }
+
+    return DEFAULT_BOTTOM_GAP;
+}
+
+/**
  * 把当前设置铺到面板上。
  *
  * 面板只有"开着 / 关着"两种状态，关着时整块 display:none，所以宽度与最大高度
  * 不需要分情况处理——收起态不再存在（那条横杠的职责已经交给徽章）。
+ *
+ * 三条约束按顺序成立，任何一条被违反都会表现为"面板错位叠在别的东西上"：
+ *   1. 宽度不超过视口（竖屏手机 92vw 也可能顶出边框）
+ *   2. 没拖过时底边让开发送区（`bottomGap`），高度上限再扣掉这块，于是顶边不会跑到屏幕外
+ *   3. 拖过时坐标夹回视口，高度上限按"顶边到视口底部还剩多少"重算
  *
  * @param {HTMLElement} [panel]
  */
@@ -79,22 +132,28 @@ export function applyPanelLayout(panel = document.getElementById(PANEL_ID)) {
     }
 
     const layout = readPanelLayout(ensureSettings(getContext()));
+    const view = viewportSize();
 
     panel.style.opacity = String(layout.opacity);
-    // 再叠一个 vw/vh 上限：窗口窄于设置值时不该顶出屏幕
-    panel.style.width = `min(${layout.width}px, 92vw)`;
-    panel.style.maxHeight = `min(${layout.height}px, calc(100vh - 24px))`;
+
+    // 宽度写成具体像素而不是 `min(…, 92vw)`：夹取要和下面的坐标夹取用同一口径，
+    // 交给 CSS 算的话，这里就拿不到"面板实际多宽"，右边距会算错
+    const width = Math.round(Math.max(160, Math.min(layout.width, view.width - PANEL_MARGIN * 2)));
+    panel.style.width = `${width}px`;
 
     if (layout.pinned) {
-        pinPanel(panel, layout.x, layout.y);
+        pinPanel(panel, layout, view, width);
         return;
     }
 
-    // 没拖过：交回 CSS 的右下角，顺手清掉之前拖出来的行内位置
-    panel.style.left = '';
-    panel.style.top = '';
-    panel.style.right = '';
-    panel.style.bottom = '';
+    // 没拖过：贴着右下角，往上让出发送区
+    const gap = bottomGap(view.height);
+    const available = Math.max(PANEL_MIN_VISIBLE, view.height - gap - PANEL_MARGIN);
+    panel.style.maxHeight = `${Math.round(Math.min(layout.height, available))}px`;
+    panel.style.left = 'auto';
+    panel.style.top = 'auto';
+    panel.style.right = `${PANEL_MARGIN * 2}px`;
+    panel.style.bottom = `${gap}px`;
 }
 
 /**
@@ -104,22 +163,60 @@ export function applyPanelLayout(panel = document.getElementById(PANEL_ID)) {
  * getBoundingClientRect() 给的是视口坐标，两者差一个滚动量——ST 页面不滚动，
  * 但这里仍然换算，免得哪天外面套了一层可滚动的容器就整块跑偏。
  *
+ * 高度上限按顶边重算：存下来的坐标可能是横屏时拖的，转到竖屏后底边已经贴到
+ * 视口底部，那时剩下的地方只够这么高。先夹坐标、再按新坐标算高度，两件事必须同序，
+ * 否则会出现"坐标夹进来了、高度还是旧的大值"，面板下半截挂到屏幕外。
+ *
  * @param {HTMLElement} panel
- * @param {number} left 文档坐标
- * @param {number} top 文档坐标
+ * @param {ReturnType<typeof readPanelLayout>} layout
+ * @param {{ width: number, height: number }} view
+ * @param {number} width 已夹过的面板宽度
  */
-function pinPanel(panel, left, top) {
-    const rect = panel.getBoundingClientRect();
-    const maxLeft = Math.max(PANEL_MARGIN, window.innerWidth - rect.width - PANEL_MARGIN);
-    const maxTop = Math.max(PANEL_MARGIN, window.innerHeight - rect.height - PANEL_MARGIN);
+function pinPanel(panel, layout, view, width) {
+    const maxLeft = Math.max(PANEL_MARGIN, view.width - width - PANEL_MARGIN);
+    // 顶边最多摆到"只剩标题栏可见"，再往下就只能看到一条上边框
+    const maxTop = Math.max(PANEL_MARGIN, view.height - PANEL_MIN_VISIBLE - PANEL_MARGIN);
 
-    const viewX = clampNumber(left - window.scrollX, PANEL_MARGIN, maxLeft, PANEL_MARGIN);
-    const viewY = clampNumber(top - window.scrollY, PANEL_MARGIN, maxTop, PANEL_MARGIN);
+    const viewX = clampNumber(layout.x - window.scrollX, PANEL_MARGIN, maxLeft, PANEL_MARGIN);
+    const viewY = clampNumber(layout.y - window.scrollY, PANEL_MARGIN, maxTop, PANEL_MARGIN);
 
+    const available = Math.max(PANEL_MIN_VISIBLE, view.height - viewY - PANEL_MARGIN);
+    panel.style.maxHeight = `${Math.round(Math.min(layout.height, available))}px`;
     panel.style.left = `${Math.round(viewX + window.scrollX)}px`;
     panel.style.top = `${Math.round(viewY + window.scrollY)}px`;
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
+}
+
+/**
+ * 视口一变就重摆一次。
+ *
+ * 要接三种事件，它们各自解决一种"错位"：
+ *   - resize：窗口缩小 / 移动端地址栏收起，会连发好几次，合并成一次
+ *   - orientationchange：横竖屏切换。事件触发时 innerHeight 往往还是旧值，得等一拍
+ *   - visualViewport.resize：软键盘弹出/收起只改可视区，不改 layout viewport，
+ *     这条不接的话，竖屏下键盘一弹面板就被压在键盘底下
+ *
+ * 只改行内样式、不回写设置：转回横屏时还要回到用户拖的那个位置。
+ */
+export function bindPanelRelayout() {
+    const relayout = () => {
+        const panel = document.getElementById(PANEL_ID);
+        if (!panel || panel.classList.contains('displayNone')) {
+            return;
+        }
+        applyPanelLayout(panel);
+    };
+
+    let timer = 0;
+    const schedule = delay => {
+        clearTimeout(timer);
+        timer = setTimeout(relayout, delay);
+    };
+
+    window.addEventListener('resize', () => schedule(60));
+    window.addEventListener('orientationchange', () => schedule(150));
+    window.visualViewport?.addEventListener('resize', () => schedule(60));
 }
 
 /**

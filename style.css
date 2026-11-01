@@ -358,6 +358,12 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /*
+     * 宽度与最大高度都写成行内像素（见 panel-layout.js）。要 border-box 才能让
+     * "设置里写的 480px" 就是眼睛看到的宽度——否则内边距与边框会额外加 26px，
+     * 窄屏下按视口夹取的那一步就会算得刚好越界。
+     */
+    box-sizing: border-box;
     width: min(480px, 92vw);
     max-height: min(70vh, 620px);
     padding: 8px 12px;
@@ -586,6 +592,52 @@ body.thrive-panel-dragging {
     white-space: nowrap;
 }
 
+/* ------------------------------------------------------ 面板里的折叠分区 */
+
+/*
+ * 分区的标题行本身就是折头。用 div + role="button" 而不是 <button>：
+ * 原生按钮会带上 ST 的边框与内边距，把"分区标题"压成另一个东西。
+ * 代价是无障碍要自己补（panel.js 的 onPanelKeydown）。
+ */
+.thrive-panel__fold {
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.thrive-panel__fold:hover {
+    background-color: rgb(128 128 128 / 10%);
+}
+
+.thrive-panel__fold:focus-visible {
+    outline: 1px solid var(--SmartThemeQuoteColor);
+    outline-offset: 1px;
+}
+
+/*
+ * 箭头用字符转 90° 表示展开：收起 → 展开、展开 → 收起都不需要换图标，
+ * 重绘时也不会因为换了字形而让标题文字跳一下。
+ */
+.thrive-panel__fold-icon {
+    margin-right: 5px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.62);
+    opacity: 0.55;
+    transition: transform 0.15s ease;
+}
+
+.thrive-panel__fold.is-open .thrive-panel__fold-icon {
+    transform: rotate(90deg);
+}
+
+/* 收起时那一行不带分隔线，展开后的列表才需要东西把它和上面的分区切开 */
+.thrive-panel__section--fold .thrive-history {
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    padding-top: 4px;
+}
+
 .thrive-panel__notice {
     font-size: calc(var(--mainFontSize, 15px) * 0.8);
     opacity: 0.75;
@@ -663,10 +715,18 @@ body.thrive-panel-dragging {
     gap: 6px;
 }
 
+/*
+ * 说明独占一行，按钮另起一行靠右。
+ *
+ * 以前是"说明 flex:1 + 按钮跟在后面"，窄屏上会变成"说明折成三行、按钮再折两行"，
+ * 两段文字挤在一起分不清谁在说哪个按钮。整行铺开之后，"这段话是在解释下面这几个
+ * 动作"这层关系不用猜。
+ */
 .thrive-panel__actions .thrive-hint {
-    flex: 1 1 auto;
+    flex: 1 1 100%;
     margin: 0;
     font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    line-height: 1.4;
     opacity: 0.5;
 }
 
@@ -679,6 +739,18 @@ body.thrive-panel-dragging {
 .thrive-panel__button--danger {
     border-color: var(--SmartThemeQuoteColor);
     color: var(--SmartThemeQuoteColor);
+}
+
+/*
+ * 次要动作（丢弃改动 / 移除记录）：压暗一档，别和"真的会覆盖内容"的按钮
+ * 抢同一份注意力。仍然可点——它是"我不打算动内容"的出口，藏起来反而让人找不到。
+ */
+.thrive-panel__button--ghost {
+    opacity: 0.72;
+}
+
+.thrive-panel__button--ghost:hover {
+    opacity: 1;
 }
 
 /* ------------------------------------------------------------ 已写入列表 */

@@ -156,7 +156,7 @@ export function applyDescriptionLocally(character, text, previousText = null) {
 /**
  * 把已写入的描述直接推进编辑框，不管框里现在是什么。
  *
- * 只有用户主动点面板上的「刷新编辑框」才会走到这里 —— 那是"我知道会覆盖我刚才敲的字"
+ * 只有用户主动点面板上的「填入编辑框」才会走到这里 —— 那是"我知道会覆盖我刚才敲的字"
  * 的显式同意。写入路径自己不用它：那边碰到用户改过的框一律不动（见 applyDescriptionLocally）。
  *
  * @param {object|null} character

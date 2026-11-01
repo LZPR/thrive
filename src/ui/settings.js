@@ -403,7 +403,7 @@ function bindPatchControls() {
         // 只把开关拨回去——丢弃必须发生在面板里，用户得亲眼看一遍 diff
         if (!enabled && isUnresolved(getPatch(ctx))) {
             this.checked = true;
-            toast('还有一份待处理的描述改动：请先在浮动面板里接受或拒绝');
+            toast('还有一份待处理的描述改动：请先在浮动面板里写入或丢弃');
             setPanelOpen(true, ctx);
             document.getElementById(PANEL_ID)?.scrollIntoView({ block: 'nearest' });
             return;
@@ -470,8 +470,8 @@ export function updatePatchHint(ctx, settings) {
     }
 
     el.textContent = pending
-        ? '当前有一份待处理的改动，在浮动面板的「待确认」里接受或拒绝。'
-        : '模型的描述改动会先暂存成一份 diff，你接受后才写入角色卡；暂存期间模型读到的是暂存版。';
+        ? '当前有一份待处理的改动，在浮动面板的「待确认」里写入或丢弃。'
+        : '模型的描述改动会先暂存成一份 diff，你点「写入角色卡」才落盘；暂存期间模型读到的是暂存版。';
     el.classList.toggle('thrive-hint--warn', pending);
 }
 

@@ -3,7 +3,7 @@
  *
  * 三件事：
  *   - 重绘：refreshPanel 现算状态，签名没变就不碰 DOM
- *   - 交互：接受 / 拒绝 / 恢复 / 重写，以及第一段那两个模式开关
+ *   - 交互：写入 / 丢弃 / 恢复 / 重写，以及第一段那两个模式开关
  *   - 入口：initPanel 挂载，openPanel 给 `/thrive panel` 用
  *
  * 位置、尺寸、拖动这些几何细节在 ui/panel-layout.js；面板开没开的状态在 ui/shared.js
@@ -45,7 +45,7 @@ import {
 import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '../targets.js';
 import { escapeHtml, normalizeEol } from '../util.js';
 import { syncBadgeOpenState } from './badge.js';
-import { applyPanelLayout, bindDrag } from './panel-layout.js';
+import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
 import { updatePatchHint } from './settings.js';
 import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
@@ -56,6 +56,14 @@ let patchBusy = false;
 let panelSignature = null;
 /** 已经被"强制打开"过的那份 patch。只在它第一次出现时打开，之后用户关掉就是关掉 */
 let forcedPatchId = null;
+/**
+ * 「已写入」展开着没有。
+ *
+ * 默认收起：这一段是流水账，内容会随着写入累积到十条，展开着会把模式开关挤到
+ * 需要滚动才能看见的位置。状态放模块级而不是设置里——它只影响"这一次打开面板",
+ * 刷新页面回到收起是合理的默认值，不值得为它多存一个键、多一次落盘。
+ */
+let historyExpanded = false;
 
 /**
  * 挂载浮动面板。重复调用安全。
@@ -80,20 +88,14 @@ export function initPanel() {
 
     // 事件挂在外壳上：内容每次整块重绘，挂在里面会跟着一起没
     panel.addEventListener('click', onPanelClick);
+    // 折头是 div + role=button（按钮样式会把标题压成另一套观感），键盘要自己补
+    panel.addEventListener('keydown', onPanelKeydown);
     document.addEventListener(PANEL_EVENT, () => refreshPanel());
     // 徽章点击只是发了个事件，开合由这里接（badge.js 不认识面板）
     document.addEventListener(PANEL_TOGGLE_EVENT, () => setPanelOpen(!isPanelOpen(), getContext()));
 
     bindDrag();
-
-    // 窗口变小后原来拖到右下角的面板可能整个跑到屏幕外，重新摆一次
-    window.addEventListener('resize', () => {
-        const current = document.getElementById(PANEL_ID);
-        if (!current || current.classList.contains('displayNone')) {
-            return;
-        }
-        applyPanelLayout(current);
-    });
+    bindPanelRelayout();
 }
 
 /**
@@ -118,7 +120,7 @@ export function refreshPanel(ctx = getContext()) {
      * "已写入"但角色卡上的描述已经不是那份内容了 —— 实测最常见的原因是：
      * 角色编辑面板里还停着写入前的文本，用户点了一下保存，旧文本把新内容盖了回去。
      * 这时候面板如果继续说"已写入"，就会出现"面板说写了、编辑器里什么都没有"。
-     * 所以单独算一个状态：内容还在聊天记录里（patch.after），给一个「重新写入」的出口。
+     * 所以单独算一个状态：内容还在聊天记录里（patch.after），给一个「重写角色卡」的出口。
      */
     const drift = Boolean(patch)
         && patch.status === PATCH_STATUS.APPLIED
@@ -128,7 +130,7 @@ export function refreshPanel(ctx = getContext()) {
     /*
      * 另一种"已写入但对不上"：盘上是对的，编辑框里还停着别的文本。
      * 用户改过、或者写入那一刻正在框里打字，同步就会被跳过（不能盖掉正在敲的字）。
-     * 这时给一个「刷新编辑框」的出口，省得为了让它显示新内容还得先关掉面板。
+     * 这时给一个「填入编辑框」的出口，省得为了让它显示新内容还得先关掉面板。
      */
     const editorStale = Boolean(patch)
         && patch.status === PATCH_STATUS.APPLIED
@@ -165,6 +167,7 @@ export function refreshPanel(ctx = getContext()) {
     /*
      * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
      * 模式状态也在里面——面板里就摆着两个开关，它们变了必须重画。
+     * 「已写入」的展开状态同理：它只改这段的 DOM，不重画就没有反馈。
      */
     const signature = JSON.stringify([
         mode.active,
@@ -180,6 +183,7 @@ export function refreshPanel(ctx = getContext()) {
         descBackup ? descBackup.at : null,
         drift,
         editorStale,
+        historyExpanded,
     ]);
     if (signature === panelSignature) {
         return;
@@ -376,7 +380,7 @@ function renderPanel({ mode, patch, backups, descBackup, drift = false, editorSt
     const body = [
         renderModeSection(mode),
         renderPatchSection(patch, drift, editorStale),
-        renderHistorySection(backups, descBackup),
+        renderHistorySection(backups, descBackup, historyExpanded),
     ].filter(Boolean).join('');
 
     return `${bar}<div class="thrive-panel__body">${body}</div>`;
@@ -499,26 +503,20 @@ function renderPatchSection(patch, drift = false, editorStale = false) {
     const notice = applied
         ? drift
             ? '角色卡上的描述已经和这次写入不一致了：可能是你在编辑器里自己改过，'
-                + '也可能是编辑面板还停着旧文本、一次保存把它盖了回去。'
-                + '这份内容只留在记录里，需要的话点「重新写入」再落一次盘（当前这版会先进上一版快照）。'
+                + '也可能是编辑面板还停着旧文本、一次保存把它盖了回去。这份内容只留在记录里，'
+                + '要重新落盘得点「重写角色卡」。'
             : editorStale
-                ? '角色卡上已经是这份内容了，但编辑面板的文本框里还是别的文字'
+                ? '角色卡上已经是这份内容了，但角色编辑框里还是别的文字'
                     + '（你改过，或者写入时正在框里输入）。直接保存会把这次写入盖回去；'
-                    + '点「刷新编辑框」就能把它换成这份内容，不用关面板。'
+                    + '点「填入编辑框」把这份内容放进框里，不用关面板。'
                 : `已写入${name ? `「${name}」的` : ''}角色卡${when}，下一轮请求开始生效。`
         : conflict
-            ? '磁盘上的描述在暂存之后被改动过。这里不做自动合并：要么整份覆盖，要么拒绝。'
-            : '还没写入角色卡。接受后从下一轮请求开始生效。';
+            ? '磁盘上的描述在暂存之后被改动过。这里不做自动合并：要么整份覆盖，要么丢弃。'
+            : '还没写入角色卡。点「写入角色卡」后从下一轮请求开始生效。';
 
     const body = applied ? '' : renderDiff(buildDiffRows(patch.before, patch.after));
     const actions = applied ? renderAppliedActions(drift, editorStale) : renderPendingActions(conflict);
-    const hint = applied
-        ? (drift
-            ? '重写只动角色描述；当前这一版会先进「上一版」快照。'
-            : editorStale
-                ? '刷新编辑框会用这次写入的内容覆盖框里的文字。'
-                : '这条记录只是留痕：关掉它不会改回任何内容。')
-        : '面板只读：只能整份接受或拒绝，不能在这里改文本。';
+    const hint = applied ? appliedHint(drift, editorStale) : '面板只读：只能整份写入或丢弃，不能在这里改文本。';
 
     const noticeClass = conflict || drift || editorStale
         ? 'thrive-panel__notice thrive-panel__notice--warn'
@@ -542,26 +540,48 @@ function renderPatchSection(patch, drift = false, editorStale = false) {
 /**
  * 已写入分区：世界书写入记录 + 描述上一版。
  *
+ * 默认收起。这一段是流水账（最多十条），展开着会把模式开关挤下去；收起后只留一行
+ * 折头，上面写着有几条、最近一次是什么时候——"有没有东西可恢复"一眼能看出来，
+ * 要点开才占地方。
+ *
  * 记录只读，唯一的动作是恢复——世界书没有 patch，写错了只能靠这条退路。
+ *
  * @param {Array<object>} backups
  * @param {{ before: string, at: number }|null} descBackup
+ * @param {boolean} expanded
  */
-function renderHistorySection(backups, descBackup) {
+function renderHistorySection(backups, descBackup, expanded) {
     if (backups.length === 0 && !descBackup) {
         return '';
     }
 
-    const rows = backups.map(renderHistoryRow).join('');
-    const desc = renderDescBackupRow(descBackup);
-    const meta = backups.length > 0 ? `最近 ${backups.length} 次` : '';
+    const latest = Math.max(
+        0,
+        ...backups.map(item => Number(item.at) || 0),
+        Number(descBackup?.at) || 0,
+    );
+    const meta = [
+        backups.length > 0 ? `${backups.length} 条` : '',
+        descBackup ? '含描述上一版' : '',
+        latest > 0 ? `最近 ${formatTime(latest)}` : '',
+    ].filter(Boolean).join(' · ');
+
+    const rows = expanded
+        ? `<div class="thrive-history">${backups.map(renderHistoryRow).join('')}${renderDescBackupRow(descBackup)}</div>`
+        : '';
 
     return `
-        <section class="thrive-panel__section">
-            <div class="thrive-panel__head">
-                <span class="thrive-panel__section-title">已写入</span>
+        <section class="thrive-panel__section thrive-panel__section--fold">
+            <div class="thrive-panel__head thrive-panel__fold${expanded ? ' is-open' : ''}"
+                role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}"
+                data-thrive-action="toggle-history"
+                title="展开 / 收起写入记录（每条都带恢复入口）">
+                <span class="thrive-panel__section-title">
+                    <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>已写入
+                </span>
                 <span class="thrive-panel__meta">${escapeHtml(meta)}</span>
             </div>
-            <div class="thrive-history">${rows}${desc}</div>
+            ${rows}
         </section>`;
 }
 
@@ -630,23 +650,71 @@ function renderDiff(rows) {
     return `<div class="thrive-diff">${html.join('')}</div>`;
 }
 
+/**
+ * 待确认 / 冲突状态下的两个动作。
+ *
+ * 文案不用「接受 / 拒绝」：那是相对于"这份改动"说的，用户得先想明白谁在接受谁。
+ * 直接写动作落在哪儿——写进角色卡，还是丢掉。
+ */
 function renderPendingActions(conflict) {
     const primary = conflict
-        ? '<div class="menu_button thrive-panel__button thrive-panel__button--danger" data-thrive-action="force">强制覆盖</div>'
-        : '<div class="menu_button thrive-panel__button" data-thrive-action="accept">接受</div>';
+        ? '<div class="menu_button thrive-panel__button thrive-panel__button--danger" data-thrive-action="force"'
+            + ' title="不用管卡上被改过的地方，直接用这份内容盖掉">强制覆盖</div>'
+        : '<div class="menu_button thrive-panel__button" data-thrive-action="accept"'
+            + ' title="把这份描述写进角色卡，从下一轮请求开始生效">写入角色卡</div>';
 
-    return `${primary}<div class="menu_button thrive-panel__button" data-thrive-action="discard">拒绝</div>`;
+    return `${primary}<div class="menu_button thrive-panel__button thrive-panel__button--ghost"`
+        + ' data-thrive-action="discard" title="丢掉这份暂存，角色卡上的描述保持原样">丢弃改动</div>';
 }
 
+/**
+ * 已写入状态下的动作。
+ *
+ * 三个按钮以前叫「刷新编辑框 / 重新写入 / 关闭」，前两个都在"写"，但写的地方不同
+ * （编辑框 vs 角色卡），第三个"关闭"更没说清关的是什么。现在每个按钮都把落点写在名字里：
+ *   - 填入编辑框：只动角色编辑面板里的文本框，要保存才生效
+ *   - 重写角色卡：真的落盘，卡上现在的版本先进「上一版」
+ *   - 移除记录：只是把这条记录收起来，什么内容都不改
+ * 前两个都会覆盖掉看得见的文字，所以各自带 title 说清覆盖的是哪一份。
+ */
 function renderAppliedActions(drift = false, editorStale = false) {
-    const sync = editorStale
-        ? '<div class="menu_button thrive-panel__button" data-thrive-action="sync-editor"'
-            + ' title="用已写入的内容覆盖角色编辑框里的文字">刷新编辑框</div>'
-        : '';
-    const rewrite = drift
-        ? '<div class="menu_button thrive-panel__button thrive-panel__button--danger" data-thrive-action="rewrite-desc">重新写入</div>'
-        : '';
-    return `${sync}${rewrite}<div class="menu_button thrive-panel__button" data-thrive-action="close">关闭</div>`;
+    const buttons = [];
+
+    if (editorStale) {
+        buttons.push('<div class="menu_button thrive-panel__button" data-thrive-action="sync-editor"'
+            + ' title="只把这份内容填进角色编辑框，不动角色卡；要在角色编辑面板里保存才真正生效">填入编辑框</div>');
+    }
+
+    if (drift) {
+        buttons.push('<div class="menu_button thrive-panel__button thrive-panel__button--danger"'
+            + ' data-thrive-action="rewrite-desc"'
+            + ' title="把这份内容重新写回角色卡；卡上现在的描述会被覆盖，覆盖前会先存进「上一版」">重写角色卡</div>');
+    }
+
+    buttons.push('<div class="menu_button thrive-panel__button thrive-panel__button--ghost"'
+        + ' data-thrive-action="dismiss-record" title="只是把这条记录从面板上去掉，角色卡上的内容不会变">移除记录</div>');
+
+    return buttons.join('');
+}
+
+/**
+ * 按钮底下那句小字：说出这几个按钮**之间**的区别。
+ *
+ * 不复述 notice 里已经讲过的前因后果——窄屏上两段长字挤在一起，反而更像噪音。
+ * 这里只回答"它们各自动哪儿"，完整说明在按钮的 title 里。
+ */
+function appliedHint(drift, editorStale) {
+    if (drift && editorStale) {
+        return '重写角色卡 = 落到角色卡；填入编辑框 = 只改框里的文字。两者都动不到这条记录本身。';
+    }
+    if (drift) {
+        return '重写角色卡会覆盖卡上现版，覆盖前先存进「上一版」。';
+    }
+    if (editorStale) {
+        return '填入编辑框只改框里的文字，不动角色卡，保存才生效。';
+    }
+
+    return '这条记录只是留痕：移除它不会改回任何内容。';
 }
 
 function onPanelClick(event) {
@@ -666,8 +734,12 @@ function onPanelClick(event) {
         case 'discard':
             void discardAndReport();
             break;
-        case 'close':
+        case 'dismiss-record':
             discardPatch(getContext());
+            refreshPanel(getContext());
+            break;
+        case 'toggle-history':
+            historyExpanded = !historyExpanded;
             refreshPanel(getContext());
             break;
         case 'hide-panel':
@@ -696,7 +768,29 @@ function onPanelClick(event) {
     }
 }
 
-/** 接受 / 强制覆盖。失败时把原因说清楚，别让按钮看起来"没反应" */
+/**
+ * 键盘激活折头。
+ *
+ * 折头是 div + role="button" 而不是 <button>：原生按钮在 ST 的主题下会带上一套
+ * 边框和内边距，把"分区标题"压成了另一个东西。代价是无障碍行为要自己补——Enter /
+ * 空格等价于点一下，其它键不管，免得把正文里的滚动也吞掉。
+ */
+function onPanelKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+    }
+
+    const trigger = event.target.closest('[data-thrive-action][role="button"]');
+    if (!trigger) {
+        return;
+    }
+
+    // 空格默认是翻页，Enter 默认可能触发表单提交，两者都要拦
+    event.preventDefault();
+    trigger.click();
+}
+
+/** 写入 / 强制覆盖。失败时把原因说清楚，别让按钮看起来"没反应" */
 async function applyAndReport(force) {
     if (patchBusy) {
         return;
@@ -717,7 +811,7 @@ async function applyAndReport(force) {
             // 编辑器里用户改过描述：不覆盖他的输入，但必须说清楚"保存会盖掉这次写入"
             if (edited) {
                 toast(`已写入${who}角色卡，但编辑框里的描述你改过，这次没覆盖它；`
-                    + '要换成新内容，点浮动面板上的「刷新编辑框」');
+                    + '要换成新内容，点浮动面板上的「填入编辑框」');
             } else if (reason === 'overwrote-edited') {
                 toast(`已写入${who}角色卡；编辑面板里未保存的旧描述被这次写入覆盖了`);
             } else {
@@ -727,7 +821,7 @@ async function applyAndReport(force) {
         }
 
         if (result.error === 'CONFLICT') {
-            toast('描述在暂存之后被改动过，请选择强制覆盖或拒绝');
+            toast('描述在暂存之后被改动过，请选择强制覆盖或丢弃改动');
         } else if (result.error === 'NO_CHAR') {
             toast('当前没有选中角色，无法写入描述');
         } else {
@@ -752,7 +846,7 @@ async function discardAndReport() {
 
     discardPatch(getContext());
     refreshPanel(getContext());
-    toast('已拒绝这份改动，角色描述没有变化');
+    toast('已丢弃这份改动，角色描述没有变化');
 }
 
 /**
@@ -897,8 +991,8 @@ async function rewriteDescAndReport() {
 
         const edited = result.editor?.synced === false && result.editor?.reason === 'edited';
         toast(edited
-            ? `已重新写入${name ? `「${name}」的` : ''}角色卡；编辑框里你改过的内容没被覆盖，要同步点面板上的「刷新编辑框」`
-            : `已重新写入${name ? `「${name}」的` : ''}角色卡（${patch.after.length} 字）`);
+            ? `已重写${name ? `「${name}」的` : ''}角色卡；编辑框里你改过的内容没被覆盖，要同步点面板上的「填入编辑框」`
+            : `已重写${name ? `「${name}」的` : ''}角色卡（${patch.after.length} 字）`);
     } finally {
         patchBusy = false;
         setPanelBusy(false);
@@ -909,7 +1003,7 @@ async function rewriteDescAndReport() {
 /**
  * 把已写入的内容推进角色编辑框，不管框里现在是什么。
  *
- * 只有用户点「刷新编辑框」才会走到这里 —— 这是"我知道会覆盖我刚才敲的字"的显式动作，
+ * 只有用户点「填入编辑框」才会走到这里 —— 这是"我知道会覆盖我刚才敲的字"的显式动作，
  * 所以不弹确认。写入路径自己遇到用户改过的框是不动的（见 applyDescriptionLocally），
  * 这个按钮就是给它留的出口：不关面板也能让框里看到新内容。
  */
@@ -927,7 +1021,7 @@ function syncEditorAndReport() {
     if (!result.synced) {
         toast(result.reason === 'no-editor'
             ? '没找到角色描述的文本框：先把角色编辑面板打开'
-            : '没能刷新编辑框');
+            : '没能把内容放进编辑框');
         return;
     }
 
@@ -936,7 +1030,7 @@ function syncEditorAndReport() {
 }
 
 async function askDiscardPatch() {
-    return askConfirm('拒绝后这份改动就没了，角色描述保持原样。确定拒绝吗？');
+    return askConfirm('丢弃后这份改动就没了，角色描述保持原样。确定丢弃吗？');
 }
 
 function setPanelBusy(busy) {
