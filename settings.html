@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.17.0</span>
+                <span class="thrive-version">v0.18.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -268,7 +268,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>提示词</b>
-                        <small class="thrive-group__hint">注入位置 · 学习块 · 压缩指令</small>
+                        <small class="thrive-group__hint">注入位置 · 通用 / 主动 / 被动 · 压缩指令</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -283,23 +283,72 @@
                         <small id="thrive_block_hint" class="thrive-hint thrive-hint--muted"></small>
                     </div>
 
+                    <small class="thrive-hint thrive-hint--muted">
+                        学习块分成三段：<b>通用</b> 每轮都带，<b>主动</b> / <b>被动</b> 只带当前模式那一段，
+                        注入时按「通用 + 当前模式」的顺序拼起来。两段说的话重合时，以模式段为准（它排在后面）。
+                        主动与被动同时成立时按主动算。
+                    </small>
+
                     <div class="thrive-field">
                         <div class="thrive-row">
-                            <label for="thrive_block_text">学习块正文</label>
-                            <span id="thrive_block_count" class="thrive-count">—</span>
+                            <label for="thrive_block_common">通用提示词</label>
+                            <span id="thrive_block_common_count" class="thrive-count">—</span>
                         </div>
-                        <textarea id="thrive_block_text" class="text_pole thrive-block-text" rows="14" spellcheck="false"
+                        <textarea id="thrive_block_common" class="text_pole thrive-block-text" rows="14" spellcheck="false"
                             placeholder="留空表示使用默认文本"></textarea>
                         <div class="thrive-actions">
-                            <div id="thrive_block_reset" class="menu_button thrive-reset" title="用回 spec 里的默认文本">
+                            <div id="thrive_block_common_reset" class="menu_button thrive-reset" title="用回内置的默认通用提示词">
                                 <i class="fa-solid fa-rotate-left"></i>
                                 <span>恢复默认</span>
                             </div>
                         </div>
                         <small class="thrive-hint">
-                            支持 &#123;&#123;char&#125;&#125; 与 &#123;&#123;user&#125;&#125;，注入前会替换成实际名字。留空 = 使用默认文本。
+                            两种模式都会带上这一段：工具层与正文层的分工、写到哪里、怎么写、守什么规矩。留空 = 使用默认文本。
                         </small>
                     </div>
+
+                    <div class="thrive-field">
+                        <div class="thrive-row">
+                            <label for="thrive_block_active">主动模式提示词</label>
+                            <span id="thrive_block_active_count" class="thrive-count">—</span>
+                        </div>
+                        <textarea id="thrive_block_active" class="text_pole thrive-block-text" rows="6" spellcheck="false"
+                            placeholder="留空表示使用默认文本"></textarea>
+                        <div class="thrive-actions">
+                            <div id="thrive_block_active_reset" class="menu_button thrive-reset" title="用回内置的默认主动模式提示词">
+                                <i class="fa-solid fa-rotate-left"></i>
+                                <span>恢复默认</span>
+                            </div>
+                        </div>
+                        <small class="thrive-hint">
+                            只在主动模式（手动开关一直开着）时接在通用后面。默认倾向积极提问、逢话必记。
+                        </small>
+                    </div>
+
+                    <div class="thrive-field">
+                        <div class="thrive-row">
+                            <label for="thrive_block_passive">被动模式提示词</label>
+                            <span id="thrive_block_passive_count" class="thrive-count">—</span>
+                        </div>
+                        <textarea id="thrive_block_passive" class="text_pole thrive-block-text" rows="6" spellcheck="false"
+                            placeholder="留空表示使用默认文本"></textarea>
+                        <div class="thrive-actions">
+                            <div id="thrive_block_passive_reset" class="menu_button thrive-reset" title="用回内置的默认被动模式提示词">
+                                <i class="fa-solid fa-rotate-left"></i>
+                                <span>恢复默认</span>
+                            </div>
+                        </div>
+                        <small class="thrive-hint">
+                            只在被动学习借来的那一轮接在通用后面。默认只记关键信息、尽量少调用工具。
+                            「本轮为自动触发」那句说明由插件按实际原因追加，不用自己写。
+                        </small>
+                    </div>
+
+                    <small id="thrive_block_effective" class="thrive-hint"></small>
+
+                    <small class="thrive-hint">
+                        三段都支持 &#123;&#123;char&#125;&#125; 与 &#123;&#123;user&#125;&#125;，注入前会替换成实际名字。
+                    </small>
 
                     <div class="thrive-field">
                         <div class="thrive-row">

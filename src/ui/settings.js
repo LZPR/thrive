@@ -21,9 +21,10 @@ import { LIMIT_SPECS, clampLimit, readLimits } from '../limits.js';
 import { armManual, describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import {
-    DEFAULT_BLOCK,
+    BLOCK_TEXT_PARTS,
+    composeBlockText,
     countChars,
-    getBlockText,
+    getPartText,
     getPositionHint,
     normalizeBlockText,
     normalizePosition,
@@ -31,7 +32,9 @@ import {
 } from '../prompt.js';
 import {
     DEFAULT_SETTINGS,
+    LEARNING_MODE,
     ensureSettings,
+    getLearningMode,
     getPending,
     getState,
     hasAnyModule,
@@ -847,8 +850,6 @@ function updateScopeHint(ctx, settings) {
 
 function bindBlockControls() {
     const select = document.getElementById('thrive_block_position');
-    const textarea = document.getElementById('thrive_block_text');
-    const reset = document.getElementById('thrive_block_reset');
 
     if (select) {
         select.addEventListener('change', function () {
@@ -860,42 +861,76 @@ function bindBlockControls() {
         });
     }
 
-    if (textarea) {
-        textarea.addEventListener('input', () => {
-            const ctx = getContext();
+    // 三段共用一套绑定：DOM 后缀与设置键都在 BLOCK_TEXT_PARTS 里，以后加一段不用再抄事件
+    for (const { part, settingKey, defaultValue, label } of BLOCK_TEXT_PARTS) {
+        const textarea = document.getElementById(`thrive_block_${part}`);
+        const reset = document.getElementById(`thrive_block_${part}_reset`);
 
-            // 内存里立即生效：这样即使编辑后马上触发生成，拿到也是新文本
-            ensureSettings(ctx).blockText = normalizeBlockText(textarea.value);
-            updateBlockCount(textarea.value);
+        if (textarea) {
+            textarea.addEventListener('input', () => {
+                const ctx = getContext();
 
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(() => {
+                // 内存里立即生效：这样即使编辑后马上触发生成，拿到也是新文本
+                ensureSettings(ctx)[settingKey] = normalizeBlockText(textarea.value, part);
+                updateBlockCount(part, textarea.value);
+                updateBlockEffective(ctx, ensureSettings(ctx));
+
+                clearTimeout(saveTimer);
+                saveTimer = setTimeout(() => {
+                    ctx.saveSettingsDebounced?.();
+                    syncFromContext(ctx);
+                }, SAVE_DELAY);
+            });
+        }
+
+        if (reset) {
+            reset.addEventListener('click', () => {
+                const ctx = getContext();
+                ensureSettings(ctx)[settingKey] = '';
                 ctx.saveSettingsDebounced?.();
+                if (textarea) {
+                    textarea.value = defaultValue;
+                    updateBlockCount(part, textarea.value);
+                }
+                updateBlockEffective(ctx, ensureSettings(ctx));
                 syncFromContext(ctx);
-            }, SAVE_DELAY);
-        });
-    }
-
-    if (reset) {
-        reset.addEventListener('click', () => {
-            const ctx = getContext();
-            ensureSettings(ctx).blockText = '';
-            ctx.saveSettingsDebounced?.();
-            if (textarea) {
-                textarea.value = DEFAULT_BLOCK;
-                updateBlockCount(textarea.value);
-            }
-            syncFromContext(ctx);
-            toast('学习块已恢复默认');
-        });
+                toast(`${label}已恢复默认`);
+            });
+        }
     }
 }
 
-function updateBlockCount(text) {
-    const el = document.getElementById('thrive_block_count');
+/** 每段各一个字数，按 part 拼 id（`thrive_block_<part>_count`） */
+function updateBlockCount(part, text) {
+    const el = document.getElementById(`thrive_block_${part}_count`);
     if (el) {
         el.textContent = `${countChars(text)} 字`;
     }
+}
+
+/**
+ * 「当前生效」那一行：按这个对话此刻的模式，把实际要注入的长度算出来。
+ *
+ * 三段拆开之后，用户看着三个编辑框很难判断最终发出去的是什么，这一行就是答案；
+ * 也顺手把"主动优先"这条规则显性化——徽章/面板切模式后它跟着变。
+ */
+function updateBlockEffective(ctx, settings) {
+    const el = document.getElementById('thrive_block_effective');
+    if (!el) {
+        return;
+    }
+
+    const mode = getLearningMode(ctx);
+    if (!mode) {
+        el.textContent = '当前对话没有开启学习模式，学习块不会注入。';
+        el.classList.add('thrive-hint--muted');
+        return;
+    }
+
+    const label = mode === LEARNING_MODE.PASSIVE ? '被动' : '主动';
+    const chars = countChars(composeBlockText(settings, mode));
+    el.textContent = `当前生效：通用 + ${label}模式，约 ${chars} 字（宏替换前，不含被动轮的「自动触发」说明）。`;
+    el.classList.remove('thrive-hint--muted');
 }
 
 /**
@@ -1014,15 +1049,20 @@ function refreshSettingsControls(ctx, settings) {
     }
     updateBlockHint(position);
 
-    // 正在输入时不要回写，否则会把光标和未落盘的编辑冲掉
-    const textarea = document.getElementById('thrive_block_text');
-    if (textarea && document.activeElement !== textarea) {
-        const text = getBlockText(settings);
+    for (const { part } of BLOCK_TEXT_PARTS) {
+        // 正在输入时不要回写，否则会把光标和未落盘的编辑冲掉
+        const textarea = document.getElementById(`thrive_block_${part}`);
+        if (!textarea || document.activeElement === textarea) {
+            continue;
+        }
+        const text = getPartText(settings, part);
         if (textarea.value !== text) {
             textarea.value = text;
         }
-        updateBlockCount(text);
+        updateBlockCount(part, text);
     }
+
+    updateBlockEffective(ctx, settings);
 
     const compactArea = document.getElementById('thrive_compact_prompt');
     if (compactArea && document.activeElement !== compactArea) {

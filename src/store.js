@@ -35,10 +35,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
     /** 学习块注入位置：tail / head / none */
     blockPosition: 'tail',
     /**
-     * 学习块正文。空串 = 使用 prompt.js 里的 DEFAULT_BLOCK。
-     * 存空串而不是存整段默认文本，默认文本随版本更新时老用户也能拿到新版。
+     * 学习块三段的正文。注入时拼成「通用 + 当前模式」一段（见 prompt.js 的 composeBlockText）。
+     * 空串 = 使用 prompt.js 里对应那段的 DEFAULT_BLOCK_*。存空串而不是存整段默认文本，
+     * 默认文本随版本更新时老用户也能拿到新版。
      */
-    blockText: '',
+    blockCommon: '',
+    blockActive: '',
+    blockPassive: '',
     /** 角色描述模块开关。Step 07 会把模块权限补齐 */
     moduleDescription: true,
     /**
@@ -62,7 +65,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     ...LIMIT_DEFAULTS,
     /**
      * 超过软/硬上限时追加的压缩指令。
-     * 空串 = 使用 compact.js 里的 DEFAULT_COMPACT_PROMPT（理由同 blockText）。
+     * 空串 = 使用 compact.js 里的 DEFAULT_COMPACT_PROMPT（理由同学习块）。
      */
     compactPrompt: '',
     /**
@@ -162,6 +165,17 @@ export function ensureSettings(ctx) {
     const settings = root[MODULE_NAME];
     let dirty = false;
 
+    // v0.18 之前只有一段 blockText。搬进通用段（它原本写的就是通用规则），
+    // 搬完把旧键删掉：留着会被下一次升级再搬一次，用户哪天清空通用段也会被复活。
+    if (Object.hasOwn(settings, 'blockText')) {
+        const legacy = typeof settings.blockText === 'string' ? settings.blockText : '';
+        if (!Object.hasOwn(settings, 'blockCommon') && legacy.trim()) {
+            settings.blockCommon = legacy;
+        }
+        delete settings.blockText;
+        dirty = true;
+    }
+
     for (const [key, fallback] of Object.entries(DEFAULT_SETTINGS)) {
         // 用类型比对而不是 undefined 判断：手改过 settings.json 存进去的 "false" 也能被纠正
         if (typeof settings[key] !== typeof fallback) {
@@ -201,6 +215,12 @@ export function hasAnyModule(settings) {
 export const PASSIVE_BASELINE_NONE = -1;
 
 export const PENDING_REASONS = Object.freeze(['interval', 'keyword', 'manual']);
+
+/** 当前运行模式。注入时用它决定拼哪一段模式提示词（见 getLearningMode） */
+export const LEARNING_MODE = Object.freeze({
+    ACTIVE: 'active',
+    PASSIVE: 'passive',
+});
 
 function createPassiveState() {
     return {
@@ -400,6 +420,26 @@ export function clearPending(ctx) {
 }
 
 /**
+ * 当前这一轮该走哪一套：`'active'` / `'passive'` / `null`（都没开）。
+ *
+ * **主动优先**：主动开关开着就算主动，哪怕还挂着一个待学记号。这和
+ * "主动开着时被动不触发、打开主动会丢掉记号"是同一条规则，两处不要各判一套。
+ *
+ * 注入（prompt.js 选哪段模式提示词）与门控都该经过它或 isLearningActive。
+ * @param {object} ctx
+ */
+export function getLearningMode(ctx) {
+    const state = getState(ctx);
+    if (state.enabled === true) {
+        return LEARNING_MODE.ACTIVE;
+    }
+    if (state.passive.pending) {
+        return LEARNING_MODE.PASSIVE;
+    }
+    return null;
+}
+
+/**
  * "模型现在该看到学习块、该拿到工具吗"。
  *
  * 两个入口：主动开关（对话级 enabled）与被动学习的一次性待命（pending）。
@@ -407,8 +447,7 @@ export function clearPending(ctx) {
  * 这类半开半关的状态。
  */
 export function isLearningActive(ctx) {
-    const state = getState(ctx);
-    return state.enabled === true || Boolean(state.passive.pending);
+    return getLearningMode(ctx) !== null;
 }
 
 /**

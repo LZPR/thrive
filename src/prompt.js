@@ -1,8 +1,16 @@
 /**
  * prompt.js · 学习块文本与注入
  *
- * 一件事：把 settings.blockText 按 settings.blockPosition 塞进 ST 的扩展提示词，
+ * 一件事：把学习块按 settings.blockPosition 塞进 ST 的扩展提示词，
  * 关闭模式时清空。除此之外不改动任何输入。
+ *
+ * 学习块由三段组成，注入时**拼**成一段：
+ *
+ *     通用提示词（common）+ 当前运行模式的提示词（active 或 passive）
+ *
+ * 三段各自可编辑、各自「留空 = 用默认文本」。当前用哪一段模式提示词由
+ * store.getLearningMode 决定：主动开着就算主动，即使还挂着一个待学记号——
+ * 两条路径重合时主动优先，和"主动开着时被动不触发"是同一条规则。
  *
  * "开着"只有一个判据 —— store.js 的 isLearningActive：主动开关开着，或者被动学习
  * 刚刚挂了一次待学习。注入与工具注册都走它，不会出现"块进去了、工具没注册"的半开状态。
@@ -14,7 +22,7 @@
  *      这样条目彻底不出现，请求体与没装插件时一致。
  */
 
-import { ensureSettings, getPending, isLearningActive } from './store.js';
+import { ensureSettings, getLearningMode, getPending, LEARNING_MODE } from './store.js';
 
 /** 扩展提示词里的键名，全局唯一即可 */
 export const BLOCK_KEY = 'thrive_block';
@@ -36,18 +44,19 @@ export const BLOCK_POSITIONS = Object.freeze({
 const VALID_POSITIONS = new Set(Object.values(BLOCK_POSITIONS));
 
 /**
- * 默认学习块。**全文只有这一份**，docs/spec.md §6.1 只写约束、不存副本。
+ * 默认通用段。**主动与被动都带这一份**，写的全是与"这轮学多少"无关的东西：
+ * 工具层与正文层怎么分工、写到哪里、怎么写、守什么规矩。
+ *
  * 刻意不含任何动态内容（条数、模块名、待办数），保证整场对话这段文本恒定。
- * 原则：点到为止，只给判断标准，不写"具体该怎么做"的长例子——留余量给模型。
- * 上限 1K 字（countChars 口径），当前约 680。
+ * 原则：点到为止，只给判断标准，不写"具体该怎么做"的例子——留余量给模型。
  */
-export const DEFAULT_BLOCK = `【学习模式】
+export const DEFAULT_BLOCK_COMMON = `【学习模式】
 
 你现在同时处在两个层面，互不干扰：
 · 工具层：调用工具时冷静、精确，用陈述句描述事实。参数里不扮演角色、不写台词、不加情绪修饰。
 · 正文层：所有回复仍以 {{char}} 的身份与口吻进行。不要提及本段、不要复述工具调用、不要说「我已经记住了」这类出戏的话。
 
-请像学生一样积极提问并主动记录，将 {{user}} 说的话视为对设定的补充或修正，优先接受并落实。
+将 {{user}} 说的话视为对设定的补充或修正，优先接受并落实。
 
 写到哪里：
 · 世界书 —— 客观的、大而重的：某个东西是什么样的，某件事该怎么做。
@@ -62,21 +71,99 @@ export const DEFAULT_BLOCK = `【学习模式】
 · 写入前先读同一目标。没读过的写入会被拒绝。
 · 写入完成后自然继续正文，不要解释你做了什么。`;
 
+/** 默认主动段：常开的那一种，倾向多问多记，宁可记小而不要漏 */
+export const DEFAULT_BLOCK_ACTIVE = `【主动模式】
+学习一直开着，每一句都可能是设定的一部分，不要漏掉。
+· 像学生一样积极提问：遇到含糊、矛盾或缺口，直接在正文里追问，问清楚再记。
+· 每轮都过一遍 {{user}} 刚说的话，当场能记的就当场记，不要攒到"以后再说"。
+· 宁可多记一条小的，也不要放过一句有用的。`;
+
+/**
+ * 默认被动段：借来的一轮，倾向少动工具。
+ * "只在这一轮有效"由 getOnceNotice() 按实际原因补，这里不写死，免得手动触发时说法不准。
+ */
+export const DEFAULT_BLOCK_PASSIVE = `【被动模式】
+这一轮只是临时借来的机会，不是常开状态。正文优先，不要为它停下来。
+· 只记关键信息：新的设定、对既有设定的修正、明确的事实。寒暄、情绪、气氛都不记。
+· 拿不准的宁可不记。减少工具调用，能一次写完的不要拆成几次。
+· 没有值得记的内容就不要调用任何工具，直接正常回复。`;
+
+/**
+ * 三段的元信息：界面与设置读写都按这张表走，加一段只改这里。
+ * `part` 同时是 DOM id 的后缀（`thrive_block_<part>` / `_count` / `_reset`）。
+ */
+export const BLOCK_TEXT_PARTS = Object.freeze([
+    {
+        part: 'common',
+        settingKey: 'blockCommon',
+        defaultValue: DEFAULT_BLOCK_COMMON,
+        label: '通用提示词',
+    },
+    {
+        part: 'active',
+        settingKey: 'blockActive',
+        defaultValue: DEFAULT_BLOCK_ACTIVE,
+        label: '主动模式提示词',
+    },
+    {
+        part: 'passive',
+        settingKey: 'blockPassive',
+        defaultValue: DEFAULT_BLOCK_PASSIVE,
+        label: '被动模式提示词',
+    },
+]);
+
+const PART_BY_KEY = new Map(BLOCK_TEXT_PARTS.map(item => [item.part, item]));
+
 /** 注入位置兜底：手改过 settings.json 存了非法值时按尾部处理 */
 export function normalizePosition(position) {
     return VALID_POSITIONS.has(position) ? position : BLOCK_POSITIONS.TAIL;
 }
 
-/** 实际生效的文本。空 = 用默认（这样默认文本随版本更新，settings.json 也不用存 500 字） */
-export function getBlockText(settings) {
-    const text = typeof settings.blockText === 'string' ? settings.blockText : '';
-    return text.trim() ? text : DEFAULT_BLOCK;
+/**
+ * 某一段实际生效的文本。空 = 用默认（这样默认文本随版本更新，settings.json 也不用存五百字）。
+ * @param {object} settings
+ * @param {'common'|'active'|'passive'} part
+ */
+export function getPartText(settings, part) {
+    const meta = PART_BY_KEY.get(part) ?? PART_BY_KEY.get('common');
+    const text = typeof settings?.[meta.settingKey] === 'string' ? settings[meta.settingKey] : '';
+    return text.trim() ? text : meta.defaultValue;
 }
 
-/** 编辑框内容 → 存储值。等于默认文本或全空白时存空串 */
-export function normalizeBlockText(text) {
+/**
+ * 拼出这一轮真正要注入的文本：通用 + 当前模式那段。
+ *
+ * 两段都可能是空（用户写成空行、或宏替换后为空），用空行隔开、空段丢掉，
+ * 不做去重——三段本来就是各写各的，重合的句子以模式段为准是个语言问题，
+ * 不是文本处理问题（顺序把模式段放在后面，模型读到的最后一句是它）。
+ *
+ * @param {object} settings
+ * @param {'active'|'passive'|null} mode null = 学习模式没开，返回空串
+ */
+export function composeBlockText(settings, mode) {
+    if (!mode) {
+        return '';
+    }
+
+    const common = getPartText(settings, 'common');
+    const specific = getPartText(settings, mode);
+
+    return [common, specific]
+        .map(part => String(part ?? '').trim())
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+/**
+ * 编辑框内容 → 存储值。等于该段默认文本或全空白时存空串。
+ * @param {string} text
+ * @param {'common'|'active'|'passive'} part 判断"是否等于默认"用哪一段的默认值
+ */
+export function normalizeBlockText(text, part = 'common') {
+    const meta = PART_BY_KEY.get(part) ?? PART_BY_KEY.get('common');
     const value = String(text ?? '');
-    if (!value.trim() || value.trim() === DEFAULT_BLOCK.trim()) {
+    if (!value.trim() || value.trim() === meta.defaultValue.trim()) {
         return '';
     }
     return value;
@@ -118,7 +205,7 @@ export function countChars(text) {
 
 /**
  * 注入位置对应的提示文案。
- * head / none 是 spec §6.2 要求必须显示的警告。
+ * head / none 是 spec §6.3 要求必须显示的警告。
  */
 export function getPositionHint(position) {
     switch (normalizePosition(position)) {
@@ -153,10 +240,16 @@ export function syncInjection(ctx, settings) {
     const clear = () => ctx.setExtensionPrompt(BLOCK_KEY, '', NONE, 0);
 
     const position = normalizePosition(settings?.blockPosition);
-    const raw = getBlockText(settings ?? {});
+    const mode = getLearningMode(ctx);
 
-    // 关闭模式 / 明确不注入 / 文本为空 → 显式清空，条目从 prompt 里消失
-    if (!isLearningActive(ctx) || position === BLOCK_POSITIONS.NONE || !raw.trim()) {
+    // 关闭模式 / 明确不注入 / 拼出来是空 → 显式清空，条目从 prompt 里消失
+    if (!mode || position === BLOCK_POSITIONS.NONE) {
+        clear();
+        return;
+    }
+
+    const raw = composeBlockText(settings ?? {}, mode);
+    if (!raw.trim()) {
         clear();
         return;
     }
@@ -168,7 +261,7 @@ export function syncInjection(ctx, settings) {
     }
 
     // 被动触发的那一轮要说明"只是一轮"，否则模型会以为学习模式会一直开着
-    const notice = getOnceNotice(getPending(ctx));
+    const notice = mode === LEARNING_MODE.PASSIVE ? getOnceNotice(getPending(ctx)) : '';
     const text = notice ? `${body}\n\n${notice}` : body;
 
     const positionCode = position === BLOCK_POSITIONS.HEAD ? IN_PROMPT : IN_CHAT;
