@@ -7,9 +7,7 @@
  * 两条路径：角色描述（读 + 写）、世界书（读 + 写）。
  */
 
-import { compactHint } from './compact.js';
-import { LIMIT_SPECS, readLimits } from './limits.js';
-import { normalizeEol } from './util.js';
+import { appendParagraph, normalizeEol } from './util.js';
 
 /**
  * 当前选中的角色。没有选中时返回 null。
@@ -22,43 +20,6 @@ export function getActiveCharacter(ctx) {
     }
     const character = ctx.characters?.[index];
     return character ?? null;
-}
-
-/**
- * 读角色描述全文。
- *
- * 按 spec §7：返回整段 description，不做截断 —— 角色描述每次都在 system 前缀里，
- * 只返回片段反而会让模型基于半截文本改写，把后半段冲掉。
- *
- * @param {object} ctx
- * @param {{ softLimit?: number }} [options] 软提醒阈值，超过时 over_limit 为 true
- * @returns {{ ok: true, chars: number, over_limit: boolean, text: string }
- *          | { ok: false, error: string, hint?: string }}
- */
-export function readDescription(ctx, options = {}) {
-    const character = getActiveCharacter(ctx);
-    if (!character) {
-        return {
-            ok: false,
-            error: 'NO_CHAR',
-            hint: '当前没有选中角色，请让用户先在角色列表里选一个。',
-        };
-    }
-
-    const text = normalizeEol(typeof character.description === 'string'
-        ? character.description
-        : String(character.description ?? ''));
-    const chars = text.length;
-    const softLimit = Number.isFinite(options.softLimit) && options.softLimit > 0
-        ? options.softLimit
-        : LIMIT_SPECS.softLimitDesc.default;
-
-    return {
-        ok: true,
-        chars,
-        over_limit: chars >= softLimit,
-        text,
-    };
 }
 
 /**
@@ -326,175 +287,110 @@ export function isBookScanned(ctx, book) {
     return selected.some(option => names[Number(option.value)] === name);
 }
 
+/* ------------------------------------------------------ 世界书 · 目录 */
+
 /**
- * 读世界书。
+ * 列出可写书里的条目，只取标题。
  *
- * 返回值分两半：`payload` 只给模型看（正文按 300 字截断），`registrations`
- * 只给插件用（完整正文，用来算读取哈希）—— 截断后的哈希跟原文对不上，
- * 拿它去校验写入会永远 STALE_READ。
+ * 目录的信息量要小：模型问"这本书里有什么"，一串标题就够回答。把关键词和
+ * 正文一起端上去，一次目录就能吃掉几千 token，而它多半只是想确认
+ * "这条写没写过"。
+ *
+ * 只列可写书：目录的用途是写之前先看看，而写只能落到可写书。绑定书塞进来
+ * 只会让模型以为那些条目可改（ADR-018 的读范围只作用于 lore_read）。
  *
  * @param {object} ctx
  * @param {object} settings
- * @param {{ query?: string }} [params]
+ * @returns {Promise<{ ok: true, book: string, items: Array<{ title: string, uid: number, disabled: boolean }> }
+ *          | { ok: false, error: string, hint?: string }>}
  */
-export async function readLore(ctx, settings, params = {}) {
-    const writable = getWritableBook(settings);
-    if (!writable) {
-        return noBook('还没有选择可写书。请让用户到扩展设置里选一本。');
+export async function listLore(ctx, settings) {
+    const loaded = await loadWritableBook(ctx, settings);
+    if (!loaded.ok) {
+        return loaded;
+    }
+
+    const items = Object.values(loaded.data.entries)
+        .filter(Boolean)
+        .map(entry => ({
+            title: entryTitle(entry),
+            uid: uidOf(entry),
+            disabled: entry.disable === true,
+            // 只在目录过滤时用得上（按关键词找条目），不往返回里带：目录只给标题
+            keys: Array.isArray(entry.key) ? entry.key.map(String) : [],
+        }))
+        // 按 uid 排：新建的条目落在末尾，模型能看出"这是最近写的那条"
+        .sort((a, b) => a.uid - b.uid);
+
+    return { ok: true, book: loaded.book, items };
+}
+
+/**
+ * 定位一条条目：可写书优先，`readScope=bound` 时再找角色绑定的书（只读）。
+ *
+ * 写路径不走这里 —— 写只认可写书。读路径需要它，是因为"这条设定是不是已经
+ * 记在别处"常常要去绑定的书里看一眼；看到了就得告诉模型那本不可写，否则它会
+ * 拿着刚读到的标题去 append，然后收到一个莫名其妙的 NOT_FOUND。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ * @param {string} title
+ * @returns {Promise<{ ok: true, book: string, writable: boolean, data: object,
+ *                     found: { key: string, uid: number, entry: object } }
+ *          | { ok: false, error: string, hint?: string }>}
+ */
+export async function locateLoreEntry(ctx, settings, title) {
+    const wanted = String(title ?? '').trim();
+    if (!wanted) {
+        return {
+            ok: false,
+            error: 'INVALID_TITLE',
+            hint: '标题是空串。标题既是同书内的唯一标识，也是定位条目的唯一方式。',
+        };
     }
 
     if (typeof ctx.loadWorldInfo !== 'function') {
         return noBook('当前 ST 没有向扩展暴露 loadWorldInfo，读不到世界书。');
     }
 
-    const { books } = resolveReadBooks(ctx, settings);
-    const scopeBound = settings?.readScope === 'bound';
-
-    // 与 loadBook 同一个判据：书名在清单里才算存在。少了这条，已被删除的书会以
-    // "空书" 的形式被读成功，模型会以为"这本书里什么都没有"，接着去新建。
-    const names = typeof ctx.getWorldInfoNames === 'function' ? ctx.getWorldInfoNames() : null;
-
+    const { writable, books } = resolveReadBooks(ctx, settings);
     const loaded = [];
+
     for (const name of books) {
-        if (Array.isArray(names) && !names.includes(name)) {
-            continue;
-        }
-        let data = null;
-        try {
-            data = await ctx.loadWorldInfo(name);
-        } catch (err) {
-            console.debug('[Thrive] loadWorldInfo 失败', name, err);
-        }
-        if (data?.entries) {
-            loaded.push({ name, entries: data.entries });
+        const one = await loadBook(ctx, name);
+        if (one.ok) {
+            loaded.push({ name, data: one.data });
         }
     }
 
-    if (!loaded.some(book => book.name === writable)) {
+    // 可写书读不到 = 书被删了/改名了。这时找不到条目不是"这条不存在"，
+    // 而是整个目标没了，得说清楚
+    if (!loaded.some(item => item.name === writable)) {
         return noBook(`读不到可写书「${writable}」，它可能已被删除或改名。请让用户重新选择。`);
     }
 
-    const items = [];
-    for (const book of loaded) {
-        for (const entry of Object.values(book.entries)) {
-            if (entry) {
-                items.push({ book: book.name, entry });
-            }
+    for (const item of loaded) {
+        const found = findLoreEntry(item.data, wanted);
+        if (found) {
+            return {
+                ok: true,
+                book: item.name,
+                writable: item.name === writable,
+                data: item.data,
+                found,
+            };
         }
-    }
-    // 顺序固定下来：可写书在前，其余按 books 顺序；同一本内按 uid
-    items.sort((a, b) => (books.indexOf(a.book) - books.indexOf(b.book)) || (uidOf(a.entry) - uidOf(b.entry)));
-
-    const query = String(params?.query ?? '').trim();
-    const limits = readLimits(settings);
-
-    if (query) {
-        return buildSearchResult(items, query, writable, scopeBound, limits, settings);
-    }
-
-    return buildOverviewResult(items, writable, limits);
-}
-
-/**
- * 检索结果。
- *
- * `over_limit` 只看返回正文的长度，不拦截任何写入——条目是整条替换，
- * 长正文照样能写，只是提醒模型"这条该压缩了"，否则世界书会越写越肿。
- */
-function buildSearchResult(items, query, writable, scopeBound, limits, settings) {
-    const needle = query.toLowerCase();
-    const matched = items.filter(({ entry }) => matchesNeedle(entry, needle));
-    const picked = matched.slice(0, limits.maxQueryEntries);
-
-    const softLimit = limits.softLimitEntry;
-    let overLimit = 0;
-
-    const entries = picked.map(({ book, entry }) => {
-        const full = String(entry.content ?? '');
-        const truncatedContent = full.length > limits.maxContentChars;
-        const item = {
-            title: entryTitle(entry),
-            keys: Array.isArray(entry.key) ? entry.key.map(String) : [],
-            chars: full.length,
-            // 截断留个省略号，模型才看得出这不是全文
-            content: truncatedContent ? `${full.slice(0, limits.maxContentChars)}…` : full,
-        };
-        if (full.length >= softLimit) {
-            item.over_limit = true;
-            overLimit += 1;
-        }
-        if (scopeBound) {
-            item.source_book = book;
-        }
-        if (entry.disable) {
-            // 停用条目照实显示：内容是存在的，只是生成时不会触发
-            item.disabled = true;
-        }
-        return item;
-    });
-
-    const payload = {
-        ok: true,
-        book: writable,
-        count: matched.length,
-        truncated: matched.length > picked.length,
-        entries,
-    };
-
-    // 建议放 hint，不往 note 里再抄一遍：两个字段说同一句话只是多花一遍 token。
-    // "怎么压"由设置里的压缩指令决定，这里只说清楚哪几条超了、世界书是整条替换
-    if (overLimit > 0) {
-        payload.hint = compactHint(settings,
-            `有 ${overLimit} 条正文超过 ${softLimit} 字；世界书条目是整条替换，没有追加。`);
-    }
-
-    const note = overCountNote(items.length, limits.softEntryCount);
-    if (note) {
-        payload.note = note;
-    }
-
-    // 只有返回了正文的条目才算"读过"
-    const registrations = picked.map(({ book, entry }) => ({
-        book,
-        title: entryTitle(entry),
-        content: String(entry.content ?? ''),
-    }));
-
-    return { ok: true, payload, registrations };
-}
-
-function buildOverviewResult(items, writable, limits) {
-    const titles = items.slice(0, limits.maxTitles).map(({ entry }) => entryTitle(entry));
-    const notes = ['需要正文请带 query 查询。'];
-
-    const overCount = overCountNote(items.length, limits.softEntryCount);
-    if (overCount) {
-        notes.push(overCount);
     }
 
     return {
-        ok: true,
-        payload: {
-            ok: true,
-            book: writable,
-            count: items.length,
-            truncated: items.length > limits.maxTitles,
-            titles,
-            note: notes.join(' '),
-        },
-        // 只返回标题的不登记：否则写入会被误判为"已经读过正文"
-        registrations: [],
+        ok: false,
+        error: 'NOT_FOUND',
+        hint: `可写书里没有标题为「${wanted}」的条目。先用 lore_list 看现有标题，标题必须与列表里完全一致。`,
     };
 }
 
 function noBook(hint) {
     return { ok: false, error: 'NO_BOOK', hint };
-}
-
-function overCountNote(total, softEntryCount) {
-    // 只提示"可以合并"——这是模型自己对书该做的动作。
-    // "请用户清理过时内容"那种话是在替模型组织台词，不写。
-    return total > softEntryCount ? `条目已经有 ${total} 条，考虑合并重复条目。` : '';
 }
 
 function uidOf(entry) {
@@ -516,18 +412,6 @@ export function entryTitle(entry) {
     return firstKey || `条目 #${uidOf(entry)}`;
 }
 
-function matchesNeedle(entry, needle) {
-    if (entryTitle(entry).toLowerCase().includes(needle)) {
-        return true;
-    }
-    if (String(entry.comment ?? '').toLowerCase().includes(needle)) {
-        return true;
-    }
-    if (Array.isArray(entry.key) && entry.key.some(key => String(key).toLowerCase().includes(needle))) {
-        return true;
-    }
-    return String(entry.content ?? '').toLowerCase().includes(needle);
-}
 
 /* ----------------------------------------------------------- 世界书 · 写入 */
 
@@ -707,61 +591,130 @@ function buildNewLoreEntry(settings, fields) {
 }
 
 /**
- * 改写已有条目：只动正文与（显式给出的）关键词、逻辑。
+ * 新建条目。
  *
- * 其余字段一律保留 —— 尤其是 `constant`。新建时锁死 false 是为了不让模型
- * 白白占上下文；但用户自己手工建的常驻条目，模型改写正文时不该顺手把它的
- * 触发方式也改掉（ADR-008 / ADR-015）。
+ * 与改写分开，是为了不再有 upsert：upsert 的隐含语义是"找不到就新建"，模型把
+ * 标题打错一个字就会静默多出一条重复条目，而它自己并不知道。分开之后，
+ * 标题不存在就是 NOT_FOUND，模型必须回头看一眼目录再决定。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ * @param {string} book
+ * @param {object} data
+ * @param {{ title: string, content: string, keys: string[], logic?: string }} fields
  */
-function applyLoreFields(entry, fields) {
-    entry.comment = fields.title;
-    entry.content = fields.content;
-
-    if (Array.isArray(fields.keys) && fields.keys.length > 0) {
-        entry.key = fields.keys;
+export async function createLoreEntry(ctx, settings, book, data, fields) {
+    if (typeof ctx.saveWorldInfo !== 'function') {
+        return noSaveApi();
     }
 
-    if (fields.logic && Object.hasOwn(SELECTIVE_LOGIC, fields.logic)) {
-        entry.selectiveLogic = SELECTIVE_LOGIC[fields.logic];
-    }
+    const uid = nextLoreUid(data);
+    const entry = buildNewLoreEntry(settings, { ...fields, uid });
+    // entries 以字符串 uid 为键，数字键会被 JS 转成字符串但顺序会跑到前面去
+    data.entries[String(uid)] = entry;
 
-    return entry;
+    return commitEntry(ctx, book, data, entry, 'created');
 }
 
 /**
- * 落盘：load 出来的 data 改完 → saveWorldInfo(name, data, true) → 刷新列表。
+ * 追加：正文接在末尾，关键词合并去重。
  *
- * `immediately = true` 是硬要求：默认走 debounce，用户切走对话或关页面时
- * 那几百毫秒的窗口足够丢掉一次写入，而本条路径没有别的重试机会。
+ * 这是唯一"模型不需要先读全文"的写路径 —— 它只提供增量，合成由这里做。
+ * 合成的基准是盘上的完整正文，所以模型手里那半截文本永远冲不掉后半段。
  *
- * @returns {Promise<{ ok: true, action: 'created'|'rewritten', uid: number, content: string, keys: string[] }
- *          | { ok: false, error: string, hint?: string }>}
+ * @param {object} ctx
+ * @param {string} book
+ * @param {object} data
+ * @param {{ key: string, uid: number, entry: object }} found
+ * @param {{ content?: string, keys?: string[], maxKeywords: number, hardLimit: number }} fields
  */
-export async function writeLoreEntry(ctx, settings, book, data, found, fields) {
+export async function appendLoreEntry(ctx, book, data, found, fields) {
     if (typeof ctx.saveWorldInfo !== 'function') {
+        return noSaveApi();
+    }
+
+    const before = String(found.entry.content ?? '');
+    const beforeKeys = Array.isArray(found.entry.key) ? found.entry.key.map(String) : [];
+    const content = String(fields.content ?? '').trim();
+
+    const next = content ? appendParagraph(before, content) : before;
+    if (next.length > fields.hardLimit) {
         return {
             ok: false,
-            error: 'WRITE_FAILED',
-            hint: '当前 ST 没有向扩展暴露 saveWorldInfo，写不进世界书。',
+            error: 'TOO_LONG',
+            hint: `追加后正文 ${next.length} 字，超过单条上限 ${fields.hardLimit} 字。改用 lore_replace 精简已有内容，或把要加的这条另建一条。`,
         };
     }
 
-    let action;
-    let entry;
+    const merged = mergeKeys(beforeKeys, fields.keys, fields.maxKeywords);
 
-    if (found) {
-        // 原地改写：uid 与在 entries 里的键都不变
-        entry = applyLoreFields(found.entry, fields);
-        data.entries[found.key] = entry;
-        action = 'rewritten';
-    } else {
-        const uid = nextLoreUid(data);
-        entry = buildNewLoreEntry(settings, { ...fields, uid });
-        // entries 以字符串 uid 为键，数字键会被 JS 转成字符串但顺序会跑到前面去
-        data.entries[String(uid)] = entry;
-        action = 'created';
+    found.entry.content = next;
+    found.entry.key = merged.keys;
+    data.entries[found.key] = found.entry;
+
+    const result = await commitEntry(ctx, book, data, found.entry, 'appended');
+    if (!result.ok) {
+        return result;
     }
 
+    return {
+        ...result,
+        addedChars: next.length - before.length,
+        addedKeys: merged.added,
+        skippedKeys: merged.skipped,
+    };
+}
+
+/**
+ * 用新正文替换条目正文（replace 与 rewrite 共用后半段）。
+ *
+ * 只动 `content`：标题是定位键，关键词是触发方式，压缩正文时都不该被顺手改掉
+ * （ADR-008 / ADR-015）。要加关键词走 append。
+ *
+ * @param {object} ctx
+ * @param {string} book
+ * @param {object} data
+ * @param {{ key: string, uid: number, entry: object }} found
+ * @param {string} content 新的正文
+ * @param {{ hardLimit: number }} options
+ */
+export async function replaceLoreEntry(ctx, book, data, found, content, options) {
+    if (typeof ctx.saveWorldInfo !== 'function') {
+        return noSaveApi();
+    }
+
+    const before = String(found.entry.content ?? '');
+    const next = String(content ?? '');
+
+    if (!next.trim()) {
+        return {
+            ok: false,
+            error: 'EMPTY_CONTENT',
+            hint: '替换后正文是空的。空条目等于删除，不做；要精简就保留可读的残句。',
+        };
+    }
+
+    if (next.length > options.hardLimit) {
+        return {
+            ok: false,
+            error: 'TOO_LONG',
+            hint: `正文 ${next.length} 字，超过单条上限 ${options.hardLimit} 字。再压一压。`,
+        };
+    }
+
+    found.entry.content = next;
+    data.entries[found.key] = found.entry;
+
+    const result = await commitEntry(ctx, book, data, found.entry, 'rewritten');
+    if (!result.ok) {
+        return result;
+    }
+
+    return { ...result, beforeChars: before.length, afterChars: next.length };
+}
+
+/** 三种写法的公共收尾：落盘 → 返回统一形状 */
+async function commitEntry(ctx, book, data, entry, action) {
     const saved = await persistBook(ctx, book, data, { uid: entry.uid });
     if (!saved.ok) {
         return saved;
@@ -773,6 +726,49 @@ export async function writeLoreEntry(ctx, settings, book, data, found, fields) {
         uid: entry.uid,
         content: String(entry.content ?? ''),
         keys: Array.isArray(entry.key) ? entry.key.map(String) : [],
+    };
+}
+
+/**
+ * 合并关键词：保留原顺序，追加没出现过的，按上限截断。
+ *
+ * 去重是必需的：同一批关键词写两遍，条目在世界书里看起来会像"重点强调"，
+ * 实际只是把触发词表撑长。
+ */
+function mergeKeys(existing, incoming, maxKeywords) {
+    const keys = Array.isArray(existing) ? existing.map(String) : [];
+    const added = [];
+    const skipped = [];
+
+    for (const raw of Array.isArray(incoming) ? incoming : []) {
+        const key = String(raw ?? '').trim();
+        if (!key) {
+            continue;
+        }
+        if (keys.includes(key)) {
+            skipped.push(key);
+            continue;
+        }
+        keys.push(key);
+        added.push(key);
+    }
+
+    const limit = Math.max(1, Number(maxKeywords) || 1);
+    const truncated = keys.length > limit;
+
+    return {
+        keys: keys.slice(0, limit),
+        added: added.slice(0, Math.max(0, limit - (keys.length - added.length))),
+        skipped,
+        truncated,
+    };
+}
+
+function noSaveApi() {
+    return {
+        ok: false,
+        error: 'WRITE_FAILED',
+        hint: '当前 ST 没有向扩展暴露 saveWorldInfo，写不进世界书。',
     };
 }
 

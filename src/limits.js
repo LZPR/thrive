@@ -38,14 +38,18 @@ export const LIMIT_SPECS = Object.freeze({
     /** 角色描述的硬上限（字）：写入后总长超过直接拒绝 */
     hardLimitDesc: Object.freeze({ default: 2400, min: 100, max: 80000, step: 50 }),
 
-    /** 一次 lore_read 检索最多返回几条正文 */
-    maxQueryEntries: Object.freeze({ default: 8, min: 1, max: 50, step: 1 }),
-    /** 检索结果里单条正文最多给多少字（超出截断并标 over_limit） */
-    maxContentChars: Object.freeze({ default: 300, min: 40, max: 20000, step: 20 }),
-    /** 不带 query 时最多列几个标题 */
-    maxTitles: Object.freeze({ default: 20, min: 5, max: 500, step: 5 }),
+    /** 一次正则读取最多返回几处命中；超出的只报总数 */
+    maxMatches: Object.freeze({ default: 10, min: 1, max: 100, step: 1 }),
+    /** 单条正文最多返回多少字（角色描述或世界书条目，超出截断并标注） */
+    maxReadChars: Object.freeze({ default: 3000, min: 200, max: 40000, step: 100 }),
+    /** lore_list 最多列几条标题 */
+    listLimit: Object.freeze({ default: 80, min: 5, max: 500, step: 5 }),
     /** 整本书条目数超过这个值就提醒合并 */
     softEntryCount: Object.freeze({ default: 200, min: 10, max: 100000, step: 10 }),
+    /** 正则表达式本身的字数上限：超过不是能力问题，是写法问题 */
+    patternMaxChars: Object.freeze({ default: 200, min: 20, max: 1000, step: 10 }),
+    /** 命中片段前后各显示多少字，0 之外的值才有区分度 */
+    matchWindow: Object.freeze({ default: 60, min: 10, max: 400, step: 10 }),
 
     /** 面板"已写入"保留几条：既是备份槽位数，也是能退几步 */
     loreBackupLimit: Object.freeze({ default: 10, min: 1, max: 50, step: 1 }),

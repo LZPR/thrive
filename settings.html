@@ -212,27 +212,38 @@
                     <span class="thrive-limit-title">读取返回</span>
 
                     <div class="thrive-row">
-                        <label for="thrive_limit_query_entries">单次返回条目数（条）</label>
-                        <input id="thrive_limit_query_entries" class="text_pole thrive-number" type="number" inputmode="numeric">
+                        <label for="thrive_limit_max_matches">一次最多命中（处）</label>
+                        <input id="thrive_limit_max_matches" class="text_pole thrive-number" type="number" inputmode="numeric">
                     </div>
 
                     <div class="thrive-row">
-                        <label for="thrive_limit_content_chars">单条正文最多给（字）</label>
-                        <input id="thrive_limit_content_chars" class="text_pole thrive-number" type="number" inputmode="numeric">
+                        <label for="thrive_limit_read_chars">单条正文最多返回（字）</label>
+                        <input id="thrive_limit_read_chars" class="text_pole thrive-number" type="number" inputmode="numeric">
                     </div>
 
                     <div class="thrive-row">
-                        <label for="thrive_limit_max_titles">总览标题数（个）</label>
-                        <input id="thrive_limit_max_titles" class="text_pole thrive-number" type="number" inputmode="numeric">
+                        <label for="thrive_limit_list_count">目录最多列（个）</label>
+                        <input id="thrive_limit_list_count" class="text_pole thrive-number" type="number" inputmode="numeric">
                     </div>
 
                     <div class="thrive-row">
                         <label for="thrive_limit_entry_count">整本提醒阈值（条）</label>
                         <input id="thrive_limit_entry_count" class="text_pole thrive-number" type="number" inputmode="numeric">
                     </div>
+
+                    <div class="thrive-row">
+                        <label for="thrive_limit_pattern_chars">正则最长（字）</label>
+                        <input id="thrive_limit_pattern_chars" class="text_pole thrive-number" type="number" inputmode="numeric">
+                    </div>
+
+                    <div class="thrive-row">
+                        <label for="thrive_limit_match_window">命中前后各显示（字）</label>
+                        <input id="thrive_limit_match_window" class="text_pole thrive-number" type="number" inputmode="numeric">
+                    </div>
                     <small class="thrive-hint">
-                        返回得越多，占用的上下文越多。单条正文超长时会截断并标 <code>over_limit</code>，
-                        截断不影响写入校验——校验用的是完整正文。默认：8 条 / 300 字 / 20 个标题 / 200 条提醒。
+                        返回得越多，占用的上下文越多。正则读取只给命中片段，不给整篇；
+                        单条正文超长时截断并标 <code>truncated</code>，截断之后不允许整段重写。
+                        默认：10 处 / 3000 字 / 80 个标题 / 200 条提醒 / 正则 200 字 / 上下文 60 字。
                     </small>
 
                     <span class="thrive-limit-title">记录与日志</span>

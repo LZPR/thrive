@@ -188,6 +188,14 @@ export const ERROR_HINTS = Object.freeze({
     ENTRY_GONE: '条目已经不在书里（被删除或改名），没有可恢复的位置。',
     INVALID_BACKUP: '这条快照缺少书名或标题，定位不到条目。',
 
+    // —— 分拆工具体系新增
+    TITLE_EXISTS: '同书名下已经有这个标题。要改正文用 lore_rewrite，要补内容用 lore_append，不要新建。',
+    NOT_FOUND: '这条目不存在。先用 lore_list 看现有标题，标题必须与列表里完全一致。',
+    NO_MATCH: '正则一处也没命中，内容没有被改动。先带同样的 pattern 读一次，看清能匹配到什么。',
+    AMBIGUOUS_MATCH: '命中多处。要么把 pattern 写得更具体，要么明确传 replace_all=true 全改。',
+    INVALID_REGEX: '正则语法有误。检查括号、方括号和转义，或改用更短的字面词。',
+    PATTERN_TOO_LONG: '正则太长。用更短的特征词，不要把整句原文当 pattern。',
+
     // —— 只在插件内部/面板里流转，不会到模型面前
     NO_PATCH: '没有待确认的描述改动。',
     CONFLICT: '磁盘上的描述在暂存之后被改动过。面板里只能选择强制覆盖或拒绝。',

@@ -491,10 +491,12 @@ const LIMIT_FIELDS = Object.freeze([
     ['thrive_limit_title_chars', 'titleMaxChars'],
     ['thrive_limit_soft_desc', 'softLimitDesc'],
     ['thrive_limit_hard_desc', 'hardLimitDesc'],
-    ['thrive_limit_query_entries', 'maxQueryEntries'],
-    ['thrive_limit_content_chars', 'maxContentChars'],
-    ['thrive_limit_max_titles', 'maxTitles'],
+    ['thrive_limit_max_matches', 'maxMatches'],
+    ['thrive_limit_read_chars', 'maxReadChars'],
+    ['thrive_limit_list_count', 'listLimit'],
     ['thrive_limit_entry_count', 'softEntryCount'],
+    ['thrive_limit_pattern_chars', 'patternMaxChars'],
+    ['thrive_limit_match_window', 'matchWindow'],
     ['thrive_limit_backup', 'loreBackupLimit'],
     ['thrive_limit_trace_chars', 'traceMaxChars'],
 ]);
@@ -583,8 +585,9 @@ function updateLimitHint(settings) {
         `条目 ${limits.softLimitEntry} / ${limits.hardLimitEntry} 字`,
         `描述 ${limits.softLimitDesc} / ${limits.hardLimitDesc} 字`,
         `关键词 ${limits.maxKeywords} 个`,
-        `单次读 ${limits.maxQueryEntries} 条、每条 ${limits.maxContentChars} 字`,
-        `总览 ${limits.maxTitles} 个标题`,
+        `一次读 ${limits.maxMatches} 处命中、单条正文最多 ${limits.maxReadChars} 字`,
+        `目录 ${limits.listLimit} 个标题`,
+        `正则最长 ${limits.patternMaxChars} 字、命中前后 ${limits.matchWindow} 字`,
         `记录留 ${limits.loreBackupLimit} 条`,
     ];
 

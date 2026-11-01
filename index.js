@@ -6,7 +6,8 @@
  *   2. 对话级开关（chat_metadata.thrive.enabled）+ 输入框旁的方块徽章（只开关浮动面板，
  *      主动 / 被动两个开关在面板里，待确认改动在徽章角上带计数）
  *   3. 开启时注入学习块，关闭时彻底清空
- *   4. 工具 desc_read / desc_write / lore_read / lore_write
+ *   4. 工具：世界书 lore_list / lore_read / lore_add / lore_append / lore_replace /
+ *      lore_rewrite，角色描述 desc_read / desc_append / desc_replace / desc_rewrite
  *   5. 描述改动先暂存成 patch；世界书写入留快照，面板里可恢复
  *   6. 工具日志：当轮压成一行纯文本，下一条消息起移出上下文
  *   7. 环境诊断（设置页顶部 + 徽章置灰）+ `/thrive on|off|passive|once|status|panel`

@@ -4,7 +4,7 @@ SillyTavern 扩展。开启后给模型一组受限工具，让它把对话里�
 
 两种开启方式：**主动**（手动开关，一直学）与**被动**（配好判据，命中就借一轮）。
 
-适用版本：**SillyTavern 1.19.0**（2026-09-14）· 当前 v0.18.0 · 单人一对一对话，不支持群聊。
+适用版本：**SillyTavern 1.19.0**（2026-09-14）· 当前 v0.19.0 · 单人一对一对话，不支持群聊。
 
 ## 它解决什么
 
@@ -85,6 +85,7 @@ ST 左侧「AI 响应配置」里必须勾上 **启用函数调用**（Enable fu
 ```
 index.js        入口：初始化、事件绑定
 src/tools.js    工具注册与分发        src/targets.js   世界书 / 角色描述的读写
+src/regex.js    正则编译、命中与替换   src/limits.js    所有可调数值上限
 src/store.js    设置与对话状态        src/patch.js     描述改动的暂存与确认
 src/passive.js  被动学习的判据        src/limits.js    所有可调数值上限
 src/prompt.js   学习块与注入          src/diagnostics.js 环境诊断与错误文案
