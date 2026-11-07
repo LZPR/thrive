@@ -11,6 +11,7 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
@@ -45,6 +46,7 @@ import {
 import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '../targets.js';
 import { escapeHtml, normalizeEol } from '../util.js';
 import { syncBadgeOpenState } from './badge.js';
+import { openCompressPanel } from './compress-panel.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
 import { updatePatchHint } from './settings.js';
@@ -163,11 +165,13 @@ export function refreshPanel(ctx = getContext()) {
 
     const settings = ensureSettings(ctx);
     const mode = readModeView(ctx, settings);
+    const compress = getCompressSnapshot();
 
     /*
      * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
      * 模式状态也在里面——面板里就摆着两个开关，它们变了必须重画。
      * 「已写入」的展开状态同理：它只改这段的 DOM，不重画就没有反馈。
+     * 压缩那段同理：条数或字数变了，入口上的提示与高亮都要跟着变。
      */
     const signature = JSON.stringify([
         mode.active,
@@ -184,13 +188,15 @@ export function refreshPanel(ctx = getContext()) {
         drift,
         editorStale,
         historyExpanded,
+        compress.error,
+        compress.items.map(item => [item.id, item.chars, item.level]),
     ]);
     if (signature === panelSignature) {
         return;
     }
     panelSignature = signature;
 
-    panel.innerHTML = renderPanel({ mode, patch, backups, descBackup, drift, editorStale });
+    panel.innerHTML = renderPanel({ mode, patch, backups, descBackup, drift, editorStale, compress });
     // 内容换了高度可能也变了，重新摆一次（拖动后的位置在这里生效）
     applyPanelLayout(panel);
     updatePatchHint(ctx, settings);
@@ -356,7 +362,7 @@ function isDescriptionEditorStale(ctx, applied) {
     return normalizeEol(textarea.value) !== normalizeEol(applied);
 }
 
-function renderPanel({ mode, patch, backups, descBackup, drift = false, editorStale = false }) {
+function renderPanel({ mode, patch, backups, descBackup, drift = false, editorStale = false, compress = getCompressSnapshot() }) {
     const pending = isUnresolved(patch);
     const counts = [];
     if (pending) {
@@ -368,11 +374,29 @@ function renderPanel({ mode, patch, backups, descBackup, drift = false, editorSt
         counts.push(`已写入 ${backups.length}`);
     }
 
+    /*
+     * 压缩不再是正文里的一段，而是标题栏上的一颗按钮：它只做一件事——打开压缩侧栏。
+     * 条数做成按钮右上角的小角标，有超长内容时整颗按钮点亮（is-alert）。
+     * 这样面板正文只剩"当前对话"的三段，不用为一件低频操作常年占一屏。
+     */
+    const compressCount = compress.items.length;
+    const compressHard = compress.items.filter(item => item.level === 'hard').length;
+    const compressAlert = compressCount > 0;
+    const compressTitle = compressAlert
+        ? `压缩：${compressCount} 条超软提醒${compressHard > 0 ? ` · ${compressHard} 条超硬上限` : ''}。点开逐条处理`
+        : '压缩：没有超长内容，点开可以确认或重新扫描';
+
     const bar = `
         <div class="thrive-panel__bar">
             <i class="fa-solid fa-grip-vertical thrive-panel__grip" title="按住拖动可移动面板" aria-hidden="true"></i>
             <span class="thrive-panel__title">Thrive</span>
             <span class="thrive-panel__summary">${escapeHtml(counts.join(' · '))}</span>
+            <div class="menu_button thrive-panel__compress${compressAlert ? ' is-alert' : ''}"
+                data-thrive-action="open-compress" title="${escapeHtml(compressTitle)}"
+                aria-label="${escapeHtml(compressTitle)}">
+                <i class="fa-solid fa-compress" aria-hidden="true"></i>
+                ${compressAlert ? `<span class="thrive-panel__compress-count">${compressCount}</span>` : ''}
+            </div>
             <div class="menu_button thrive-panel__toggle" data-thrive-action="hide-panel"
                 title="收起面板；输入框旁的徽章随时能把它叫回来">收起</div>
         </div>`;
@@ -745,6 +769,10 @@ function onPanelClick(event) {
         case 'hide-panel':
             setPanelOpen(false);
             break;
+        case 'open-compress':
+            /* 压缩面板是另一个窗口，浮动面板不动：用户可能想两边对照着看 */
+            openCompressPanel(getContext());
+            break;
         case 'toggle-active':
             toggleActive(getContext(), ensureSettings(getContext()));
             break;
@@ -1059,4 +1087,6 @@ function formatTime(timestamp) {
 /* 登记给刷新编排：面板的刷新入口就这一个 */
 registerSurfaces({
     panel: ({ ctx }) => refreshPanel(ctx),
+    // 压缩扫描结果变了：入口那段的高亮与提示要跟着变，整块重画（签名会挡住无变化的）
+    compressEntry: () => refreshPanel(getContext()),
 });

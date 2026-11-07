@@ -142,7 +142,7 @@ export function applyPanelLayout(panel = document.getElementById(PANEL_ID)) {
     panel.style.width = `${width}px`;
 
     if (layout.pinned) {
-        pinPanel(panel, layout, view, width);
+        pinPanel(panel, layout.x, layout.y, width);
         return;
     }
 
@@ -167,18 +167,29 @@ export function applyPanelLayout(panel = document.getElementById(PANEL_ID)) {
  * 视口底部，那时剩下的地方只够这么高。先夹坐标、再按新坐标算高度，两件事必须同序，
  * 否则会出现"坐标夹进来了、高度还是旧的大值"，面板下半截挂到屏幕外。
  *
+ * 收的是**坐标**而不是一份 layout：拖动时手里只有指针位置，没有 layout。
+ * 早先这里收 `(panel, layout, view, width)` 四个参数，拖动那边按三个参数调，
+ * `view` 拿到的是个数字，`view.width` 就是 undefined → 夹取结果 NaN →
+ * `style.left = "NaNpx"`（浏览器直接忽略），面板拖一下就跳到左上角 (8, 8)。
+ *
  * @param {HTMLElement} panel
- * @param {ReturnType<typeof readPanelLayout>} layout
- * @param {{ width: number, height: number }} view
- * @param {number} width 已夹过的面板宽度
+ * @param {number} x 目标左边缘（文档坐标）
+ * @param {number} y 目标上边缘（文档坐标）
+ * @param {number} [width] 已夹过的面板宽度；不传就量当前的
  */
-function pinPanel(panel, layout, view, width) {
-    const maxLeft = Math.max(PANEL_MARGIN, view.width - width - PANEL_MARGIN);
+function pinPanel(panel, x, y, width = 0) {
+    const layout = readPanelLayout(ensureSettings(getContext()));
+    const view = viewportSize();
+    const boxWidth = width > 0
+        ? width
+        : Math.round(panel.getBoundingClientRect().width) || PANEL_MIN_WIDTH;
+
+    const maxLeft = Math.max(PANEL_MARGIN, view.width - boxWidth - PANEL_MARGIN);
     // 顶边最多摆到"只剩标题栏可见"，再往下就只能看到一条上边框
     const maxTop = Math.max(PANEL_MARGIN, view.height - PANEL_MIN_VISIBLE - PANEL_MARGIN);
 
-    const viewX = clampNumber(layout.x - window.scrollX, PANEL_MARGIN, maxLeft, PANEL_MARGIN);
-    const viewY = clampNumber(layout.y - window.scrollY, PANEL_MARGIN, maxTop, PANEL_MARGIN);
+    const viewX = clampNumber(x - window.scrollX, PANEL_MARGIN, maxLeft, PANEL_MARGIN);
+    const viewY = clampNumber(y - window.scrollY, PANEL_MARGIN, maxTop, PANEL_MARGIN);
 
     const available = Math.max(PANEL_MIN_VISIBLE, view.height - viewY - PANEL_MARGIN);
     panel.style.maxHeight = `${Math.round(Math.min(layout.height, available))}px`;

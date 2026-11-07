@@ -170,7 +170,7 @@ export const PROMPT_CARD_META = Object.freeze({
     },
     [CARD_ID.COMPACT]: {
         label: '压缩指令',
-        hint: '内容超限时附在工具返回里，不参与注入顺序',
+        hint: '压缩面板里「智能压缩」要用的提示词（这个功能还没接线）；不再附在工具返回里',
         editable: true,
     },
 });
@@ -343,7 +343,12 @@ export function getCardState(ctx, settings, id) {
     }
 
     if (id === CARD_ID.COMPACT) {
-        return { state: 'cond', note: '超限时才用' };
+        /*
+         * 压缩指令不参与注入，只在压缩面板的「智能压缩」里用（还没接线）。
+         * 仍然单列一张卡，是因为它确实是一段可编辑的提示词——用户要能看见
+         * 它长什么样、能改，而不是埋进某个设置项里。
+         */
+        return { state: 'cond', note: '压缩面板用 · 待接线' };
     }
 
     if (!injecting) {

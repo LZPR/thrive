@@ -20,6 +20,15 @@ export const PASSIVE_EVENT = 'thrive:passive';
 export const PANEL_TOGGLE_EVENT = 'thrive:panel-toggle';
 
 /**
+ * 超长内容的扫描结果变了。
+ *
+ * 扫描是异步的（要读世界书），而徽章、浮动面板入口、设置页那行、压缩面板都是
+ * 同步渲染的——中间必须有一份"最近一次结果"，并且结果变了要有人通知它们重画。
+ * compress.js 只负责广播，谁订阅谁自己刷。
+ */
+export const COMPRESS_EVENT = 'thrive:compress';
+
+/**
  * 通知面板重绘。非浏览器环境（node 里跑纯逻辑用例）没有 document，忽略即可。
  * @param {unknown} [detail] 仅用于调试，面板不依赖它
  */

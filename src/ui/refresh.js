@@ -10,7 +10,9 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { getCompressSnapshot, requestCompressScan } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
+import { COMPRESS_EVENT } from '../events.js';
 import { syncFromContext } from '../prompt.js';
 import {
     ensureSettings,
@@ -22,7 +24,7 @@ import {
     saveChat,
     setEnabled,
 } from '../store.js';
-import { isPanelOpen, markPanelOpen, toast } from './shared.js';
+import { COMPRESS_ID, isPanelOpen, markPanelOpen, toast } from './shared.js';
 
 /* ------------------------------------------------------------ 分区登记表 */
 
@@ -48,6 +50,10 @@ const SURFACES = {
     badge: () => {},
     /** 聊天区：浮动面板 */
     panel: () => {},
+    /** 聊天区：压缩面板 */
+    compressPanel: () => {},
+    /** 浮动面板标题栏上那颗压缩按钮（条数角标与高亮） */
+    compressEntry: () => {},
 };
 
 /**
@@ -133,6 +139,12 @@ export function refreshUI(ctx = getContext()) {
 
     // 换角色/换对话后，选项上的"角色自带/卡内嵌"标注会变，重新铺一遍
     void paint('books', view);
+
+    /*
+     * 顺手排一次"哪些内容超长"的检查。扫描要读世界书，所以去抖；
+     * 结果变了会发 COMPRESS_EVENT，各入口自己重画（见 bindCompressRefresh）。
+     */
+    requestCompressScan(ctx);
 }
 
 /**
@@ -161,4 +173,88 @@ export function refreshBadgeOnly(ctx = getContext()) {
     if (isPanelOpen()) {
         paint('panel', view);
     }
+}
+
+/* ------------------------------------------------------------ 压缩结果广播 */
+
+/**
+ * 压缩扫描结果变了：刷浮动面板标题栏上那颗按钮，以及压缩侧栏自己。
+ *
+ * 由 compress.js 广播、这里订阅，是因为"结果变了该重画什么"属于界面编排，
+ * 扫描那一边不该知道有几个窗口在看着它。
+ *
+ * @param {object} [snapshot]
+ */
+export function refreshCompressEntry(snapshot = getCompressSnapshot()) {
+    const view = { ctx: getContext(), snapshot };
+    paint('compressEntry', view);
+    paint('compressPanel', view);
+}
+
+/** 闪烁用的定时器：连续来几次新条目时只保留最后一次，别叠成一个长亮 */
+let flashTimer = 0;
+
+/**
+ * 让标题栏那颗压缩按钮闪几下。
+ *
+ * 只在浮动面板开着时调用：按钮就在面板标题栏里，面板关着时它根本不在屏幕上。
+ * 重绘会重建 DOM，所以这个函数必须在 refreshCompressEntry 之后调。
+ */
+function flashCompressEntry() {
+    const button = document.querySelector('#thrive_panel [data-thrive-action="open-compress"]');
+    if (!button) {
+        return;
+    }
+
+    clearTimeout(flashTimer);
+    button.classList.remove('is-flash');
+    // 读一次布局强制重排：连续两次新增时，class 不重新生效动画就不会重播
+    void button.offsetWidth;
+    button.classList.add('is-flash');
+
+    flashTimer = setTimeout(() => {
+        button.classList.remove('is-flash');
+    }, 2600);
+}
+
+/**
+ * 订阅压缩事件。由 index.js 在初始化时调一次。
+ *
+ * 徽章与浮动面板顶部都带"几条超长"，它们走 refreshBadgeOnly 一起刷——
+ * 那里面本来就包括"面板开着就顺手重画"，不用再单独调一次。
+ */
+export function bindCompressRefresh() {
+    document.addEventListener(COMPRESS_EVENT, event => {
+        refreshCompressEntry();
+        refreshBadgeOnly(getContext());
+
+        const added = event?.detail?.added ?? [];
+        if (added.length === 0) {
+            return;
+        }
+
+        /*
+         * 压缩侧栏正开着：用户已经在处理了，闪烁与提示都是打扰。
+         * 浮动面板开着：按钮就在标题栏上，闪两下比弹 toast 轻，也不挡内容。
+         * 两个都关着：按钮看不见，只能弹一句告诉用户去哪儿处理。
+         */
+        if (isCompressPanelVisible()) {
+            return;
+        }
+
+        const head = added.length === 1 ? `「${added[0]}」` : `「${added[0]}」等 ${added.length} 条`;
+
+        if (isPanelOpen()) {
+            flashCompressEntry();
+            return;
+        }
+
+        toast(`${head}超过软提醒，可以在压缩面板里处理（/thrive compress）`);
+    });
+}
+
+/** 压缩面板现在开着没有。放在这里判断，是为了不把 compress-panel 再 import 进来 */
+function isCompressPanelVisible() {
+    const panel = document.getElementById(COMPRESS_ID);
+    return Boolean(panel) && !panel.classList.contains('displayNone');
 }

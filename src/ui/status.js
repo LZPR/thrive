@@ -8,6 +8,7 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
@@ -53,6 +54,15 @@ export function describeStatus(ctx = getContext()) {
 
     if (oneShot) {
         parts.push(`待学习：${describePending(oneShot)}（下一轮临时开启）`);
+    }
+
+    /*
+     * 超长内容是"最近一次扫描"的结论，可能比此刻晚几秒——所以只在有条目时补一句，
+     * 不写"0 条"，免得让人以为这个数字是实时精确的。
+     */
+    const compress = getCompressSnapshot().items.length;
+    if (compress > 0) {
+        parts.push(`超长：${compress} 条（/thrive compress 打开压缩面板）`);
     }
 
     const diag = diagnoseEnvironment(ctx);

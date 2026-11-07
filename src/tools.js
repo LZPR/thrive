@@ -44,7 +44,6 @@ import {
     saveChat,
     setReadHash,
 } from './store.js';
-import { compactHint } from './compact.js';
 import { readLimits } from './limits.js';
 import {
     appendLoreEntry,
@@ -607,10 +606,14 @@ async function handleLoreRead(params) {
         setReadHash(ctx, loreReadKey(book, title), fnv1a(full));
     }
 
-    if (full.length >= limits.softLimitEntry) {
-        payload.over_limit = true;
-        payload.hint = compactHint(settings, `正文 ${full.length} 字，超过软提醒 ${limits.softLimitEntry} 字。`);
-    }
+    /*
+     * 软提醒不再出现在返回里。
+     *
+     * 以前这里会附 over_limit + 一段压缩指令，让模型自己把条目压短——结果是它在
+     * 完全不了解上下文的情况下把设定压成摘要，而用户根本不知道发生过什么。
+     * 现在"该压哪条、压到什么程度"只在压缩面板里由用户判断（见 compress.js），
+     * 模型侧只剩硬上限：写不进去就是写不进去。
+     */
 
     applyReadNotes(ctx, settings, book, writable, payload);
 
@@ -665,8 +668,8 @@ async function handleLoreAdd(params) {
         return errorResult('EMPTY_CONTENT', '正文为空。世界书条目不能写成空内容，否则等同于删除。');
     }
     if (content.length > limits.hardLimitEntry) {
-        return errorResult('TOO_LONG', compactHint(settings,
-            `正文 ${content.length} 字，超过单条上限 ${limits.hardLimitEntry} 字。`));
+        return errorResult('TOO_LONG',
+            `正文 ${content.length} 字，超过单条上限 ${limits.hardLimitEntry} 字。这次没有写入：请精简到上限以内，或者拆成两条分别新建。`);
     }
 
     const normalized = normalizeKeys(params?.keys);
@@ -943,8 +946,8 @@ async function handleLoreRewrite(params) {
         return errorResult('EMPTY_CONTENT', '正文为空。空条目等于删除，不做。');
     }
     if (content.length > limits.hardLimitEntry) {
-        return errorResult('TOO_LONG', compactHint(settings,
-            `正文 ${content.length} 字，超过单条上限 ${limits.hardLimitEntry} 字，还没有压到位。`));
+        return errorResult('TOO_LONG',
+            `正文 ${content.length} 字，超过单条上限 ${limits.hardLimitEntry} 字。这次没有写入：请精简到上限以内再整段重写，或者改用 lore_replace 只改其中一段。`);
     }
 
     const written = await replaceLoreEntry(ctx, book, data, found, content, {
@@ -1035,21 +1038,19 @@ async function handleDescRead(params) {
     setReadHash(ctx, READ_KEY_DESC, fnv1a(text));
 
     const chars = text.length;
-    const payload = { ok: true, chars, over_limit: chars >= limits.softLimitDesc, text };
+    const payload = { ok: true, chars, text };
 
-    if (payload.over_limit) {
-        const hard = limits.hardLimitDesc;
-        payload.hint = compactHint(settings, chars > hard
-            ? `描述已 ${chars} 字，超过硬上限 ${hard} 字；追加和整段重写都会被拒绝，只能先压短。`
-            : `描述已 ${chars} 字，超过软提醒 ${limits.softLimitDesc} 字；写到总长超过 ${hard} 字才会被拒绝。`);
-    }
+    /*
+     * 软提醒不再进返回（见 lore_read 里的说明）。硬上限仍然只在写入侧拦：
+     * 读多少字不影响任何东西，读回来是为了让模型有完整正文可用。
+     */
 
     if (view.staged) {
         payload.staged = true;
         payload.note = '这份内容还没写入角色卡，用户确认后才会落盘；在此之前 prompt 里仍是原描述。';
     }
 
-    console.debug(`${LOG} desc_read`, { chars, over_limit: payload.over_limit, staged: view.staged });
+    console.debug(`${LOG} desc_read`, { chars, staged: view.staged });
 
     return payload;
 }
@@ -1087,8 +1088,8 @@ async function handleDescAppend(params) {
     const next = appendParagraph(base, text);
     const hardLimit = limits.hardLimitDesc;
     if (next.length > hardLimit) {
-        return errorResult('TOO_LONG', compactHint(settings,
-            `追加后共 ${next.length} 字，超过上限 ${hardLimit} 字。`));
+        return errorResult('TOO_LONG',
+            `追加后共 ${next.length} 字，超过上限 ${hardLimit} 字。这次没有写入：请少追加一些，或改用 desc_replace 顺手删掉一段再写。`);
     }
 
     const committed = await commitDescription(ctx, gate.character, { next, fullText: false });
@@ -1145,8 +1146,8 @@ async function handleDescReplace(params) {
 
     const hardLimit = limits.hardLimitDesc;
     if (replaced.text.length > hardLimit) {
-        return errorResult('TOO_LONG', compactHint(settings,
-            `替换后共 ${replaced.text.length} 字，超过上限 ${hardLimit} 字。`));
+        return errorResult('TOO_LONG',
+            `替换后共 ${replaced.text.length} 字，超过上限 ${hardLimit} 字。这次没有写入：把替换内容写短一些，或分几次局部替换。`);
     }
 
     const committed = await commitDescription(ctx, gate.character, { next: replaced.text, fullText: false });
@@ -1200,8 +1201,8 @@ async function handleDescRewrite(params) {
     const next = text.trim();
     const hardLimit = limits.hardLimitDesc;
     if (next.length > hardLimit) {
-        return errorResult('TOO_LONG', compactHint(settings,
-            `正文 ${next.length} 字，超过上限 ${hardLimit} 字，还没有压到位。`));
+        return errorResult('TOO_LONG',
+            `正文 ${next.length} 字，超过上限 ${hardLimit} 字。这次没有写入：整段重写必须一次给到上限以内，否则先用 desc_replace 删掉一部分。`);
     }
 
     const committed = await commitDescription(ctx, gate.character, { next, fullText: true });

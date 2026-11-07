@@ -14,13 +14,15 @@
  *   8. 被动学习：条数 / 关键词任一命中就"借"一轮，回复完自动关闭（src/passive.js）
  *   9. 超长时的压缩指令可配（src/compact.js）
  *  10. 字数上限 / 返回条数 / 记录槽位 / 日志长度等数值全部可配（src/limits.js）
- *  11. 设置项按用途分成六组折叠，默认全收起（settings.html + style.css）
+ *  11. 设置项按用途分成七组折叠，默认全收起（settings.html + style.css）
  *  12. 界面按块拆分：src/ui/ 下一块界面一个文件，src/ui.js 只做门面（src/ui/*.js）
  *  13. 提示词卡片：拖动排序、按分界线分头部/尾部注入、弹窗编辑（src/prompt-order.js）
  *  14. 工具常驻：开关模式不再改变 tools 数组，改用「工具指令」的宏说明哪些不可用（src/tool-state.js）
+ *  15. 压缩改成手动：软提醒不再进工具返回，超长内容由独立的压缩面板处理（src/compress.js）
  */
 
 import { getContext } from '../../../extensions.js';
+import { requestCompressScan } from './src/compress.js';
 import { syncFromContext } from './src/prompt.js';
 import {
     clearPending,
@@ -38,17 +40,20 @@ import { registerTools } from './src/tools.js';
 import { compressToolTrace, pruneToolTraces } from './src/trace.js';
 import { diagnoseEnvironment, formatDiagnosis } from './src/diagnostics.js';
 import {
+    bindCompressRefresh,
     describeStatus,
     initBadge,
+    initCompressPanel,
     initPanel,
     initSettingsPanel,
+    openCompressPanel,
     openPanel,
     refreshBadgeOnly,
     refreshUI,
 } from './src/ui.js';
 
 const LOG = '[Thrive]';
-const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'passive', 'once'];
+const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'compress', 'passive', 'once'];
 
 /**
  * 现取 context。
@@ -63,7 +68,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.21 · 工具常驻 + 提示词卡片 + 工具清单`);
+    console.log(`${LOG} 启动 v0.22 · 手动压缩面板 + 工具常驻 + 提示词卡片`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -74,12 +79,21 @@ async function init() {
     await initSettingsPanel();
     await initBadge();
     initPanel();
+    initCompressPanel();
+    bindCompressRefresh();
     await initSlashCommand();
     bindEvents();
 
     const ctx = context();
     syncFromContext(ctx);
     refreshUI(ctx);
+
+    /*
+     * 首次检查延后一点：ST 启动时世界书列表还在陆续加载，太早扫会读到一半。
+     * refreshUI 里已经排过一次（去抖 250ms），这里只是兜一个更晚的时机，
+     * 两次结果一样时不会重画。
+     */
+    requestCompressScan(ctx, 1200);
 }
 
 /* ---------------------------------------------------------------- 斜杠命令 */
@@ -111,6 +125,7 @@ async function initSlashCommand() {
             name: 'thrive',
             helpString: '学习模式：`/thrive on` 开启、`off` 关闭（都只作用于当前对话）、'
                 + '`passive` 切换被动学习、`once` 让下一轮临时学一次、'
+                + '`compress` 打开压缩面板（超长条目与角色描述）、'
                 + '`status` 看主动/被动/模块/可写书/待确认、`panel` 打开浮动面板（模式开关 + 记录）。不写动作等于 `status`。',
             returns: '一行状态说明',
             unnamedArgumentList: [
@@ -176,6 +191,19 @@ function runThriveCommand(raw) {
         case 'panel': {
             openPanel(ctx);
             return report('面板已打开：模式开关在最上面，记录在下面');
+        }
+
+        /*
+         * 压缩面板是独立窗口，和浮动面板互不遮挡——要处理超长内容时不必先把
+         * 浮动面板收起来。它的数据每次打开都现扫，所以这里不做任何前置检查：
+         * 没选可写书、读不到书，都会在面板里写清楚。
+         */
+        case 'compress': {
+            if (!openCompressPanel(ctx)) {
+                return report('压缩面板还没挂载，刷新页面再试');
+            }
+            // 不在这里报条数：打开时刚排了一次重扫，此刻读到的是上一份快照
+            return report('压缩面板已打开：超长条目与角色描述都在里面');
         }
 
         /*
@@ -351,6 +379,13 @@ function bindEvents() {
                 syncFromContext(next);
             }
             refreshBadgeOnly(next);
+
+            /*
+             * 这一轮可能刚写进一条长条目（也可能刚把一条写超了）。重扫一次，
+             * 好在下一轮开始之前就把"该压缩了"标出来——等用户自己想起来去点，
+             * 往往已经又写进去两条了。
+             */
+            requestCompressScan(next, 500);
         });
     }
 

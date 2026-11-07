@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.21.0</span>
+                <span class="thrive-version">v0.22.2</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -154,7 +154,7 @@
             </div>
 
             <!-- 数值与上限 -->
-            <div class="inline-drawer thrive-group">
+            <div class="inline-drawer thrive-group" id="thrive_limits_group">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>数值与上限</b>
@@ -165,7 +165,8 @@
                 <div class="inline-drawer-content">
                     <small class="thrive-hint thrive-hint--muted">
                         这些数字决定模型一次能写多少、能读到多少。改完对下一次工具调用生效，已经写进去的内容不受影响。
-                        「软提醒」只在工具返回里提一句，写入照常通过；「硬上限」会让这次写入被拒绝。
+                        「软提醒」只用来在压缩面板里标记该压的内容，写入照常通过、模型也看不到它；
+                        「硬上限」会让这次写入被拒绝。
                         清空或填 0 等于用回默认值。
                     </small>
 
@@ -266,6 +267,11 @@
                     <small id="thrive_limits_hint" class="thrive-hint"></small>
 
                     <div class="thrive-actions">
+                        <div id="thrive_compress_open" class="menu_button"
+                            title="打开压缩面板：列出超过软提醒的世界书条目与角色描述，可以就地改">
+                            <i class="fa-solid fa-compress"></i>
+                            <span>压缩面板</span>
+                        </div>
                         <div id="thrive_limits_reset" class="menu_button thrive-reset" title="把所有数值恢复成默认值">
                             <i class="fa-solid fa-rotate-left"></i>
                             <span>全部恢复默认</span>
@@ -316,7 +322,7 @@
                         <span>自动注入这些提示词</span>
                     </label>
                     <small class="thrive-hint">
-                        关掉 = 由你在预设里手动放置，插件不再往提示词里塞任何东西；压缩指令仍会附在工具返回里。
+                        关掉 = 由你在预设里手动放置，插件不再往提示词里塞任何东西（压缩指令本来就不参与注入）。
                     </small>
                 </div>
             </div>

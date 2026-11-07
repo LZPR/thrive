@@ -9,6 +9,7 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { getCompressSnapshot } from '../compress.js';
 import { formatDiagnosis } from '../diagnostics.js';
 import { PASSIVE_EVENT, notifyPanelToggle } from '../events.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
@@ -180,6 +181,16 @@ function refreshBadge(ctx, settings, available, diag) {
     }
     if (patchPending > 0) {
         lines.push(`有 ${patchPending} 份待确认的描述改动`);
+    }
+
+    /*
+     * 超长内容只在 tooltip 里提一句，不在徽章上再加一个标记：
+     * 这个方块已经用颜色表达模式、用数字表达待确认改动，再叠一层就分不清了。
+     * 真正的高亮在面板里的「压缩」那一段与设置页那一组。
+     */
+    const compressCount = getCompressSnapshot().items.length;
+    if (compressCount > 0) {
+        lines.push(`有 ${compressCount} 条内容超过软提醒，面板里的「压缩」可以处理`);
     }
 
     // 点徽章只会开 / 关面板，说清楚，省得用户以为它还像以前那样切开关

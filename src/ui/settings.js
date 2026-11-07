@@ -12,6 +12,7 @@
 import { getContext } from '../../../../../extensions.js';
 import { copyText } from '../../../../../utils.js';
 import { COMPACT_PROMPT_LIMIT } from '../compact.js';
+import { requestCompressScan } from '../compress.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { LIMIT_SPECS, clampLimit, readLimits } from '../limits.js';
 import { armManual, describePending, intervalProgress, parseKeywords } from '../passive.js';
@@ -40,6 +41,7 @@ import {
 import { getActiveCharacter, getWritableBook, isBookScanned } from '../targets.js';
 import { listToolInfo } from '../tool-state.js';
 import { escapeHtml } from '../util.js';
+import { openCompressPanel } from './compress-panel.js';
 import { applyPanelLayout } from './panel-layout.js';
 import { refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
 import { LOG, PANEL_ID, askConfirm, toast } from './shared.js';
@@ -137,6 +139,7 @@ function bindPanelEvents() {
     bindPatchControls();
     bindTraceControls();
     bindPanelLayoutControls();
+    bindCompressControls();
 }
 
 /* ------------------------------------------------------------------ 模块开关 */
@@ -526,6 +529,11 @@ function bindLimitControls() {
             input.value = String(value);
             ctx.saveSettingsDebounced?.();
             updateLimitHint(settings);
+            // 软提醒改了，列表里"哪条超长"就跟着变——重新算一次
+            if (key === 'softLimitEntry' || key === 'softLimitDesc'
+                || key === 'hardLimitEntry' || key === 'hardLimitDesc') {
+                requestCompressScan(ctx, 150);
+            }
         });
     }
 
@@ -590,9 +598,29 @@ function updateLimitHint(settings) {
 
     el.textContent = `当前生效：${parts.join('；')}。`
         + (entryClamped || descClamped
-            ? ' 软提醒高于硬上限，已按硬上限计算；被拒之前不会再有单独的提醒。'
+            ? ' 软提醒高于硬上限，已按硬上限计算：等于只有到硬上限才会被列进压缩面板。'
             : '');
     el.classList.toggle('thrive-hint--warn', entryClamped || descClamped);
+}
+
+/* -------------------------------------------------------------- 压缩入口 */
+
+/**
+ * 设置页只剩一颗「压缩面板」按钮，放在「数值与上限」组的操作行里。
+ *
+ * 原来这里有一个折叠分组：标题旁写条数、组里再放说明与两个按钮。但这一组的全部
+ * 作用就是"打开那个侧栏"，为它占一整块折叠区不划算。现在软提醒与硬上限本身就在
+ * 上面那一组里，按钮跟着它们，上下文反而更近。
+ *
+ * 不做高亮、不做动效、不写条数：提醒的位置在浮动面板标题栏上，设置页不是常看的地方。
+ * 改内容也只在压缩侧栏里做——设置页不该出现第二处能改正文的地方。
+ */
+function bindCompressControls() {
+    document.getElementById('thrive_compress_open')?.addEventListener('click', () => {
+        if (!openCompressPanel(getContext())) {
+            toast('压缩面板还没挂载，刷新页面再试');
+        }
+    });
 }
 
 /* ------------------------------------------------------- 面板布局设置项 */

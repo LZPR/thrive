@@ -1192,3 +1192,454 @@ body.thrive-panel-dragging {
     text-align: center;
     pointer-events: none;
 }
+
+/* ------------------------------------------------------------ 压缩面板 */
+
+/*
+ * 独立的窗口，不是浮动面板里的一段：处理超长内容要同时看到多行正文，
+ * 塞进 480px 的面板里只会变成一条窄缝。
+ *
+ * 贴左边做成一条常驻侧栏，不再是浮在中间的弹窗：浮窗一挡就压住聊天区正中间，
+ * 而它又**不能拖**（拖拽只给浮动面板做了，见 ui/panel-layout.js）——位置既不可预期
+ * 也调不了。贴边之后位置固定、关掉就完全还原，改一段正文时左边的聊天区还看得见。
+ *
+ * 与 .thrive-panel 一样用 absolute：ST 给 html 设了 transform，fixed 的包含块会变成
+ * html 的零高度内容盒（详见 .thrive-panel 的注释）。
+ */
+.thrive-compress {
+    position: absolute;
+    /*
+     * 从顶栏下面开始、到底：顶部那排菜单键（设置、角色、世界书）被盖住会显得很怪，
+     * 而 ST 自己也是用 --topBarBlockSize 给侧边容器让位的（#top-settings-holder 等）。
+     * 变量没定义时退回 0，宁可盖住顶栏也别整块错位。
+     */
+    top: var(--topBarBlockSize, 0);
+    bottom: 0;
+    left: 0;
+    z-index: 4200;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-sizing: border-box;
+    width: min(420px, 92vw);
+    /*
+     * 上下都贴住，不写 height: 100vh：初始包含块就是视口（ST 页面自己不滚动），
+     * top/bottom 一起用才跟着视口高度走，竖屏地址栏收起时不用另算。
+     */
+    padding: 10px 14px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    /* 贴边那一侧不留边框和圆角，看起来才像一条栏，而不是一张卡片 */
+    border-left: none;
+    border-radius: 0 10px 10px 0;
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    backdrop-filter: blur(8px);
+    box-shadow: 12px 0 32px rgb(0 0 0 / 28%);
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+    /* 从左边滑出来：显示/隐藏是切 display，动画会跟着重放 */
+    animation: thrive-compress-slide-in 0.16s ease-out;
+}
+
+@keyframes thrive-compress-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(-16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thrive-compress {
+        animation: none;
+    }
+}
+
+/* 保存中：只关交互，别整体降透明度（面板本身可能已经是半透明的） */
+.thrive-compress--busy {
+    pointer-events: none;
+}
+
+.thrive-compress__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.thrive-compress__icon {
+    flex: 0 0 auto;
+    opacity: 0.7;
+}
+
+.thrive-compress__title {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.thrive-compress__bar-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-compress__close {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+}
+
+.thrive-compress__body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* 说明口径那一行：软提醒用来列表，硬上限用来拒绝写入 */
+.thrive-compress__limits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.65;
+}
+
+.thrive-compress__limits small {
+    flex: 1 1 100%;
+    opacity: 0.9;
+}
+
+/* 可写书单独占一行：书名长度不可控，和数字挤一行会把两个数字顶到下一行 */
+.thrive-compress__book {
+    flex: 1 0 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-compress__notice {
+    padding: 4px 8px;
+    border-left: 2px solid var(--SmartThemeBorderColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    line-height: 1.45;
+    opacity: 0.8;
+}
+
+.thrive-compress__notice--warn {
+    border-left-color: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+.thrive-compress__empty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 8px;
+    opacity: 0.6;
+}
+
+.thrive-compress__empty i {
+    opacity: 0.7;
+}
+
+.thrive-compress__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/*
+ * 一条内容。左边缘那道竖线表示严重程度：强调色 = 已经超过硬上限（模型再也写不进去），
+ * 灰 = 只是超过软提醒。整块用淡底而不是边框加重，一屏能放好几条。
+ */
+.thrive-compress__item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 6px 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 3%, transparent);
+}
+
+.thrive-compress__item--hard {
+    border-left-color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-compress__item--soft {
+    border-left-color: color-mix(in srgb, var(--SmartThemeBodyColor) 30%, transparent);
+}
+
+.thrive-compress__item.is-picked {
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+}
+
+.thrive-compress__row {
+    display: flex;
+    align-items: center;
+    /* 窄屏（92vw）下放不下就让标签与按钮落到第二行，别把标题挤成一两个字 */
+    flex-wrap: wrap;
+    gap: 4px 8px;
+}
+
+.thrive-compress__pick {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    margin: 0;
+}
+
+.thrive-compress__pick input {
+    margin: 0;
+    cursor: pointer;
+}
+
+/* 标题吃掉剩余宽度；标签与「编辑」固定在右侧，窄屏才换行 */
+.thrive-compress__item-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * 字数与上限单独一行。
+ *
+ * 原来它和标题一起装在同一个列里，侧栏一收窄，"编辑"按钮就被挤到下一行去了
+ * ——标题占着 flex:1，标签和按钮谁也不肯缩。拆成两行之后：第一行标题 + 标签 + 按钮，
+ * 第二行字数，第三行预览。这里的 21px 是让过复选框那一格（13px 框 + 8px 间距），
+ * 与上面的标题左对齐。
+ */
+.thrive-compress__item-meta {
+    padding-left: 21px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.55;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.thrive-compress__tag {
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.66);
+    white-space: nowrap;
+}
+
+.thrive-compress__item--hard .thrive-compress__tag {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 50%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-compress__edit {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+}
+
+.thrive-compress__preview {
+    max-height: 4.6em;
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    line-height: 1.5;
+    opacity: 0.7;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.thrive-compress__editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* 编辑框要能一路拉高：压一条两千字的描述时，八行根本不够看 */
+.thrive-compress__editor textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 9em;
+    resize: vertical;
+    font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
+    font-size: calc(var(--mainFontSize, 15px) * 0.82);
+    line-height: 1.5;
+}
+
+.thrive-compress__editor-foot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* 与底部工具栏同样的道理：字数那格吃掉剩余宽度，两个按钮不许被压成竖排 */
+.thrive-compress__editor-foot > .menu_button {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+}
+
+.thrive-compress__count {
+    flex: 1 1 auto;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+}
+
+.thrive-compress__count.thrive-count--warn {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+.thrive-compress__save {
+    width: auto;
+    padding: 2px 12px;
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-compress__foot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+/*
+ * 按钮不许被压窄。
+ *
+ * 实测过一版只写 `flex-wrap: wrap` + 让"已选 N 条"吃掉剩余宽度：中文可以在任意
+ * 两个字之间断行，浏览器就把「智能压缩所选（待实现）」的最小宽度算成一两个字，
+ * 于是它被挤成一根竖排的窄条、把底部工具栏撑到一百多像素高。
+ * 这里三件事一起做才稳：按钮不参与伸缩（flex: 0 0 auto）、文字不换行、
+ * 中间那格显式允许收缩到 0（min-width: 0），剩余空间才真的归它。
+ */
+.thrive-compress__foot > .menu_button {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+}
+
+.thrive-compress__ghost {
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    opacity: 0.8;
+}
+
+.thrive-compress__ghost:hover {
+    opacity: 1;
+}
+
+.thrive-compress__picked {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * 还没接线的按钮：虚线边框 + 常态压暗。不禁用——点它会给一句"为什么还不能点"，
+ * 比一个灰掉且点不动的按钮有用。
+ */
+.thrive-compress__smart[data-state="todo"] {
+    border-style: dashed;
+    opacity: 0.7;
+}
+
+.thrive-compress__tip {
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    line-height: 1.45;
+    opacity: 0.5;
+}
+
+/* ------------------------------------------------ 标题栏上的压缩按钮 */
+
+/*
+ * 压缩只剩这一颗按钮，放在浮动面板标题栏：图标 + 条数。
+ * 有超长内容时整颗点亮（is-alert）；扫描到新条目时闪 4 下（is-flash，由 refresh.js 加）。
+ */
+.thrive-panel__compress {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    padding: 1px 7px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+}
+
+.thrive-panel__compress.is-alert {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 60%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
+}
+
+/* 条数：按钮里的一颗小胶囊。不做绝对定位——标题栏只有 360px，溢出的角标会被裁掉 */
+.thrive-panel__compress-count {
+    min-width: 12px;
+    padding: 0 3px;
+    border-radius: 999px;
+    background-color: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBlurTintColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.6);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    line-height: 12px;
+    text-align: center;
+}
+
+/*
+ * 新条目提醒：短时间闪几下就停。
+ * 只在浮动面板开着时加这个 class——面板关着时按钮根本不在屏幕上，闪了也没人看见。
+ * 4 × 0.6s = 2.4s，与 refresh.js 里 2600ms 的移除定时器对齐。
+ */
+@keyframes thrive-compress-flash {
+    0%,
+    100% {
+        border-color: var(--SmartThemeBorderColor);
+        box-shadow: none;
+    }
+
+    50% {
+        border-color: var(--SmartThemeQuoteColor);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--SmartThemeQuoteColor) 30%, transparent);
+        color: var(--SmartThemeQuoteColor);
+    }
+}
+
+.thrive-panel__compress.is-flash {
+    animation: thrive-compress-flash 0.6s ease-in-out 4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* 动画关掉也得留下"刚才有新增"的痕迹：把边框点亮到下一次重绘 */
+    .thrive-panel__compress.is-flash {
+        border-color: var(--SmartThemeQuoteColor);
+        animation: none;
+    }
+}

@@ -24,7 +24,7 @@
  * 顺序与设置页一致：世界书条目 → 角色描述 → 读取返回 → 记录与日志。
  */
 export const LIMIT_SPECS = Object.freeze({
-    /** 单条世界书正文的软提醒（字）：只在返回里提一句，不拦截 */
+    /** 单条世界书正文的软提醒（字）：只在压缩面板里标记该压，不拦截任何写入 */
     softLimitEntry: Object.freeze({ default: 800, min: 100, max: 20000, step: 50 }),
     /** 单条世界书正文的硬上限（字）：写入后整条超过直接拒绝 */
     hardLimitEntry: Object.freeze({ default: 1200, min: 100, max: 40000, step: 50 }),
@@ -33,7 +33,7 @@ export const LIMIT_SPECS = Object.freeze({
     /** 条目标题字数上限，超出报 TITLE_TOO_LONG */
     titleMaxChars: Object.freeze({ default: 60, min: 4, max: 200, step: 2 }),
 
-    /** 角色描述的软提醒（字）：超过时 desc_read 返回 over_limit */
+    /** 角色描述的软提醒（字）：超过时列进压缩面板（ADR-040） */
     softLimitDesc: Object.freeze({ default: 1600, min: 100, max: 40000, step: 50 }),
     /** 角色描述的硬上限（字）：写入后总长超过直接拒绝 */
     hardLimitDesc: Object.freeze({ default: 2400, min: 100, max: 80000, step: 50 }),
@@ -101,8 +101,8 @@ export function readLimit(settings, key) {
  * 读整套上限。
  *
  * 软提醒被硬上限封顶：用户可以两边随便填，但"软 > 硬"意味着一条内容在被拒之前
- * 根本不会收到提醒。与其在设置页拦住他，不如在生效时按硬上限算——
- * 结果永远自洽，面板上也会把实际生效值写出来。
+ * 根本不会出现在压缩面板里（面板按软提醒筛，而写入按硬上限拦）。与其在设置页拦住他，
+ * 不如在生效时按硬上限算——结果永远自洽，面板上也会把实际生效值写出来。
  *
  * @param {object} settings
  * @returns {Record<string, number>}
