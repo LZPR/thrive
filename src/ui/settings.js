@@ -10,31 +10,26 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
-import {
-    COMPACT_PROMPT_LIMIT,
-    DEFAULT_COMPACT_PROMPT,
-    getCompactPrompt,
-    normalizeCompactPrompt,
-} from '../compact.js';
+import { COMPACT_PROMPT_LIMIT } from '../compact.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { LIMIT_SPECS, clampLimit, readLimits } from '../limits.js';
 import { armManual, describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import {
-    BLOCK_TEXT_PARTS,
-    composeBlockText,
+    PROMPT_CARD_META,
+    buildInjection,
     countChars,
-    getPartText,
-    getPositionHint,
-    normalizeBlockText,
-    normalizePosition,
+    getCardSettingKey,
+    getCardState,
+    getCardText,
+    getPromptOrder,
+    normalizeCardText,
     syncFromContext,
 } from '../prompt.js';
+import { CARD_ID, DEFAULT_PROMPT_ORDER, normalizeOrder } from '../prompt-order.js';
 import {
     DEFAULT_SETTINGS,
-    LEARNING_MODE,
     ensureSettings,
-    getLearningMode,
     getPending,
     getState,
     hasAnyModule,
@@ -131,8 +126,7 @@ function bindPanelEvents() {
         refreshUI(ctx);
     });
 
-    bindBlockControls();
-    bindCompactControls();
+    bindPromptControls();
     bindLoreControls();
     bindLimitControls();
     bindModuleControls();
@@ -851,150 +845,311 @@ function updateScopeHint(ctx, settings) {
         : '当前角色没有绑定其他书，实际等同只看可写书。';
 }
 
-function bindBlockControls() {
-    const select = document.getElementById('thrive_block_position');
+/* ------------------------------------------------------------ 提示词卡片 */
 
-    if (select) {
-        select.addEventListener('change', function () {
+/** 卡片状态 → 角标文案。`anchor` 是分界线，没有状态角标 */
+const PROMPT_STATE_LABEL = Object.freeze({
+    on: '生效中',
+    idle: '未生效',
+    cond: '条件触发',
+});
+
+/** jQuery UI 拖动期间不要重排 DOM：它正持有占位元素与 helper */
+let promptDragging = false;
+
+function bindPromptControls() {
+    $('#thrive_tools_resident').on('change', function () {
+        const ctx = getContext();
+        ensureSettings(ctx).toolsResident = Boolean(this.checked);
+        ctx.saveSettingsDebounced?.();
+        syncFromContext(ctx);
+        // 工具注册表与工具卡片状态都跟着变
+        refreshUI(ctx);
+    });
+
+    $('#thrive_prompt_inject').on('change', function () {
+        const ctx = getContext();
+        ensureSettings(ctx).promptInject = Boolean(this.checked);
+        ctx.saveSettingsDebounced?.();
+        syncFromContext(ctx);
+        refreshUI(ctx);
+    });
+
+    $('#thrive_prompt_order_reset').on('click', () => {
+        const ctx = getContext();
+        ensureSettings(ctx).promptOrder = DEFAULT_PROMPT_ORDER.slice();
+        ctx.saveSettingsDebounced?.();
+        syncFromContext(ctx);
+        refreshUI(ctx);
+        toast('提示词顺序已恢复默认');
+    });
+
+    // 一张卡一个铅笔，用委托就够；分界线卡片没有铅笔
+    $('#thrive_prompt_list').on('click', '.thrive-prompt-card__edit', function () {
+        const id = this.closest('.thrive-prompt-card')?.dataset.card;
+        void openPromptEditor(getContext(), id);
+    });
+
+    initPromptSortable();
+}
+
+/**
+ * 拖动排序。用 ST 自带的 jQuery UI sortable（预设面板也是它），
+ * 不额外引入依赖；拿不到就退化成不能拖，编辑与注入照常。
+ */
+function initPromptSortable() {
+    const list = document.getElementById('thrive_prompt_list');
+    const $ = globalThis.jQuery;
+
+    if (!list || typeof $?.fn?.sortable !== 'function') {
+        return;
+    }
+
+    // 手机上整卡拖动会和滚动打架，只认抓手；桌面整卡可拖，铅笔留给点击
+    const mobile = Boolean(getContext()?.isMobile?.());
+
+    $(list).sortable({
+        items: '.thrive-prompt-card',
+        handle: mobile ? '.thrive-prompt-card__grip' : null,
+        cancel: '.thrive-prompt-card__edit',
+        placeholder: 'thrive-prompt-placeholder',
+        forcePlaceholderSize: true,
+        axis: 'y',
+        tolerance: 'pointer',
+        delay: 30,
+        start: () => {
+            promptDragging = true;
+        },
+        stop: () => {
+            promptDragging = false;
+        },
+        update: () => {
             const ctx = getContext();
-            ensureSettings(ctx).blockPosition = normalizePosition(this.value);
+            const settings = ensureSettings(ctx);
+            const ids = Array.from(list.querySelectorAll('.thrive-prompt-card')).map(el => el.dataset.card);
+
+            settings.promptOrder = normalizeOrder(ids);
             ctx.saveSettingsDebounced?.();
-            updateBlockHint(this.value);
             syncFromContext(ctx);
-        });
-    }
-
-    // 三段共用一套绑定：DOM 后缀与设置键都在 BLOCK_TEXT_PARTS 里，以后加一段不用再抄事件
-    for (const { part, settingKey, defaultValue, label } of BLOCK_TEXT_PARTS) {
-        const textarea = document.getElementById(`thrive_block_${part}`);
-        const reset = document.getElementById(`thrive_block_${part}_reset`);
-
-        if (textarea) {
-            textarea.addEventListener('input', () => {
-                const ctx = getContext();
-
-                // 内存里立即生效：这样即使编辑后马上触发生成，拿到也是新文本
-                ensureSettings(ctx)[settingKey] = normalizeBlockText(textarea.value, part);
-                updateBlockCount(part, textarea.value);
-                updateBlockEffective(ctx, ensureSettings(ctx));
-
-                clearTimeout(saveTimer);
-                saveTimer = setTimeout(() => {
-                    ctx.saveSettingsDebounced?.();
-                    syncFromContext(ctx);
-                }, SAVE_DELAY);
-            });
-        }
-
-        if (reset) {
-            reset.addEventListener('click', () => {
-                const ctx = getContext();
-                ensureSettings(ctx)[settingKey] = '';
-                ctx.saveSettingsDebounced?.();
-                if (textarea) {
-                    textarea.value = defaultValue;
-                    updateBlockCount(part, textarea.value);
-                }
-                updateBlockEffective(ctx, ensureSettings(ctx));
-                syncFromContext(ctx);
-                toast(`${label}已恢复默认`);
-            });
-        }
-    }
+            updatePromptCards(ctx, settings);
+            updatePromptStats(ctx, settings);
+        },
+    });
 }
 
-/** 每段各一个字数，按 part 拼 id（`thrive_block_<part>_count`） */
-function updateBlockCount(part, text) {
-    const el = document.getElementById(`thrive_block_${part}_count`);
-    if (el) {
-        el.textContent = `${countChars(text)} 字`;
-    }
-}
-
-/**
- * 「当前生效」那一行：按这个对话此刻的模式，把实际要注入的长度算出来。
- *
- * 三段拆开之后，用户看着三个编辑框很难判断最终发出去的是什么，这一行就是答案；
- * 也顺手把"主动优先"这条规则显性化——徽章/面板切模式后它跟着变。
- */
-function updateBlockEffective(ctx, settings) {
-    const el = document.getElementById('thrive_block_effective');
-    if (!el) {
+/** 卡片骨架。只在列表为空时铺一次，之后靠 updatePromptCards 改状态与顺序 */
+function renderPromptCards(settings) {
+    const list = document.getElementById('thrive_prompt_list');
+    if (!list || list.childElementCount) {
         return;
     }
 
-    const mode = getLearningMode(ctx);
-    if (!mode) {
-        el.textContent = '当前对话没有开启学习模式，学习块不会注入。';
-        el.classList.add('thrive-hint--muted');
-        return;
-    }
+    list.innerHTML = getPromptOrder(settings).map(id => {
+        const meta = PROMPT_CARD_META[id];
+        if (!meta) {
+            return '';
+        }
 
-    const label = mode === LEARNING_MODE.PASSIVE ? '被动' : '主动';
-    const chars = countChars(composeBlockText(settings, mode));
-    el.textContent = `当前生效：通用 + ${label}模式，约 ${chars} 字（宏替换前，不含被动轮的「自动触发」说明）。`;
-    el.classList.remove('thrive-hint--muted');
+        const anchor = id === CARD_ID.ANCHOR;
+        return `<div class="thrive-prompt-card${anchor ? ' thrive-prompt-card--anchor' : ''}" data-card="${id}" data-state="idle" title="${meta.hint}">
+    <span class="thrive-prompt-card__grip fa-solid fa-grip-vertical" title="拖动调整位置与落点"></span>
+    <div class="thrive-prompt-card__main">
+        <span class="thrive-prompt-card__name">${meta.label}</span>
+        <span class="thrive-prompt-card__note"></span>
+    </div>
+    ${anchor ? '' : '<span class="thrive-prompt-card__badge"></span>'}
+    ${meta.editable
+        ? '<span class="thrive-prompt-card__edit fa-solid fa-pen-to-square" role="button" title="编辑内容"></span>'
+        : ''}
+</div>`;
+    }).join('');
 }
 
 /**
- * 压缩指令编辑框。
+ * 回填卡片的状态、字数与顺序。
  *
- * 与学习块不同的地方：它不进提示词，不用在防抖里 sync，只在输入时把值写进内存即可——
- * 超限提示是工具调用时现取的，晚一次落盘也不会拿到旧值。
+ * 只改文字与 class，不重建 DOM：拖动中重建会把 jQuery UI 手里的元素抽掉，
+ * 输入焦点也会丢。
  */
-function bindCompactControls() {
-    const textarea = document.getElementById('thrive_compact_prompt');
-    const reset = document.getElementById('thrive_compact_reset');
-
-    if (textarea) {
-        textarea.addEventListener('input', () => {
-            const ctx = getContext();
-
-            ensureSettings(ctx).compactPrompt = normalizeCompactPrompt(textarea.value);
-            updateCompactCount(textarea.value);
-
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(() => ctx.saveSettingsDebounced?.(), SAVE_DELAY);
-        });
+function updatePromptCards(ctx, settings) {
+    const list = document.getElementById('thrive_prompt_list');
+    if (!list) {
+        return;
     }
 
-    if (reset) {
-        reset.addEventListener('click', () => {
-            const ctx = getContext();
-            ensureSettings(ctx).compactPrompt = '';
-            // 默认文本照旧存空串：版本更新换了默认文案时，点过恢复默认的人也能跟着更新
-            ctx.saveSettingsDebounced?.();
-            if (textarea) {
-                textarea.value = DEFAULT_COMPACT_PROMPT;
-                updateCompactCount(textarea.value);
+    renderPromptCards(settings);
+
+    const order = getPromptOrder(settings);
+    const cards = new Map(
+        Array.from(list.querySelectorAll('.thrive-prompt-card')).map(el => [el.dataset.card, el]),
+    );
+
+    const current = Array.from(list.children).map(el => el.dataset.card);
+    if (!promptDragging && current.join(',') !== order.join(',')) {
+        for (const id of order) {
+            const el = cards.get(id);
+            if (el) {
+                list.appendChild(el);
             }
-            toast('压缩指令已恢复默认');
-        });
+        }
     }
+
+    for (const id of order) {
+        const el = cards.get(id);
+        const meta = PROMPT_CARD_META[id];
+        if (!el || !meta) {
+            continue;
+        }
+
+        const status = getCardState(ctx, settings, id);
+        el.dataset.state = status.state;
+
+        const note = el.querySelector('.thrive-prompt-card__note');
+        if (note) {
+            if (id === CARD_ID.ANCHOR) {
+                note.textContent = meta.hint;
+            } else {
+                const chars = countChars(getCardText(settings, id));
+                note.textContent = `${status.note} · ${chars} 字`;
+            }
+        }
+
+        const badge = el.querySelector('.thrive-prompt-card__badge');
+        if (badge) {
+            badge.textContent = PROMPT_STATE_LABEL[status.state] ?? '';
+        }
+    }
+
+    updateToolsResidentHint(settings);
 }
 
-/** 超过参考上限只提醒不截断：这是用户自己的提示词，截一半比超字更糟 */
-function updateCompactCount(text) {
-    const el = document.getElementById('thrive_compact_count');
+/**
+ * 「当前注入」那一行：把两段实际长度算出来。
+ *
+ * 卡片可以拖到分界线两侧，只看列表很难知道最终发出去多少字；这一行就是答案，
+ * 也顺手说明宏替换前后的差别。
+ */
+function updatePromptStats(ctx, settings) {
+    const el = document.getElementById('thrive_prompt_stats');
     if (!el) {
         return;
     }
 
-    const chars = countChars(text);
-    el.textContent = `${chars} / ${COMPACT_PROMPT_LIMIT} 字`;
-    el.classList.toggle('thrive-count--warn', chars > COMPACT_PROMPT_LIMIT);
+    if (settings.promptInject === false) {
+        el.textContent = '自动注入已关闭：插件不会改动提示词。';
+        return;
+    }
+
+    const { head, tail, mode } = buildInjection(ctx, settings);
+    const note = mode ? '' : '（学习模式未开启，只可能注入工具指令）';
+    el.textContent = `当前注入：系统区 ${countChars(head)} 字 · 尾部 ${countChars(tail)} 字${note}`;
 }
 
-function updateBlockHint(position) {
-    const el = document.getElementById('thrive_block_hint');
+function updateToolsResidentHint(settings) {
+    const el = document.getElementById('thrive_tools_resident_hint');
     if (!el) {
         return;
     }
 
-    const hint = getPositionHint(position);
-    el.textContent = hint.text;
-    el.classList.toggle('thrive-hint--warn', hint.level === 'warn');
-    el.classList.toggle('thrive-hint--muted', hint.level !== 'warn');
+    const resident = settings.toolsResident === true;
+    el.textContent = resident
+        ? '开：工具定义一直留在请求里，开关学习模式不再改变 tools 数组。不可用的工具由「工具指令」说明，调用会被直接拒绝。'
+        : '关：关闭学习模式时工具会从请求里消失，tools 数组一变，前缀缓存就从工具定义处失效。';
+    el.classList.toggle('thrive-hint--muted', !resident);
+}
+
+/**
+ * 卡片内容编辑弹窗。
+ *
+ * 用 ST 的通用弹窗而不是自己搭一层：右上角那颗「全屏」是 ST 原生编辑器的按钮，
+ * 挂了 `editor_maximize` 类就会走它自己的全屏逻辑，输入实时同步回这里的 textarea。
+ *
+ * 输入即写内存（防抖落盘），关掉弹窗再同步一次注入——和设置页里原来那些
+ * textarea 的约定一致。
+ */
+async function openPromptEditor(ctx, id) {
+    const meta = PROMPT_CARD_META[id];
+    const key = getCardSettingKey(id);
+
+    if (!meta || !meta.editable || !key) {
+        return;
+    }
+
+    const settings = ensureSettings(ctx);
+    const fieldId = 'thrive_prompt_editor_field';
+    const isCompact = id === CARD_ID.COMPACT;
+
+    if (typeof ctx.callGenericPopup !== 'function') {
+        toast('当前 SillyTavern 没有提供编辑弹窗，无法编辑提示词');
+        return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'thrive-prompt-editor';
+    wrapper.innerHTML = `<div class="thrive-prompt-editor__head">
+    <b>${meta.label}</b>
+    <small>${meta.hint}</small>
+</div>
+<textarea id="${fieldId}" class="text_pole thrive-block-text" spellcheck="false"></textarea>
+<div class="thrive-prompt-editor__foot">
+    <span class="thrive-count"></span>
+    <div class="thrive-prompt-editor__actions">
+        <div class="menu_button thrive-reset" data-act="reset" title="用回内置的默认文本">
+            <i class="fa-solid fa-rotate-left"></i>
+            <span>恢复默认</span>
+        </div>
+        <i class="editor_maximize fa-solid fa-maximize right_menu_button" data-for="${fieldId}"
+            title="全屏编辑"></i>
+    </div>
+</div>`;
+
+    const textarea = wrapper.querySelector('textarea');
+    const counter = wrapper.querySelector('.thrive-count');
+
+    const paintCount = () => {
+        const chars = countChars(textarea.value);
+        counter.textContent = isCompact
+            ? `${chars} / ${COMPACT_PROMPT_LIMIT} 字`
+            : `${chars} 字`;
+        counter.classList.toggle('thrive-count--warn', isCompact && chars > COMPACT_PROMPT_LIMIT);
+    };
+
+    textarea.value = getCardText(settings, id);
+    paintCount();
+
+    textarea.addEventListener('input', () => {
+        // 内存里立即生效：编辑完马上生成，拿到的也是新文本
+        settings[key] = normalizeCardText(textarea.value, id);
+        paintCount();
+
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+            ctx.saveSettingsDebounced?.();
+            syncFromContext(ctx);
+        }, SAVE_DELAY);
+    });
+
+    wrapper.querySelector('[data-act="reset"]').addEventListener('click', () => {
+        // 默认文本照旧存空串：版本更新换了默认文案时，点过恢复默认的人也能跟着更新
+        settings[key] = '';
+        textarea.value = getCardText(settings, id);
+        paintCount();
+        ctx.saveSettingsDebounced?.();
+        syncFromContext(ctx);
+        toast(`${meta.label}已恢复默认`);
+    });
+
+    await ctx.callGenericPopup(wrapper, ctx.POPUP_TYPE?.TEXT ?? 1, '', {
+        wide: true,
+        large: true,
+        allowVerticalScrolling: true,
+    });
+
+    ctx.saveSettingsDebounced?.();
+    syncFromContext(ctx);
+    const latest = ensureSettings(ctx);
+    updatePromptCards(ctx, latest);
+    updatePromptStats(ctx, latest);
 }
 
 /**
@@ -1045,36 +1200,10 @@ function refreshSettingsControls(ctx, settings) {
     updateBookHint(ctx, settings);
     updateScopeHint(ctx, settings);
 
-    const position = normalizePosition(settings.blockPosition);
-    const select = document.getElementById('thrive_block_position');
-    if (select && select.value !== position) {
-        select.value = position;
-    }
-    updateBlockHint(position);
-
-    for (const { part } of BLOCK_TEXT_PARTS) {
-        // 正在输入时不要回写，否则会把光标和未落盘的编辑冲掉
-        const textarea = document.getElementById(`thrive_block_${part}`);
-        if (!textarea || document.activeElement === textarea) {
-            continue;
-        }
-        const text = getPartText(settings, part);
-        if (textarea.value !== text) {
-            textarea.value = text;
-        }
-        updateBlockCount(part, text);
-    }
-
-    updateBlockEffective(ctx, settings);
-
-    const compactArea = document.getElementById('thrive_compact_prompt');
-    if (compactArea && document.activeElement !== compactArea) {
-        const text = getCompactPrompt(settings);
-        if (compactArea.value !== text) {
-            compactArea.value = text;
-        }
-        updateCompactCount(text);
-    }
+    syncCheckbox('thrive_tools_resident', settings.toolsResident);
+    syncCheckbox('thrive_prompt_inject', settings.promptInject);
+    updatePromptCards(ctx, settings);
+    updatePromptStats(ctx, settings);
 }
 
 function syncCheckbox(id, value) {

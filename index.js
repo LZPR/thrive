@@ -16,6 +16,8 @@
  *  10. 字数上限 / 返回条数 / 记录槽位 / 日志长度等数值全部可配（src/limits.js）
  *  11. 设置项按用途分成六组折叠，默认全收起（settings.html + style.css）
  *  12. 界面按块拆分：src/ui/ 下一块界面一个文件，src/ui.js 只做门面（src/ui/*.js）
+ *  13. 提示词卡片：拖动排序、按分界线分头部/尾部注入、弹窗编辑（src/prompt-order.js）
+ *  14. 工具常驻：开关模式不再改变 tools 数组，改用「工具指令」的宏说明哪些不可用（src/tool-state.js）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -61,7 +63,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 step 17 · 界面拆成 src/ui/`);
+    console.log(`${LOG} 启动 v0.20 · 工具常驻 + 提示词卡片`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

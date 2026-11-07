@@ -11,6 +11,7 @@
 
 import { notifyPanel } from './events.js';
 import { LIMIT_DEFAULTS, readLimit } from './limits.js';
+import { HEAD_PROMPT_ORDER } from './prompt-order.js';
 import { fnv1a } from './util.js';
 
 export const MODULE_NAME = 'thrive';
@@ -33,10 +34,29 @@ export const DEFAULT_SETTINGS = Object.freeze({
     passiveInterval: 0,
     /** 被动学习：关键词，逗号/分号/换行分隔；空 = 不用关键词触发 */
     passiveKeywords: '',
-    /** 学习块注入位置：tail / head / none */
-    blockPosition: 'tail',
     /**
-     * 学习块三段的正文。注入时拼成「通用 + 当前模式」一段（见 prompt.js 的 composeBlockText）。
+     * 是否让工具定义常驻。
+     *
+     * 关：关闭学习模式时工具的 shouldRegister 返回 false，tools 数组从有变无——
+     * 这段位于请求最前面，前缀缓存从第一个 token 起就废了。
+     * 开：工具定义一直留在请求里，可用性改由「工具指令」那段文字表达（见 prompt.js），
+     * 切换模式只会改动尾部或 system 段末尾，不会动工具定义。
+     */
+    toolsResident: false,
+    /**
+     * 工具指令的正文。空串 = 使用 prompt.js 的 DEFAULT_TOOL_PROMPT。
+     * 支持 {{工具名}} / {{!工具名}} 两种宏，见 expandToolMacros。
+     */
+    toolPrompt: '',
+    /**
+     * 提示词卡片的顺序（prompt-order.js 里的 id 数组）。
+     * 空数组 = 默认顺序；顺序里带一张分界线卡片，上方进系统提示词区、下方进尾部。
+     */
+    promptOrder: [],
+    /** 是否自动注入这些提示词。关掉 = 用户自己把它们放进预设，插件不再往提示词里塞东西 */
+    promptInject: true,
+    /**
+     * 学习块三段的正文。注入时按 promptOrder 拼成两段（见 prompt.js 的 buildInjection）。
      * 空串 = 使用 prompt.js 里对应那段的 DEFAULT_BLOCK_*。存空串而不是存整段默认文本，
      * 默认文本随版本更新时老用户也能拿到新版。
      */
@@ -174,6 +194,28 @@ export function ensureSettings(ctx) {
             settings.blockCommon = legacy;
         }
         delete settings.blockText;
+        dirty = true;
+    }
+
+    /*
+     * v0.20：一个 blockPosition 换成可拖动的卡片顺序表。
+     *   head → 学习块整体搬到分界线上方（进系统提示词区）
+     *   tail → 默认顺序（全在分界线下方）
+     *   none → 关掉自动注入，正文留在原处
+     * 只搬一次：promptOrder 已经有序时不再按旧值覆盖。
+     */
+    if (Object.hasOwn(settings, 'blockPosition')) {
+        const legacy = settings.blockPosition;
+        const hasOrder = Array.isArray(settings.promptOrder) && settings.promptOrder.length > 0;
+
+        if (!hasOrder && legacy === 'head') {
+            settings.promptOrder = HEAD_PROMPT_ORDER.slice();
+        }
+        if (legacy === 'none') {
+            settings.promptInject = false;
+        }
+
+        delete settings.blockPosition;
         dirty = true;
     }
 

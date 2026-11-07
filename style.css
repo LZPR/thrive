@@ -331,6 +331,225 @@
     opacity: 0.5;
 }
 
+/* ------------------------------------------------------------ 提示词卡片 */
+
+/*
+ * 卡片列表是设置页里唯一"可拖动"的区域：
+ * 左侧是抓手，中间是名字 + 状态，右侧是状态角标与铅笔。
+ * 三种状态只靠边框与透明度区分，不引入新颜色——主题换肤时跟着走。
+ */
+.thrive-settings .thrive-prompt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 6px 0 8px;
+}
+
+.thrive-settings .thrive-prompt-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-left-width: 3px;
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+    line-height: 1.35;
+}
+
+.thrive-settings .thrive-prompt-card__grip {
+    flex: 0 0 auto;
+    padding: 2px 1px;
+    opacity: 0.4;
+    cursor: grab;
+}
+
+.thrive-settings .thrive-prompt-card__grip:active {
+    cursor: grabbing;
+}
+
+.thrive-settings .thrive-prompt-card__main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.thrive-settings .thrive-prompt-card__name {
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.thrive-settings .thrive-prompt-card__note {
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    opacity: 0.55;
+}
+
+.thrive-settings .thrive-prompt-card__badge {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.68);
+    line-height: 1.6;
+    opacity: 0.5;
+}
+
+.thrive-settings .thrive-prompt-card__edit {
+    flex: 0 0 auto;
+    padding: 3px 4px;
+    opacity: 0.55;
+    cursor: pointer;
+}
+
+.thrive-settings .thrive-prompt-card__edit:hover {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor);
+}
+
+/* 生效中：强调色左边框 + 实心角标 */
+.thrive-settings .thrive-prompt-card[data-state="on"] {
+    border-left-color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-settings .thrive-prompt-card[data-state="on"] .thrive-prompt-card__badge {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+/*
+ * 未生效：虚线框 + 整卡变淡，一眼能和"这一轮真的在发"的卡区分开。
+ * 只淡文字，不淡铅笔——淡了的按钮看起来像不能点。
+ */
+.thrive-settings .thrive-prompt-card[data-state="idle"] {
+    border-style: dashed;
+    border-left-style: solid;
+}
+
+.thrive-settings .thrive-prompt-card[data-state="idle"] .thrive-prompt-card__main {
+    opacity: 0.55;
+}
+
+.thrive-settings .thrive-prompt-card[data-state="idle"] .thrive-prompt-card__badge {
+    opacity: 0.3;
+}
+
+/* 条件触发：点状左边框（压缩指令、"全都可用所以不注入"的工具指令） */
+.thrive-settings .thrive-prompt-card[data-state="cond"] {
+    border-left-color: var(--SmartThemeEmColor, var(--SmartThemeBorderColor));
+    border-left-style: dotted;
+}
+
+/* 分界线：底色略深、整卡虚线，读起来像"这里不是一张提示词" */
+.thrive-settings .thrive-prompt-card--anchor {
+    border-style: dashed;
+    border-left-color: transparent;
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 9%, transparent);
+}
+
+.thrive-settings .thrive-prompt-card--anchor .thrive-prompt-card__name {
+    font-weight: 600;
+}
+
+.thrive-settings .thrive-prompt-stats {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+/* jQuery UI sortable 的占位块：拖动时提示"会落在这里" */
+.thrive-settings .thrive-prompt-placeholder {
+    height: 42px;
+    border: 1px dashed var(--SmartThemeQuoteColor);
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 8%, transparent);
+}
+
+/* ------------------------------------------------------ 提示词编辑弹窗 */
+
+/*
+ * 弹窗内容自成一块：上面标题、中间 textarea 撑满、下面字数与按钮。
+ * 右上角那颗全屏按钮走 ST 原生的 editor_maximize，样式沿用它的。
+ */
+.thrive-prompt-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    /* large 弹窗固定 90dvh：撑满内容区，textarea 才不会只占上半截 */
+    height: 100%;
+    text-align: left;
+}
+
+.thrive-prompt-editor__head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.thrive-prompt-editor__head small {
+    opacity: 0.6;
+}
+
+.thrive-prompt-editor textarea {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    resize: none;
+    font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.thrive-prompt-editor__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.thrive-prompt-editor__actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+}
+
+/*
+ * 弹窗不在 .thrive-settings 里，设置页那几条样式够不到它：
+ * 按钮得自己写回 auto 宽度，否则会被 ST 的 .menu_button 规则压成一列字。
+ */
+.thrive-prompt-editor .thrive-reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    padding: 2px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.85);
+    white-space: nowrap;
+}
+
+.thrive-prompt-editor .thrive-count {
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.55;
+}
+
+.thrive-prompt-editor .thrive-count--warn {
+    opacity: 0.95;
+    color: var(--SmartThemeQuoteColor);
+}
+
 /* ------------------------------------------------------------ 浮动面板 */
 
 /*

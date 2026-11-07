@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.18.0</span>
+                <span class="thrive-version">v0.20.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -279,106 +279,47 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>提示词</b>
-                        <small class="thrive-group__hint">注入位置 · 通用 / 主动 / 被动 · 压缩指令</small>
+                        <small class="thrive-group__hint">工具常驻 · 卡片顺序 · 内容编辑</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <div class="thrive-field">
-                        <label for="thrive_block_position">学习块注入位置</label>
-                        <select id="thrive_block_position" class="text_pole">
-                            <option value="tail">尾部（推荐）</option>
-                            <option value="head">头部（system 区）</option>
-                            <option value="none">不注入</option>
-                        </select>
-                        <small id="thrive_block_hint" class="thrive-hint thrive-hint--muted"></small>
-                    </div>
+                    <label class="checkbox_label" for="thrive_tools_resident">
+                        <input id="thrive_tools_resident" type="checkbox">
+                        <span>工具提示词常驻</span>
+                    </label>
+                    <small id="thrive_tools_resident_hint" class="thrive-hint"></small>
 
+                    <span class="thrive-field-title">提示词卡片</span>
                     <small class="thrive-hint thrive-hint--muted">
-                        学习块分成三段：<b>通用</b> 每轮都带，<b>主动</b> / <b>被动</b> 只带当前模式那一段，
-                        注入时按「通用 + 当前模式」的顺序拼起来。两段说的话重合时，以模式段为准（它排在后面）。
-                        主动与被动同时成立时按主动算。
+                        拖动卡片调整顺序与落点：分界线「其它提示词」上方进系统提示词区，下方进对话尾部。
+                        点卡片右侧的铅笔编辑内容，编辑弹窗右上角还能全屏。
                     </small>
 
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <label for="thrive_block_common">通用提示词</label>
-                            <span id="thrive_block_common_count" class="thrive-count">—</span>
+                    <div id="thrive_prompt_list" class="thrive-prompt-list"></div>
+
+                    <div class="thrive-prompt-stats">
+                        <span id="thrive_prompt_stats" class="thrive-count">—</span>
+                        <div id="thrive_prompt_order_reset" class="menu_button thrive-reset" title="把卡片恢复成默认顺序">
+                            <i class="fa-solid fa-rotate-left"></i>
+                            <span>默认顺序</span>
                         </div>
-                        <textarea id="thrive_block_common" class="text_pole thrive-block-text" rows="14" spellcheck="false"
-                            placeholder="留空表示使用默认文本"></textarea>
-                        <div class="thrive-actions">
-                            <div id="thrive_block_common_reset" class="menu_button thrive-reset" title="用回内置的默认通用提示词">
-                                <i class="fa-solid fa-rotate-left"></i>
-                                <span>恢复默认</span>
-                            </div>
-                        </div>
-                        <small class="thrive-hint">
-                            两种模式都会带上这一段：工具层与正文层的分工、写到哪里、怎么写、守什么规矩。留空 = 使用默认文本。
-                        </small>
                     </div>
 
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <label for="thrive_block_active">主动模式提示词</label>
-                            <span id="thrive_block_active_count" class="thrive-count">—</span>
-                        </div>
-                        <textarea id="thrive_block_active" class="text_pole thrive-block-text" rows="6" spellcheck="false"
-                            placeholder="留空表示使用默认文本"></textarea>
-                        <div class="thrive-actions">
-                            <div id="thrive_block_active_reset" class="menu_button thrive-reset" title="用回内置的默认主动模式提示词">
-                                <i class="fa-solid fa-rotate-left"></i>
-                                <span>恢复默认</span>
-                            </div>
-                        </div>
-                        <small class="thrive-hint">
-                            只在主动模式（手动开关一直开着）时接在通用后面。默认倾向积极提问、逢话必记。
-                        </small>
-                    </div>
+                    <small id="thrive_prompt_macro_hint" class="thrive-hint">
+                        工具指令里可以用 &#123;&#123;desc_read&#125;&#125; 表示「可用时写成工具名」，
+                        &#123;&#123;!desc_read&#125;&#125; 表示「不可用时写成工具名」。所有工具宏都展开为空时，整段不注入。
+                        十个工具名：desc_read、desc_append、desc_replace、desc_rewrite、
+                        lore_list、lore_read、lore_add、lore_append、lore_replace、lore_rewrite。
+                    </small>
 
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <label for="thrive_block_passive">被动模式提示词</label>
-                            <span id="thrive_block_passive_count" class="thrive-count">—</span>
-                        </div>
-                        <textarea id="thrive_block_passive" class="text_pole thrive-block-text" rows="6" spellcheck="false"
-                            placeholder="留空表示使用默认文本"></textarea>
-                        <div class="thrive-actions">
-                            <div id="thrive_block_passive_reset" class="menu_button thrive-reset" title="用回内置的默认被动模式提示词">
-                                <i class="fa-solid fa-rotate-left"></i>
-                                <span>恢复默认</span>
-                            </div>
-                        </div>
-                        <small class="thrive-hint">
-                            只在被动学习借来的那一轮接在通用后面。默认只记关键信息、尽量少调用工具。
-                            「本轮为自动触发」那句说明由插件按实际原因追加，不用自己写。
-                        </small>
-                    </div>
-
-                    <small id="thrive_block_effective" class="thrive-hint"></small>
-
+                    <label class="checkbox_label" for="thrive_prompt_inject">
+                        <input id="thrive_prompt_inject" type="checkbox">
+                        <span>自动注入这些提示词</span>
+                    </label>
                     <small class="thrive-hint">
-                        三段都支持 &#123;&#123;char&#125;&#125; 与 &#123;&#123;user&#125;&#125;，注入前会替换成实际名字。
+                        关掉 = 由你在预设里手动放置，插件不再往提示词里塞任何东西；压缩指令仍会附在工具返回里。
                     </small>
-
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <label for="thrive_compact_prompt">超长时的压缩指令</label>
-                            <span id="thrive_compact_count" class="thrive-count">—</span>
-                        </div>
-                        <textarea id="thrive_compact_prompt" class="text_pole thrive-block-text" rows="8" spellcheck="false"
-                            placeholder="留空表示使用默认文本"></textarea>
-                        <div class="thrive-actions">
-                            <div id="thrive_compact_reset" class="menu_button thrive-reset" title="用回内置的默认压缩指令">
-                                <i class="fa-solid fa-rotate-left"></i>
-                                <span>恢复默认</span>
-                            </div>
-                        </div>
-                        <small id="thrive_compact_hint" class="thrive-hint">
-                            描述或世界书条目超过长度上限时，这段文字会接在「已超多少字、append 还能不能写」后面发给模型。
-                            建议 500 字以内：话越少，模型越会自己判断怎么压。留空 = 使用默认文本。
-                        </small>
-                    </div>
                 </div>
             </div>
 

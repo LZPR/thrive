@@ -69,6 +69,7 @@ import {
 } from './patch.js';
 import { compilePattern, replaceIn, scan } from './regex.js';
 import { TOOL_NAMES } from './tool-names.js';
+import { isToolAvailable } from './tool-state.js';
 import { hintFor } from './diagnostics.js';
 import { appendParagraph, fnv1a, isBlank, truncate } from './util.js';
 
@@ -125,7 +126,7 @@ function registerLoreTools(ctx) {
                 },
             },
         },
-        action: params => handleLoreList(params),
+        action: guardAction(TOOL_NAMES.LORE_LIST, handleLoreList),
         formatMessage: params => (isBlank(params?.pattern) ? '浏览世界书目录' : `筛选世界书：${params.pattern}`),
         shouldRegister: () => shouldRegisterLore(),
         stealth: false,
@@ -154,7 +155,7 @@ function registerLoreTools(ctx) {
             },
             required: ['title'],
         },
-        action: params => handleLoreRead(params),
+        action: guardAction(TOOL_NAMES.LORE_READ, handleLoreRead),
         formatMessage: params => `读取世界书条目：${params?.title ?? ''}`,
         shouldRegister: () => shouldRegisterLore(),
         stealth: false,
@@ -189,7 +190,7 @@ function registerLoreTools(ctx) {
             },
             required: ['title', 'content', 'keys'],
         },
-        action: params => handleLoreAdd(params),
+        action: guardAction(TOOL_NAMES.LORE_ADD, handleLoreAdd),
         formatMessage: params => `新建世界书条目：${params?.title ?? ''}`,
         shouldRegister: () => shouldRegisterLore(),
         stealth: false,
@@ -220,7 +221,7 @@ function registerLoreTools(ctx) {
             },
             required: ['title'],
         },
-        action: params => handleLoreAppend(params),
+        action: guardAction(TOOL_NAMES.LORE_APPEND, handleLoreAppend),
         formatMessage: params => `追加世界书条目：${params?.title ?? ''}`,
         shouldRegister: () => shouldRegisterLore(),
         stealth: false,
@@ -258,7 +259,7 @@ function registerLoreTools(ctx) {
             },
             required: ['title', 'pattern', 'replacement'],
         },
-        action: params => handleLoreReplace(params),
+        action: guardAction(TOOL_NAMES.LORE_REPLACE, handleLoreReplace),
         formatMessage: params => `替换世界书正文：${params?.title ?? ''}`,
         shouldRegister: () => shouldRegisterLore(),
         stealth: false,
@@ -284,7 +285,7 @@ function registerLoreTools(ctx) {
             },
             required: ['title', 'content'],
         },
-        action: params => handleLoreRewrite(params),
+        action: guardAction(TOOL_NAMES.LORE_REWRITE, handleLoreRewrite),
         formatMessage: params => `重写世界书正文：${params?.title ?? ''}`,
         shouldRegister: () => shouldRegisterLore(),
         stealth: false,
@@ -312,7 +313,7 @@ function registerDescTools(ctx) {
                 },
             },
         },
-        action: params => handleDescRead(params),
+        action: guardAction(TOOL_NAMES.DESC_READ, handleDescRead),
         formatMessage: params => (isBlank(params?.pattern) ? '读取角色描述' : `检索角色描述：${params.pattern}`),
         shouldRegister: () => shouldRegisterDescription(),
         stealth: false,
@@ -333,7 +334,7 @@ function registerDescTools(ctx) {
             },
             required: ['text'],
         },
-        action: params => handleDescAppend(params),
+        action: guardAction(TOOL_NAMES.DESC_APPEND, handleDescAppend),
         formatMessage: () => '追加角色描述',
         shouldRegister: () => shouldRegisterDescription(),
         stealth: false,
@@ -367,7 +368,7 @@ function registerDescTools(ctx) {
             },
             required: ['pattern', 'replacement'],
         },
-        action: params => handleDescReplace(params),
+        action: guardAction(TOOL_NAMES.DESC_REPLACE, handleDescReplace),
         formatMessage: params => `替换角色描述：${params?.pattern ?? ''}`,
         shouldRegister: () => shouldRegisterDescription(),
         stealth: false,
@@ -388,7 +389,7 @@ function registerDescTools(ctx) {
             },
             required: ['text'],
         },
-        action: params => handleDescRewrite(params),
+        action: guardAction(TOOL_NAMES.DESC_REWRITE, handleDescRewrite),
         formatMessage: () => '整段重写角色描述',
         shouldRegister: () => shouldRegisterDescription(),
         stealth: false,
@@ -397,36 +398,63 @@ function registerDescTools(ctx) {
 
 /**
  * 每次请求前由 ST 调用。必须同步返回、必须现取 context。
+ *
+ * 两种模式：
+ *   · 默认（toolsResident = false）：学习模式没开就撤下工具，请求体与没装插件时一致，
+ *     代价是 tools 数组随开关变化，前缀缓存从请求最前面就失效。
+ *   · 常驻（toolsResident = true）：工具定义一直留着，可用性交给「工具指令」那段文字，
+ *     调用由 guardAction 拦。模块/可写书这类结构性变化仍然会撤下工具——它们不随对话变。
+ *
  * @returns {boolean}
  */
 export function shouldRegisterDescription() {
     const ctx = getContext();
+    const settings = ensureSettings(ctx);
 
-    if (!isLearningActive(ctx)) {
+    if (settings.moduleDescription === false) {
         return false;
     }
 
-    return ensureSettings(ctx).moduleDescription !== false;
+    return settings.toolsResident === true || isLearningActive(ctx);
 }
 
 /**
  * 世界书工具的门控比描述多一条：没选可写书 = 模块未就绪，工具干脆不注册。
  * 注册了再报 NO_BOOK，模型会反复试 —— 看不见才是"未就绪"的正确表达。
+ * 这条在常驻模式下同样成立：没选书是结构性缺失，不随对话开关变化。
  * @returns {boolean}
  */
 export function shouldRegisterLore() {
     const ctx = getContext();
-
-    if (!isLearningActive(ctx)) {
-        return false;
-    }
-
     const settings = ensureSettings(ctx);
+
     if (settings.moduleWorldbook === false) {
         return false;
     }
 
-    return Boolean(getWritableBook(settings));
+    if (!getWritableBook(settings)) {
+        return false;
+    }
+
+    return settings.toolsResident === true || isLearningActive(ctx);
+}
+
+/**
+ * 工具调用前的守卫：注册着不等于现在能用。
+ *
+ * 常驻模式下工具一直在 tools 里，模型完全可能在学习模式关闭时调用它们。
+ * 这里统一拒绝并给一句话，比让它反复试别的工具好。
+ *
+ * @param {string} name
+ * @param {(params: object) => Promise<object>} handler
+ */
+function guardAction(name, handler) {
+    return async params => {
+        if (!isToolAvailable(getContext(), name)) {
+            return errorResult('TOOL_UNAVAILABLE');
+        }
+        return handler(params);
+    };
 }
 
 /* --------------------------------------------------------------- lore_list */
