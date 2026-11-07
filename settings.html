@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.20.0</span>
+                <span class="thrive-version">v0.21.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -279,7 +279,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>提示词</b>
-                        <small class="thrive-group__hint">工具常驻 · 卡片顺序 · 内容编辑</small>
+                        <small class="thrive-group__hint">工具常驻 · 卡片顺序 · 工具清单</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -307,11 +307,39 @@
                     </div>
 
                     <small id="thrive_prompt_macro_hint" class="thrive-hint">
-                        工具指令里可以用 &#123;&#123;desc_read&#125;&#125; 表示「可用时写成工具名」，
-                        &#123;&#123;!desc_read&#125;&#125; 表示「不可用时写成工具名」。所有工具宏都展开为空时，整段不注入。
-                        十个工具名：desc_read、desc_append、desc_replace、desc_rewrite、
-                        lore_list、lore_read、lore_add、lore_append、lore_replace、lore_rewrite。
+                        工具指令里用 &#123;&#123;desc_read&#125;&#125; / &#123;&#123;!desc_read&#125;&#125; 指代工具，
+                        清单与宏见下方。
                     </small>
+
+                    <!-- 只读清单：默认收起，展开后才占版面。内容由 ui/settings.js 渲染 -->
+                    <div class="inline-drawer thrive-tool-catalog">
+                        <div class="inline-drawer-toggle inline-drawer-header">
+                            <div class="thrive-group__title">
+                                <b>工具清单</b>
+                                <small id="thrive_tool_catalog_meta" class="thrive-group__hint">—</small>
+                            </div>
+                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                        </div>
+                        <!-- 内联 display:none 而不是 ST 的 displayNone（后者带 !important，slideToggle 打不开） -->
+                        <div class="inline-drawer-content" style="display:none">
+                            <div class="thrive-tool-copy">
+                                <div id="thrive_tool_copy_all" class="menu_button" title="复制全部工具宏（可用时展开成工具名）">
+                                    <i class="fa-solid fa-copy"></i>
+                                    <span id="thrive_tool_copy_all_label">复制全部</span>
+                                </div>
+                                <div id="thrive_tool_copy_all_neg" class="menu_button" title="复制全部取反宏（不可用时展开成工具名）">
+                                    <i class="fa-solid fa-copy"></i>
+                                    <span id="thrive_tool_copy_all_neg_label">复制全部取反</span>
+                                </div>
+                            </div>
+                            <small class="thrive-hint thrive-hint--muted">
+                                只读，内容就是实际发给模型的工具定义。点击任意宏可单独复制。
+                                &#123;&#123;x&#125;&#125; 在工具可用时展开成工具名，&#123;&#123;!x&#125;&#125; 反过来——
+                                两种写法都贴全部十个，状态变化后才依然正确。
+                            </small>
+                            <div id="thrive_tool_catalog_list" class="thrive-tool-list"></div>
+                        </div>
+                    </div>
 
                     <label class="checkbox_label" for="thrive_prompt_inject">
                         <input id="thrive_prompt_inject" type="checkbox">

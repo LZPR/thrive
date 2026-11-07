@@ -20,7 +20,7 @@
 
 import { ensureSettings, isLearningActive } from './store.js';
 import { getWritableBook } from './targets.js';
-import { TOOL_NAMES } from './tool-names.js';
+import { TOOL_NAMES, isThriveTool } from './tool-names.js';
 
 const DESC_TOOLS = new Set([
     TOOL_NAMES.DESC_READ,
@@ -107,6 +107,101 @@ export function toolUnavailableReason(ctx, name) {
 /** 这个工具此刻可用吗 */
 export function isToolAvailable(ctx, name) {
     return toolUnavailableReason(ctx, name) === '';
+}
+
+/**
+ * 这个工具此刻**注册了吗**——也就是它的定义在不在这次请求的 tools 数组里。
+ *
+ * 与 exposed 的区别只有一条：非常驻模式下，学习模式关着就不注册。
+ * 注册门控（tools.js 的 shouldRegister）与设置页的「工具清单」都问这里，
+ * 免得界面显示"能用"、实际压根没发给模型。
+ *
+ * @param {object} ctx
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isToolRegistered(ctx, name) {
+    if (!isToolExposed(ctx, name)) {
+        return false;
+    }
+
+    return ensureSettings(ctx).toolsResident === true || isLearningActive(ctx);
+}
+
+/** 没注册的原因：分得清"模块/书没配好"和"这一轮没开常驻也没开学习" */
+function notRegisteredReason(ctx, name) {
+    const settings = ensureSettings(ctx);
+
+    if (toolGroup(name) === 'lore' && settings.moduleWorldbook !== false && !getWritableBook(settings)) {
+        return 'no-book';
+    }
+
+    if (!isToolExposed(ctx, name)) {
+        return 'module-off';
+    }
+
+    return 'resident-off';
+}
+
+/**
+ * 设置页「工具清单」一行要显示的状态。
+ *
+ * state：
+ *   on   这一轮能用（注册 + 学习模式开着）
+ *   off  注册了但调用会被拒（常驻开着，但学习模式没开）
+ *   idle 这一轮压根没进请求（模块关 / 没选书 / 非常驻又没开学习）
+ *
+ * @param {object} ctx
+ * @param {string} name
+ * @returns {{ state: 'on'|'off'|'idle', reason: string }}
+ */
+export function toolDisplayState(ctx, name) {
+    if (!isToolRegistered(ctx, name)) {
+        return { state: 'idle', reason: notRegisteredReason(ctx, name) };
+    }
+
+    return isToolAvailable(ctx, name)
+        ? { state: 'on', reason: '' }
+        : { state: 'off', reason: 'learning-off' };
+}
+
+/**
+ * 工具清单的数据源：以 ST 自己的注册表为准（ToolManager.tools），
+ * 名字、描述、参数都取"真正发给模型的那份"，不在这里再抄一遍。
+ *
+ * 注册表里没有的（比如工具还没注册）也补一行空壳，保证清单永远是完整的十行。
+ *
+ * @param {object} ctx
+ * @returns {Array<{name: string, label: string, description: string, parameters: string[], group: string, state: string, reason: string}>}
+ */
+export function listToolInfo(ctx) {
+    const registry = new Map();
+
+    for (const def of ctx?.ToolManager?.tools ?? []) {
+        let fn = null;
+        try {
+            fn = def?.toFunctionOpenAI?.()?.function ?? null;
+        } catch {
+            fn = null;
+        }
+
+        const name = String(fn?.name ?? '');
+        if (!name || !isThriveTool(name)) {
+            continue;
+        }
+
+        registry.set(name, {
+            name,
+            label: String(def.displayName || name),
+            description: String(fn.description ?? ''),
+            parameters: Object.keys(fn.parameters?.properties ?? {}),
+        });
+    }
+
+    return Object.values(TOOL_NAMES).map(name => {
+        const info = registry.get(name) ?? { name, label: name, description: '', parameters: [] };
+        return { ...info, group: toolGroup(name), ...toolDisplayState(ctx, name) };
+    });
 }
 
 /**

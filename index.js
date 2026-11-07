@@ -63,7 +63,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.20 · 工具常驻 + 提示词卡片`);
+    console.log(`${LOG} 启动 v0.21 · 工具常驻 + 提示词卡片 + 工具清单`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

@@ -69,7 +69,7 @@ import {
 } from './patch.js';
 import { compilePattern, replaceIn, scan } from './regex.js';
 import { TOOL_NAMES } from './tool-names.js';
-import { isToolAvailable } from './tool-state.js';
+import { isToolAvailable, isToolRegistered } from './tool-state.js';
 import { hintFor } from './diagnostics.js';
 import { appendParagraph, fnv1a, isBlank, truncate } from './util.js';
 
@@ -408,14 +408,7 @@ function registerDescTools(ctx) {
  * @returns {boolean}
  */
 export function shouldRegisterDescription() {
-    const ctx = getContext();
-    const settings = ensureSettings(ctx);
-
-    if (settings.moduleDescription === false) {
-        return false;
-    }
-
-    return settings.toolsResident === true || isLearningActive(ctx);
+    return isToolRegistered(getContext(), TOOL_NAMES.DESC_READ);
 }
 
 /**
@@ -425,18 +418,7 @@ export function shouldRegisterDescription() {
  * @returns {boolean}
  */
 export function shouldRegisterLore() {
-    const ctx = getContext();
-    const settings = ensureSettings(ctx);
-
-    if (settings.moduleWorldbook === false) {
-        return false;
-    }
-
-    if (!getWritableBook(settings)) {
-        return false;
-    }
-
-    return settings.toolsResident === true || isLearningActive(ctx);
+    return isToolRegistered(getContext(), TOOL_NAMES.LORE_LIST);
 }
 
 /**
