@@ -49,7 +49,7 @@ import { syncBadgeOpenState } from './badge.js';
 import { openCompressPanel } from './compress-panel.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
-import { updatePatchHint } from './settings.js';
+import { updatePatchHint } from './settings/desc-patch.js';
 import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
 
 /* ------------------------------------------------------------------ 浮动面板 */

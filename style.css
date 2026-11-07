@@ -234,6 +234,109 @@
     opacity: 0.95;
 }
 
+/* -------------------------------------------------------------- 说明按钮 */
+
+/*
+ * 标签旁那颗「?」：外面只留一眼能看懂的短标签，解释都收在它下面。
+ *
+ * 尺寸写死 15px 而不是跟着字号走：标签行里它是唯一一个圆形控件，
+ * 跟着字号变会让不同分组的圆圈大小不一，看起来像没对齐。
+ */
+.thrive-settings .thrive-help {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    background: none;
+    color: inherit;
+    font-size: calc(var(--mainFontSize, 15px) * 0.65);
+    line-height: 1;
+    opacity: 0.4;
+    cursor: pointer;
+    transition: opacity 120ms ease, color 120ms ease;
+}
+
+.thrive-settings .thrive-help:hover,
+.thrive-settings .thrive-help:focus-visible,
+.thrive-settings .thrive-help[aria-expanded="true"] {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+/*
+ * 展开出来的说明块。左缘一道强调色，视觉上是"注释"而不是"又一个设置项"，
+ * 所以不画外框、不加背景块以外的装饰。
+ */
+.thrive-settings .thrive-help__body {
+    display: none;
+    margin: 2px 0 8px;
+    padding: 5px 8px;
+    border-left: 2px solid var(--SmartThemeQuoteColor);
+    border-radius: 0 4px 4px 0;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    line-height: 1.55;
+    opacity: 0.85;
+}
+
+/* 用属性而不是 hidden 类：JS 只切一个开关，样式里也只有一条对应规则 */
+.thrive-settings .thrive-help__body[data-open] {
+    display: block;
+}
+
+/*
+ * 一行里"标签 + ?"。和 .thrive-row 的 space-between 配合：
+ * 包成一枚标签，? 就贴在文字后面，不会被推到行中间或右端。
+ */
+.thrive-settings .thrive-row__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+/* 勾选框 + ?：ST 的 .checkbox_label 是整行 flex，外面再套一层才能把 ? 放在文字后 */
+.thrive-settings .thrive-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.thrive-settings .thrive-check .checkbox_label {
+    flex: 0 1 auto;
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* 按钮 + ?：两个靠在一起，? 解释的就是它左边这颗按钮 */
+.thrive-settings .thrive-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 小组标题整体压暗了，里面那颗「?」要自己提回来，否则几乎看不见 */
+.thrive-settings .thrive-limit-title .thrive-help,
+.thrive-settings .thrive-field-title .thrive-help {
+    opacity: 1;
+}
+
+/*
+ * 单位：跟在标签后面的一小截浅色字，替掉以前的「（字）」。
+ * 不用括号是为了让标签读起来仍是一句话，而不是"标签 + 补充"。
+ */
+.thrive-settings .thrive-unit {
+    margin-left: 4px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    opacity: 0.5;
+}
+
 /* -------------------------------------------------------- 学习块编辑区 */
 
 .thrive-settings .thrive-field {
@@ -250,16 +353,20 @@
     margin-bottom: 4px;
 }
 
-/* 分组标题（不是 label，所以不走上面那条） */
+/* 分组标题（不是 label，所以不走上面那条）；右侧可能挂一颗「?」 */
 .thrive-settings .thrive-field-title {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin-bottom: 4px;
     opacity: 0.85;
 }
 
 /* 「数值与上限」里的小组标题：比字段标题轻一级，起分段作用 */
 .thrive-settings .thrive-limit-title {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin: 8px 0 4px;
     font-size: calc(var(--mainFontSize, 15px) * 0.8);
     letter-spacing: 0.04em;
@@ -289,6 +396,11 @@
     white-space: pre-wrap;
 }
 
+/* 只收几个关键词 / 一句话的框：默认那 8em 是给整段提示词留的，这里用不上 */
+.thrive-settings .thrive-block-text--short {
+    min-height: 4.5em;
+}
+
 .thrive-settings .thrive-count {
     font-size: calc(var(--mainFontSize, 15px) * 0.75);
     font-variant-numeric: tabular-nums;
@@ -311,7 +423,10 @@
 
 .thrive-settings .thrive-actions {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: flex-end;
+    gap: 8px;
     margin-top: 4px;
 }
 

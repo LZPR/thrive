@@ -19,6 +19,8 @@
  *  13. 提示词卡片：拖动排序、按分界线分头部/尾部注入、弹窗编辑（src/prompt-order.js）
  *  14. 工具常驻：开关模式不再改变 tools 数组，改用「工具指令」的宏说明哪些不可用（src/tool-state.js）
  *  15. 压缩改成手动：软提醒不再进工具返回，超长内容由独立的压缩面板处理（src/compress.js）
+ *  16. 设置页收敛：解释收进「?」、可见小字只报状态、基本设置合并两组，
+ *      并按一组一个文件拆进 src/ui/settings/（ADR-041）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -68,7 +70,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.22 · 手动压缩面板 + 工具常驻 + 提示词卡片`);
+    console.log(`${LOG} 启动 v0.23 · 设置页分组收敛，「?」收起细节说明`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
