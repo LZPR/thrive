@@ -476,18 +476,10 @@
 /* ------------------------------------------------------------ 工具清单 */
 
 /*
- * 折叠块里的只读清单：一组工具一段，每行「中文名 + 工具名 + 状态」，
- * 下面一行描述、一行宏。默认收起，不展开就不占版面。
+ * 一个与「提示词」并列的分组（不再嵌在它里面），只读：
+ * 一组工具一段，每行「中文名 + 工具名 + 状态」，下面一行描述、一行宏。
+ * 外框与折叠头沿用 .thrive-group，这里只管里面的排版。
  */
-.thrive-settings .thrive-tool-catalog {
-    margin: 2px 0 10px;
-    border-top: 1px dashed var(--SmartThemeBorderColor);
-}
-
-.thrive-settings .thrive-tool-catalog > .inline-drawer-header {
-    padding-top: 6px;
-}
-
 .thrive-settings .thrive-tool-copy {
     display: flex;
     flex-wrap: wrap;

@@ -279,7 +279,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>提示词</b>
-                        <small class="thrive-group__hint">工具常驻 · 卡片顺序 · 工具清单</small>
+                        <small class="thrive-group__hint">工具常驻 · 卡片顺序 · 内容编辑</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -308,38 +308,8 @@
 
                     <small id="thrive_prompt_macro_hint" class="thrive-hint">
                         工具指令里用 &#123;&#123;desc_read&#125;&#125; / &#123;&#123;!desc_read&#125;&#125; 指代工具，
-                        清单与宏见下方。
+                        清单与宏见下方「工具清单」。
                     </small>
-
-                    <!-- 只读清单：默认收起，展开后才占版面。内容由 ui/settings.js 渲染 -->
-                    <div class="inline-drawer thrive-tool-catalog">
-                        <div class="inline-drawer-toggle inline-drawer-header">
-                            <div class="thrive-group__title">
-                                <b>工具清单</b>
-                                <small id="thrive_tool_catalog_meta" class="thrive-group__hint">—</small>
-                            </div>
-                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
-                        </div>
-                        <!-- 内联 display:none 而不是 ST 的 displayNone（后者带 !important，slideToggle 打不开） -->
-                        <div class="inline-drawer-content" style="display:none">
-                            <div class="thrive-tool-copy">
-                                <div id="thrive_tool_copy_all" class="menu_button" title="复制全部工具宏（可用时展开成工具名）">
-                                    <i class="fa-solid fa-copy"></i>
-                                    <span id="thrive_tool_copy_all_label">复制全部</span>
-                                </div>
-                                <div id="thrive_tool_copy_all_neg" class="menu_button" title="复制全部取反宏（不可用时展开成工具名）">
-                                    <i class="fa-solid fa-copy"></i>
-                                    <span id="thrive_tool_copy_all_neg_label">复制全部取反</span>
-                                </div>
-                            </div>
-                            <small class="thrive-hint thrive-hint--muted">
-                                只读，内容就是实际发给模型的工具定义。点击任意宏可单独复制。
-                                &#123;&#123;x&#125;&#125; 在工具可用时展开成工具名，&#123;&#123;!x&#125;&#125; 反过来——
-                                两种写法都贴全部十个，状态变化后才依然正确。
-                            </small>
-                            <div id="thrive_tool_catalog_list" class="thrive-tool-list"></div>
-                        </div>
-                    </div>
 
                     <label class="checkbox_label" for="thrive_prompt_inject">
                         <input id="thrive_prompt_inject" type="checkbox">
@@ -348,6 +318,35 @@
                     <small class="thrive-hint">
                         关掉 = 由你在预设里手动放置，插件不再往提示词里塞任何东西；压缩指令仍会附在工具返回里。
                     </small>
+                </div>
+            </div>
+
+            <!-- 工具清单：只读，内容由 ui/settings.js 渲染 -->
+            <div class="inline-drawer thrive-group thrive-tool-catalog">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <div class="thrive-group__title">
+                        <b>工具清单</b>
+                        <small id="thrive_tool_catalog_meta" class="thrive-group__hint">—</small>
+                    </div>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+                    <div class="thrive-tool-copy">
+                        <div id="thrive_tool_copy_all" class="menu_button" title="复制全部工具宏（可用时展开成工具名）">
+                            <i class="fa-solid fa-copy"></i>
+                            <span id="thrive_tool_copy_all_label">复制全部</span>
+                        </div>
+                        <div id="thrive_tool_copy_all_neg" class="menu_button" title="复制全部取反宏（不可用时展开成工具名）">
+                            <i class="fa-solid fa-copy"></i>
+                            <span id="thrive_tool_copy_all_neg_label">复制全部取反</span>
+                        </div>
+                    </div>
+                    <small class="thrive-hint thrive-hint--muted">
+                        只读，内容就是实际发给模型的工具定义。点击任意宏可单独复制。
+                        &#123;&#123;x&#125;&#125; 在工具可用时展开成工具名，&#123;&#123;!x&#125;&#125; 反过来——
+                        两种写法都贴全部十个，状态变化后才依然正确。
+                    </small>
+                    <div id="thrive_tool_catalog_list" class="thrive-tool-list"></div>
                 </div>
             </div>
 
