@@ -14,10 +14,10 @@
  *   write-targets.js 写入模块、可写书、读取范围
  *   desc-patch.js   描述改动暂存（面板也 import 它）
  *   passive-trigger.js 自动学习与两条判据
- *   limit-fields.js 14 个数值上限 + 压缩面板入口
+ *   limit-fields.js 14 个数值上限
  *   prompt-cards.js 提示词卡片、拖动、编辑弹窗
  *   tool-catalog.js 只读工具清单与复制
- *   appearance.js   旧日志清理、浮动面板外观
+ *   appearance.js   旧日志清理、浮动面板外观、压缩面板入口
  *
  * 加一项设置：挑一个现有的组文件改，不新建文件；实在不属于任何一组，再开一个文件
  * 并在下面两处各加一行。

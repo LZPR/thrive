@@ -70,7 +70,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.23 · 设置页分组收敛，「?」收起细节说明`);
+    console.log(`${LOG} 启动 v0.23.1 · 设置页分组收敛，「?」收起细节说明`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

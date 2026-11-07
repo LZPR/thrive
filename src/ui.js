@@ -6,7 +6,7 @@
  *
  *   ui/settings/        扩展设置页（settings.html 的绑定与回填，见下面的分工）
  *   ui/panel.js         浮动面板（重绘 / 交互 / 模式开关 / 入口）
- *   ui/panel-layout.js  面板的位置、尺寸、透明度与拖拽
+ *   ui/panel-layout.js  面板的位置、尺寸、不透明度与拖拽
  *   ui/compress-panel.js 压缩面板（独立窗口：超长条目、手动编辑、智能压缩占位）
  *   ui/badge.js         输入框旁的状态徽章
  *   ui/status.js        状态摘要文本（`/thrive status` 与设置页那一行）

@@ -1,12 +1,13 @@
 /**
  * ui/settings/appearance.js · 「日志与面板」组
  *
- * 两件不相干但都属"环境偏好"的事：旧工具日志要不要清出上下文、浮动面板长什么样。
- * 放在一组是因为都不会改变学习行为——调错了不影响写进去的内容。
+ * 三件不相干但都属"环境偏好"的事：旧工具日志要不要清出上下文、浮动面板长什么样、
+ * 以及压缩面板的入口。放在一组是因为都不会改变学习行为——调错了不影响写进去的内容。
  */
 
 import { getContext } from '../../../../../../extensions.js';
 import { ensureSettings, DEFAULT_SETTINGS } from '../../store.js';
+import { openCompressPanel } from '../compress-panel.js';
 import { applyPanelLayout } from '../panel-layout.js';
 import { toast } from '../shared.js';
 import { byId, paintHint, syncCheckbox } from './common.js';
@@ -14,6 +15,7 @@ import { byId, paintHint, syncCheckbox } from './common.js';
 export function bindAppearanceControls() {
     bindTraceControls();
     bindPanelLayoutControls();
+    bindCompressEntry();
 }
 
 /** @param {object} settings */
@@ -77,7 +79,7 @@ function bindPanelLayoutControls() {
         ctx.saveSettingsDebounced?.();
         syncPanelLayoutControls(settings);
         applyPanelLayout();
-        toast('面板已回到右下角，大小与透明度恢复默认');
+        toast('面板已回到右下角，大小与不透明度恢复默认');
     });
 }
 
@@ -122,6 +124,23 @@ function syncPanelLayoutControls(settings) {
     syncRange('thrive_panel_width', settings.panelWidth, value => `${Math.round(value)} px`);
     syncRange('thrive_panel_height', settings.panelHeight, value => `${Math.round(value)} px`);
     syncRange('thrive_panel_opacity', settings.panelOpacity, value => `${Math.round(value * 100)}%`);
+}
+
+/* -------------------------------------------------------------- 压缩入口 */
+
+/**
+ * 压缩面板的入口。放在这一组是因为它和浮动面板一样，是"打开一个窗口"的动作，
+ * 与上面那些"改一个数字"的滑块分开读。
+ *
+ * 不做高亮、不做动效、不写条数：提醒的位置在浮动面板标题栏上，设置页不是常看的地方。
+ * 改内容也只在压缩侧栏里做，设置页不该出现第二处能改正文的地方。
+ */
+function bindCompressEntry() {
+    byId('thrive_compress_open')?.addEventListener('click', () => {
+        if (!openCompressPanel(getContext())) {
+            toast('压缩面板还没挂载，刷新页面再试');
+        }
+    });
 }
 
 function syncRange(id, value, format) {

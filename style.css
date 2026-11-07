@@ -413,7 +413,7 @@
     color: var(--SmartThemeQuoteColor);
 }
 
-/* 记录面板的尺寸/透明度滑块：占满一行，用主题强调色当填充，不写死颜色 */
+/* 记录面板的尺寸/不透明度滑块：占满一行，用主题强调色当填充，不写死颜色 */
 .thrive-settings .thrive-range {
     display: block;
     width: 100%;
@@ -428,6 +428,22 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 4px;
+}
+
+/*
+ * 动作行里的按钮必须自己锁住宽度与换行。
+ *
+ * ST 的 .menu_button 默认允许折行，而它在这种窄格子里拿到的可用宽度又是按
+ * 最小内容宽度算的（中文的最小内容宽度 = 一个字），结果是四个字竖着排成一条。
+ * 三条一起写才稳：宽度回到内容宽、不换行、不被 flex 压缩。
+ */
+.thrive-settings .thrive-actions .menu_button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    white-space: nowrap;
 }
 
 .thrive-settings .thrive-reset {
@@ -817,7 +833,7 @@
      *
      * ST 的页面本身不滚动（聊天区自己滚），所以相对初始包含块定位与 fixed 的观感一致。
      *
-     * 位置、宽度、最大高度、透明度都由 ui.js 的 applyPanelLayout 按设置写到行内样式；
+     * 位置、宽度、最大高度、不透明度都由 ui.js 的 applyPanelLayout 按设置写到行内样式；
      * 这里的 right/bottom 只是"还没拖过"时的默认落点。
      */
     position: absolute;
@@ -856,7 +872,7 @@ body.thrive-panel-dragging {
 }
 
 /*
- * 处理中：只关交互并压暗标题栏。不能整体降 opacity——那会和用户设置的透明度
+ * 处理中：只关交互并压暗标题栏。不能整体降 opacity——那会和用户设置的不透明度
  * （行内 style.opacity）打架，行内优先级更高，效果等于没变。
  */
 .thrive-panel--busy {

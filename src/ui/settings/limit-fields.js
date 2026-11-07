@@ -6,6 +6,9 @@
  * min / max / step 也不写死在 HTML 里，绑定时从 LIMIT_SPECS 灌进去——范围只有一份
  * 定义，否则模板里改了一半、夹取逻辑还是老值，用户会看到"输入框允许填 5000、
  * 实际被夹到 2000"这种自相矛盾的界面。
+ *
+ * 这一组只有数字与一颗「全部恢复默认」；压缩面板的入口在「日志与面板」里，
+ * 那里和浮动面板挨着，两个"面板"的入口放一处。
  */
 
 import { getContext } from '../../../../../../extensions.js';
@@ -13,7 +16,6 @@ import { requestCompressScan } from '../../compress.js';
 import { LIMIT_SPECS, clampLimit, readLimits } from '../../limits.js';
 import { ensureSettings } from '../../store.js';
 import { toast } from '../shared.js';
-import { openCompressPanel } from '../compress-panel.js';
 import { byId, paintHint } from './common.js';
 
 /** 设置页里的输入框 → limits.js 的键 */
@@ -83,23 +85,6 @@ export function bindLimitControls() {
         ctx.saveSettingsDebounced?.();
         syncLimitControls(settings);
         toast('数值与上限已恢复默认');
-    });
-
-    bindCompressEntry();
-}
-
-/**
- * 设置页只剩一颗「压缩面板」按钮，放在「数值与上限」组的操作行里——软提醒与硬上限
- * 就在上面，入口跟着它们，上下文最近。
- *
- * 不做高亮、不做动效、不写条数：提醒的位置在浮动面板标题栏上，设置页不是常看的地方。
- * 改内容也只在压缩侧栏里做，设置页不该出现第二处能改正文的地方。
- */
-function bindCompressEntry() {
-    byId('thrive_compress_open')?.addEventListener('click', () => {
-        if (!openCompressPanel(getContext())) {
-            toast('压缩面板还没挂载，刷新页面再试');
-        }
     });
 }
 

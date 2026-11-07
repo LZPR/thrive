@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.23.0</span>
+                <span class="thrive-version">v0.23.1</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -335,21 +335,10 @@
                     <small id="thrive_limits_hint" class="thrive-hint"></small>
 
                     <div class="thrive-actions">
-                        <span class="thrive-action">
-                            <div id="thrive_compress_open" class="menu_button">
-                                <i class="fa-solid fa-compress"></i>
-                                <span>压缩面板</span>
-                            </div>
-                            <button type="button" class="thrive-help" data-help="thrive_help_compress"
-                                aria-expanded="false" aria-controls="thrive_help_compress" title="说明">?</button>
-                        </span>
                         <div id="thrive_limits_reset" class="menu_button thrive-reset">
                             <i class="fa-solid fa-rotate-left"></i>
                             <span>全部恢复默认</span>
                         </div>
-                    </div>
-                    <div id="thrive_help_compress" class="thrive-help__body">
-                        列出超过软提醒的世界书条目与角色描述，可以就地改。
                     </div>
                 </div>
             </div>
@@ -449,7 +438,7 @@
             </div>
 
             <!-- 日志与面板 -->
-            <div class="inline-drawer thrive-group">
+            <div class="inline-drawer thrive-group" id="thrive_appearance_group">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>日志与面板</b>
@@ -479,7 +468,7 @@
                                 aria-expanded="false" aria-controls="thrive_help_panel" title="说明">?</button>
                         </span>
                         <div id="thrive_help_panel" class="thrive-help__body">
-                            点徽章打开 / 收起。打开后拖动标题栏能挪到任意位置；位置、大小和透明度按屏幕记住，
+                            点徽章打开 / 收起。打开后拖动标题栏能挪到任意位置；位置、大小和不透明度按屏幕记住，
                             与具体对话无关。面板里是模式开关、待确认改动与写入记录。
                         </div>
 
@@ -496,7 +485,7 @@
                         <input id="thrive_panel_height" class="thrive-range" type="range" min="200" max="900" step="20">
 
                         <div class="thrive-row">
-                            <label for="thrive_panel_opacity">透明度</label>
+                            <label for="thrive_panel_opacity">不透明度</label>
                             <span id="thrive_panel_opacity_value" class="thrive-count">—</span>
                         </div>
                         <input id="thrive_panel_opacity" class="thrive-range" type="range" min="0.3" max="1" step="0.05">
@@ -505,6 +494,24 @@
                             <div id="thrive_panel_reset" class="menu_button thrive-reset">
                                 <i class="fa-solid fa-rotate-left"></i>
                                 <span>重置位置与大小</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="thrive-field">
+                        <span class="thrive-field-title">
+                            超长内容
+                            <button type="button" class="thrive-help" data-help="thrive_help_compress"
+                                aria-expanded="false" aria-controls="thrive_help_compress" title="说明">?</button>
+                        </span>
+                        <div id="thrive_help_compress" class="thrive-help__body">
+                            列出超过软提醒的世界书条目与角色描述，可以就地改。软提醒在「数值与上限」里调。
+                        </div>
+
+                        <div class="thrive-actions">
+                            <div id="thrive_compress_open" class="menu_button">
+                                <i class="fa-solid fa-compress"></i>
+                                <span>压缩面板</span>
                             </div>
                         </div>
                     </div>
