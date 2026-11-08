@@ -1,9 +1,14 @@
 /**
  * ui/panel.js · 浮动面板
  *
- * 三件事：
+ * 面板只装**作用于当前对话**的东西，全局设置一律留在扩展设置页：
+ *   - 模式：主动 / 被动两块，整块可点（不再有单独的「开 / 关」按钮）
+ *   - 更多设置（默认收起）：被动判据与「现在触发一次」——它们的效果只落在这一场对话
+ *   - 角色描述落点、待确认改动、写入记录
+ *
+ * 另外三件事：
  *   - 重绘：refreshPanel 现算状态，签名没变就不碰 DOM
- *   - 交互：写入 / 丢弃 / 恢复 / 重写，以及第一段那两个模式开关
+ *   - 交互：写入 / 丢弃 / 恢复 / 重写 / 开关模式 / 改判据
  *   - 入口：initPanel 挂载，openPanel 给 `/thrive panel` 用
  *
  * 位置、尺寸、拖动这些几何细节在 ui/panel-layout.js；面板开没开的状态在 ui/shared.js
@@ -15,7 +20,13 @@ import { getCompressSnapshot } from '../compress.js';
 import { getDescTargetSnapshot, isWorldbookDesc } from '../desc.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
-import { describePending, intervalProgress, parseKeywords } from '../passive.js';
+import {
+    PASSIVE_INTERVAL_MAX,
+    armManual,
+    describePending,
+    intervalProgress,
+    parseKeywords,
+} from '../passive.js';
 import {
     PATCH_STATUS,
     applyPatch,
@@ -50,7 +61,6 @@ import { syncBadgeOpenState } from './badge.js';
 import { openCompressPanel } from './compress-panel.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
-import { updatePatchHint } from './settings/desc-patch.js';
 import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
 
 /* ------------------------------------------------------------------ 浮动面板 */
@@ -67,6 +77,15 @@ let forcedPatchId = null;
  * 刷新页面回到收起是合理的默认值，不值得为它多存一个键、多一次落盘。
  */
 let historyExpanded = false;
+
+/**
+ * 「更多设置」展开着没有。理由同上：默认收起，面板打开的常态是"看状态、拨开关"，
+ * 改判据是偶发动作。
+ */
+let moreExpanded = false;
+
+/** 判据输入框的落盘防抖（关键词是边打边存的） */
+let moreSaveTimer = 0;
 
 /**
  * 挂载浮动面板。重复调用安全。
@@ -93,6 +112,9 @@ export function initPanel() {
     panel.addEventListener('click', onPanelClick);
     // 折头是 div + role=button（按钮样式会把标题压成另一套观感），键盘要自己补
     panel.addEventListener('keydown', onPanelKeydown);
+    // 「更多设置」里那两个判据输入框，同样靠外壳接（重绘会把里面的节点换掉）
+    panel.addEventListener('input', onPanelInput);
+    panel.addEventListener('change', onPanelChange);
     document.addEventListener(PANEL_EVENT, () => refreshPanel());
     // 徽章点击只是发了个事件，开合由这里接（badge.js 不认识面板）
     document.addEventListener(PANEL_TOGGLE_EVENT, () => setPanelOpen(!isPanelOpen(), getContext()));
@@ -104,8 +126,9 @@ export function initPanel() {
 /**
  * 重绘浮动面板。
  *
- * 面板现在**总是有内容**：第一段是模式（主动 / 被动 两个开关），后面才是有才画的记录。
- * 所以它不再是"有记录才出现"，而是由面板的开关状态决定——打开着就画，关着就整块隐藏。
+ * 面板现在**总是有内容**：第一段是模式（主动 / 被动 两块），第二段是收起的「更多设置」，
+ * 后面才是有才画的记录。所以它不再是"有记录才出现"，而是由面板的开关状态决定——
+ * 打开着就画，关着就整块隐藏。
  *
  * @param {object} [ctx]
  */
@@ -181,8 +204,9 @@ export function refreshPanel(ctx = getContext()) {
 
     /*
      * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
-     * 模式状态也在里面——面板里就摆着两个开关，它们变了必须重画。
-     * 「已写入」的展开状态同理：它只改这段的 DOM，不重画就没有反馈。
+     * 模式状态也在里面——面板里就摆着两块开关，它们变了必须重画。
+     * 「已写入」「更多设置」的展开状态同理：它们只改这段的 DOM，不重画就没有反馈。
+     * 判据的两个值在里面，是因为折头的摘要与被动那块的"还差几条"都跟着它们走。
      * 压缩那段同理：条数或字数变了，入口上的提示与高亮都要跟着变。
      */
     const signature = JSON.stringify([
@@ -194,6 +218,9 @@ export function refreshPanel(ctx = getContext()) {
         mode.interval,
         mode.since,
         mode.keywordCount,
+        settings.passiveInterval,
+        settings.passiveKeywords,
+        moreExpanded,
         descTarget ? [descTarget.mode, descTarget.book, descTarget.active, descTarget.cardChars] : null,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
@@ -209,10 +236,88 @@ export function refreshPanel(ctx = getContext()) {
     }
     panelSignature = signature;
 
-    panel.innerHTML = renderPanel({ mode, patch, descTarget, backups, descBackup, drift, editorStale, compress });
+    /*
+     * 整块重绘会把里面正在编辑的输入框一起换掉（光标、选区全丢）。判据就住在这块面板里，
+     * 所以换 DOM 前记一笔焦点，换完再放回去——顺序不能反，否则拿到的是新节点。
+     */
+    const focus = capturePanelFocus();
+    panel.innerHTML = renderPanel({
+        mode,
+        settings,
+        patch,
+        descTarget,
+        backups,
+        descBackup,
+        drift,
+        editorStale,
+        compress,
+        moreExpanded,
+    });
+    restorePanelFocus(focus);
+
     // 内容换了高度可能也变了，重新摆一次（拖动后的位置在这里生效）
     applyPanelLayout(panel);
-    updatePatchHint(ctx, settings);
+}
+
+/**
+ * 记下面板里当前的焦点位置。
+ *
+ * 只认带 `data-thrive-field` / `data-thrive-action` 的节点：重绘之后靠这两个属性
+ * 就能找回同一个控件，不必给每个节点编 id。
+ *
+ * @returns {{selector: string, start: number|null, end: number|null}|null}
+ */
+function capturePanelFocus() {
+    const active = document.activeElement;
+    if (!active || typeof active.closest !== 'function' || !active.closest(`#${PANEL_ID}`)) {
+        return null;
+    }
+
+    const selector = active.dataset?.thriveField
+        ? `[data-thrive-field="${active.dataset.thriveField}"]`
+        : active.dataset?.thriveAction
+            ? `[data-thrive-action="${active.dataset.thriveAction}"]`
+            : '';
+    if (!selector) {
+        return null;
+    }
+
+    return {
+        selector,
+        // number 输入框不支持 selectionStart，读到的是 null，写回时也不必管
+        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+    };
+}
+
+/** @param {{selector: string, start: number|null, end: number|null}|null} focus */
+function restorePanelFocus(focus) {
+    if (!focus) {
+        return;
+    }
+
+    const el = document.querySelector(`#${PANEL_ID} ${focus.selector}`);
+    if (!el) {
+        return;
+    }
+
+    try {
+        el.focus({ preventScroll: true });
+        if (focus.start !== null && focus.end !== null) {
+            el.setSelectionRange(focus.start, focus.end);
+        }
+    } catch {
+        // number 输入框、或节点已经不接受焦点：忽略即可，不值得为它打断重绘
+    }
+}
+
+/** 判据输入框的落盘防抖。和设置页的关键词框一样，边打边存没有意义 */
+function saveSoon(ctx) {
+    clearTimeout(moreSaveTimer);
+    moreSaveTimer = setTimeout(() => {
+        moreSaveTimer = 0;
+        ctx.saveSettingsDebounced?.();
+    }, 300);
 }
 
 /**
@@ -249,36 +354,19 @@ function readModeView(ctx, settings) {
 /* -------------------------------------------------------------- 模式开关 */
 
 /**
- * 三个"这个开关现在点了也没用"的原因，只报第一条。
+ * "现在点了也没用"的三个原因，任一成立就不能切。
  *
- * 顺序：模块全关 → 没对话 → 环境不支持工具调用。以前徽章的 toast 就是这么排的，
- * 用户已经习惯了这套说法。
+ * 只判不喊：原因由面板正文里那行 notice 说明（整块压暗 + 一行字），切换本身一律静默——
+ * 拨一下开关就弹一条 toast，在窄屏上挡住半块面板，比不给反馈更烦人。
  *
  * @param {object} ctx
  * @param {object} settings
  * @returns {boolean} 能不能切
  */
-function guardModeToggle(ctx, settings) {
-    // 模块全关时开关没有意义：点了只说原因，不切换状态
-    if (!hasAnyModule(settings)) {
-        toast('两个模块都关着，请先在扩展设置里开启至少一个');
-        return false;
-    }
-
-    if (!isChatAvailable(ctx)) {
-        toast('请先打开一个对话');
-        return false;
-    }
-
-    // 环境不支持工具调用时，开了也只是"灯亮着、模型什么也看不到"。
-    // 这里只报第一条没通过的原因，不替用户去改 ST 的设置（ADR-020）
-    const diag = diagnoseEnvironment(ctx);
-    if (!diag.ok) {
-        toast(`工具调用不可用：${formatDiagnosis(diag)}`);
-        return false;
-    }
-
-    return true;
+function canToggleMode(ctx, settings) {
+    // 模块全关时开关没有意义；没对话 / 环境不支持工具调用时开了也只是"灯亮着"
+    // （ADR-020：不替用户去改 ST 的设置与模块）
+    return hasAnyModule(settings) && isChatAvailable(ctx) && diagnoseEnvironment(ctx).ok;
 }
 
 /**
@@ -287,7 +375,7 @@ function guardModeToggle(ctx, settings) {
  * @param {object} settings
  */
 function toggleActive(ctx, settings) {
-    if (!guardModeToggle(ctx, settings)) {
+    if (!canToggleMode(ctx, settings)) {
         return;
     }
 
@@ -302,9 +390,11 @@ function toggleActive(ctx, settings) {
  *
  * 关掉时把已经挂上的待学习一并丢掉：它本来就是被动学习攒出来的，
  * 留着会出现"被动显示关闭、徽章却在闪待学"这种自相矛盾的状态。
+ *
+ * 切完不弹 toast：被动那块自己的第二行就写着"还差几条 / 没有判据"，状态已经在眼前。
  */
 function togglePassive(ctx, settings) {
-    if (!guardModeToggle(ctx, settings)) {
+    if (!canToggleMode(ctx, settings)) {
         return;
     }
 
@@ -319,16 +409,6 @@ function togglePassive(ctx, settings) {
 
     syncFromContext(ctx);
     refreshUI(ctx);
-
-    if (!next) {
-        toast('被动学习已关闭（主动开关不受影响）');
-        return;
-    }
-
-    const hasRule = Number(settings.passiveInterval) > 0 || parseKeywords(settings.passiveKeywords).length > 0;
-    toast(hasRule
-        ? '被动学习已开启：命中判据后会在下一轮临时开启一次'
-        : '被动学习已开启，但还没有判据（间隔 0 且关键词为空），不会触发。请到扩展设置里填一个');
 }
 
 /* ------------------------------------------------------------------ 面板入口 */
@@ -375,7 +455,18 @@ function isDescriptionEditorStale(ctx, applied) {
     return normalizeEol(textarea.value) !== normalizeEol(applied);
 }
 
-function renderPanel({ mode, patch, descTarget, backups, descBackup, drift = false, editorStale = false, compress = getCompressSnapshot() }) {
+function renderPanel({
+    mode,
+    settings,
+    patch,
+    descTarget,
+    backups,
+    descBackup,
+    drift = false,
+    editorStale = false,
+    compress = getCompressSnapshot(),
+    moreExpanded: moreOpen = false,
+}) {
     const pending = isUnresolved(patch);
     const counts = [];
     if (pending) {
@@ -416,6 +507,7 @@ function renderPanel({ mode, patch, descTarget, backups, descBackup, drift = fal
 
     const body = [
         renderModeSection(mode),
+        renderMoreSection({ mode, settings, expanded: moreOpen }),
         renderDescTargetSection(descTarget),
         renderPatchSection(patch, drift, editorStale),
         renderHistorySection(backups, descBackup, historyExpanded),
@@ -425,35 +517,28 @@ function renderPanel({ mode, patch, descTarget, backups, descBackup, drift = fal
 }
 
 /**
- * 模式分区：主动 / 被动两个开关。
+ * 模式分区：主动 / 被动两块，横排。
  *
- * 这就是从徽章上搬下来的那两段。搬过来之后每个开关终于有地方写一句"它管什么"：
- * 主动是当前对话的、被动是全局的——以前只能挤在 title 里，得悬停才知道。
+ * 不再有分区标题，也不再有"都没开 / 主动开着"这种总述——两块自己就是标题，
+ * 灯亮灯灭加上第二行的"本对话 / 全局 · 还差几条"已经说完了要说的。
+ * 这一块也是整个面板最常点的地方，所以整块可点，不再挂一颗小小的「开 / 关」。
  *
  * @param {ReturnType<typeof readModeView>} mode
  */
 function renderModeSection(mode) {
     const { active, passive, usable, none, available, diag, pending, interval, remaining, keywordCount } = mode;
 
-    const summary = active && passive
-        ? '主动 + 被动'
-        : active
-            ? '主动开着'
-            : passive
-                ? '被动待命'
-                : '都没开';
-
     /*
-     * 被动那行的说明要跟着判据走：开了但一条判据都没有是最常见的空转状态，
-     * 只写"命中判据后借一轮"等于没说——用户以为开了就会自己学。
+     * 被动那块第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
+     * 只写"全局"等于没说——用户以为开了就会自己学。
      */
     const passiveHint = !passive
-        ? '全局 · 命中判据后借一轮，回复完自动关'
+        ? '全局'
         : interval > 0
-            ? `全局 · 每 ${interval} 条借一轮，还差 ${remaining} 条`
+            ? `还差 ${remaining} 条`
             : keywordCount > 0
-                ? `全局 · ${keywordCount} 个关键词命中就借一轮，回复完自动关`
-                : '全局 · 已开启，但还没有判据（间隔 0 且关键词为空），不会触发';
+                ? `${keywordCount} 个词`
+                : '没有判据';
 
     /*
      * 不可用的原因只能写一条：三条同时列出来，用户还是不知道该先改哪个。
@@ -469,52 +554,109 @@ function renderModeSection(mode) {
 
     return `
         <section class="thrive-panel__section thrive-modes">
-            <div class="thrive-panel__head">
-                <span class="thrive-panel__section-title">模式</span>
-                <span class="thrive-panel__meta">${escapeHtml(summary)}</span>
+            <div class="thrive-modes__row">
+                ${renderModeTile({
+                    action: 'toggle-active',
+                    variant: 'active',
+                    title: '主动学习',
+                    hint: '本对话',
+                    on: active,
+                    usable,
+                })}
+                ${renderModeTile({
+                    action: 'toggle-passive',
+                    variant: 'passive',
+                    title: '被动学习',
+                    hint: passiveHint,
+                    on: passive,
+                    usable,
+                })}
             </div>
-            ${renderModeRow({
-                action: 'toggle-active',
-                variant: 'active',
-                title: '主动学习',
-                hint: '只作用于当前对话 · 手动开关，开着就一直在学',
-                on: active,
-                usable,
-            })}
-            ${renderModeRow({
-                action: 'toggle-passive',
-                variant: 'passive',
-                title: '被动学习',
-                hint: passiveHint,
-                on: passive,
-                usable,
-            })}
             ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
             ${pending
-                ? `<div class="thrive-mode__pending">本次待学习：${escapeHtml(describePending(pending))}`
-                    + ' —— 下一轮对话临时开启，回复完自动关闭。</div>'
+                ? `<div class="thrive-mode__pending">待学习：${escapeHtml(describePending(pending))} · 下一轮生效</div>`
                 : ''}
         </section>`;
 }
 
 /**
- * 一行开关。灯亮 = 开，灭 = 关；不可用时整行压暗，点了会说明原因而不是静默。
+ * 一块开关。灯亮 = 开，灭 = 关；不可用时整块压暗，点了不动（原因在下面那行 notice）。
+ *
+ * 用 div + role="switch" + tabindex 而不是 <button>：按钮样式会把这一块压成另一种观感，
+ * 而整块可点又要能 Tab 到、空格切换，所以无障碍行为自己补（onPanelKeydown）。
  *
  * @param {{action: string, variant: 'active'|'passive', title: string, hint: string,
  *     on: boolean, usable: boolean}} props
  */
-function renderModeRow({ action, variant, title, hint, on, usable }) {
+function renderModeTile({ action, variant, title, hint, on, usable }) {
+    // 不可用时不要说"点一下切换"：点了不会动，原因就在下面那行 notice 里
+    const tip = usable
+        ? `${title}：${hint}（点一下切换）`
+        : `${title}：现在切换不了——原因见下方说明`;
+
     return `
-        <div class="thrive-mode thrive-mode--${variant}${on ? ' is-on' : ''}${usable ? '' : ' is-muted'}">
+        <div class="thrive-mode thrive-mode--${variant}${on ? ' is-on' : ''}${usable ? '' : ' is-muted'}"
+            role="switch" tabindex="0" aria-checked="${on ? 'true' : 'false'}"
+            data-thrive-action="${action}"
+            title="${escapeHtml(tip)}">
             <span class="thrive-mode__led" aria-hidden="true"></span>
-            <span class="thrive-mode__text">
-                <span class="thrive-mode__title">${escapeHtml(title)}</span>
-                <span class="thrive-mode__hint">${escapeHtml(hint)}</span>
-            </span>
-            <span class="menu_button thrive-mode__switch${on ? ' is-on' : ''}" role="switch"
-                aria-checked="${on ? 'true' : 'false'}"
-                data-thrive-action="${action}">${on ? '开' : '关'}</span>
+            <span class="thrive-mode__title">${escapeHtml(title)}</span>
+            <span class="thrive-mode__hint">${escapeHtml(hint)}</span>
         </div>`;
+}
+
+/**
+ * 「更多设置」：从设置页搬过来的那一组。
+ *
+ * 这几项的效果都只落在**当前对话**上（判据命中后借的是这一场对话的一轮，手动触发同理），
+ * 所以它们跟着模式开关一起住在面板里；设置页只剩"跨对话都一样"的那些。
+ *
+ * 默认收起：面板打开的常态是"看状态、拨开关"，改判据是偶发动作。
+ * 块内平铺，不再套第二层折叠。
+ *
+ * @param {{mode: ReturnType<typeof readModeView>, settings: object, expanded: boolean}} props
+ */
+function renderMoreSection({ mode, settings, expanded }) {
+    const interval = Math.max(0, Math.floor(Number(settings.passiveInterval) || 0));
+    const keywordCount = mode.keywordCount;
+
+    const meta = interval > 0 || keywordCount > 0
+        ? [interval > 0 ? `${interval} 条` : '', keywordCount > 0 ? `${keywordCount} 词` : ''].filter(Boolean).join(' · ')
+        : '未配判据';
+
+    const rows = expanded
+        ? `<div class="thrive-more">
+            <div class="thrive-more__row">
+                <label class="thrive-more__label" for="thrive_more_interval">每 N 条</label>
+                <input id="thrive_more_interval" class="text_pole thrive-more__number" type="number"
+                    min="0" max="${PASSIVE_INTERVAL_MAX}" step="1" inputmode="numeric" placeholder="0"
+                    data-thrive-field="interval" value="${interval > 0 ? interval : ''}">
+                <span class="thrive-more__meta">${mode.since} / ${interval > 0 ? interval : '—'}</span>
+            </div>
+            <textarea id="thrive_more_keywords" class="text_pole thrive-more__keywords" rows="2"
+                spellcheck="false" placeholder="关键词，逗号分隔"
+                data-thrive-field="keywords">${escapeHtml(settings.passiveKeywords ?? '')}</textarea>
+            <div class="thrive-panel__actions">
+                <small class="thrive-hint">0 条 = 不用条数判据；命中后只借当前对话一轮。</small>
+                <div class="menu_button thrive-panel__button" data-thrive-action="trigger-once"
+                    title="不等判据，立刻给下一轮挂一次学习，用来验证判据配得对不对">现在触发一次</div>
+            </div>
+        </div>`
+        : '';
+
+    return `
+        <section class="thrive-panel__section thrive-panel__section--fold">
+            <div class="thrive-panel__head thrive-panel__fold${expanded ? ' is-open' : ''}"
+                role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}"
+                data-thrive-action="toggle-more"
+                title="展开 / 收起被动学习判据（只影响当前对话的触发）">
+                <span class="thrive-panel__section-title">
+                    <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>更多设置
+                </span>
+                <span class="thrive-panel__meta">${escapeHtml(meta)}</span>
+            </div>
+            ${rows}
+        </section>`;
 }
 
 /**
@@ -820,6 +962,13 @@ function onPanelClick(event) {
             historyExpanded = !historyExpanded;
             refreshPanel(getContext());
             break;
+        case 'toggle-more':
+            moreExpanded = !moreExpanded;
+            refreshPanel(getContext());
+            break;
+        case 'trigger-once':
+            triggerOnceAndReport();
+            break;
         case 'hide-panel':
             setPanelOpen(false);
             break;
@@ -851,9 +1000,9 @@ function onPanelClick(event) {
 }
 
 /**
- * 键盘激活折头。
+ * 键盘激活折头与开关。
  *
- * 折头是 div + role="button" 而不是 <button>：原生按钮在 ST 的主题下会带上一套
+ * 折头和模式块都是 div + role 而不是 <button>：原生按钮在 ST 的主题下会带上一套
  * 边框和内边距，把"分区标题"压成了另一个东西。代价是无障碍行为要自己补——Enter /
  * 空格等价于点一下，其它键不管，免得把正文里的滚动也吞掉。
  */
@@ -862,7 +1011,7 @@ function onPanelKeydown(event) {
         return;
     }
 
-    const trigger = event.target.closest('[data-thrive-action][role="button"]');
+    const trigger = event.target.closest('[data-thrive-action][role="button"], [data-thrive-action][role="switch"]');
     if (!trigger) {
         return;
     }
@@ -870,6 +1019,99 @@ function onPanelKeydown(event) {
     // 空格默认是翻页，Enter 默认可能触发表单提交，两者都要拦
     event.preventDefault();
     trigger.click();
+}
+
+/**
+ * 「更多设置」里的输入框：外壳接 input / change，重绘换掉节点也不会丢事件。
+ *
+ * 关键词边打边存（和设置页的关键词框同一套手感）；条数只在 change（失焦 / 回车）时落值——
+ * 边打字边存盘会把 "12" 中间那个 "1" 也存进去。
+ */
+function onPanelInput(event) {
+    if (event.target?.dataset?.thriveField !== 'keywords') {
+        return;
+    }
+
+    const ctx = getContext();
+    ensureSettings(ctx).passiveKeywords = String(event.target.value ?? '');
+    saveSoon(ctx);
+}
+
+function onPanelChange(event) {
+    const field = event.target?.dataset?.thriveField;
+    if (!field) {
+        return;
+    }
+
+    const ctx = getContext();
+    const settings = ensureSettings(ctx);
+
+    if (field === 'interval') {
+        const value = clampInterval(event.target.value);
+        settings.passiveInterval = value;
+        // 回填成夹取后的值：写 999 会被收成上限，用户得看见这件事
+        event.target.value = value > 0 ? String(value) : '';
+        saveSoon(ctx);
+        // 折头上的"N 条"与被动块里的"还差几条"都要跟着变
+        refreshPanel(ctx);
+        return;
+    }
+
+    if (field === 'keywords') {
+        settings.passiveKeywords = String(event.target.value ?? '');
+        ctx.saveSettingsDebounced?.();
+        refreshPanel(ctx);
+    }
+}
+
+/** 条数判据的夹取。设置页的输入框与这里共用同一个上限 */
+function clampInterval(value) {
+    const num = Math.round(Number(value));
+    if (!Number.isFinite(num) || num <= 0) {
+        return 0;
+    }
+    return Math.min(num, PASSIVE_INTERVAL_MAX);
+}
+
+/**
+ * 不等判据，立刻给下一轮挂一次学习。
+ *
+ * 存在的理由不是方便，而是**可验证**：用户配完判据之后总得能立刻看见它生效，
+ * 否则要等到真出现那句话，期间只能猜。
+ *
+ * 成功不弹 toast：`armManual` 会广播 PASSIVE_EVENT，徽章那边统一报一句；
+ * 这里只负责把"没能挂上"的原因说清楚。
+ */
+function triggerOnceAndReport() {
+    const ctx = getContext();
+    const settings = ensureSettings(ctx);
+
+    if (!hasAnyModule(settings)) {
+        toast('两个模块都关着，请先在扩展设置里开启至少一个');
+        return;
+    }
+    if (!isChatAvailable(ctx)) {
+        toast('请先打开一个对话');
+        return;
+    }
+
+    const diag = diagnoseEnvironment(ctx);
+    if (!diag.ok) {
+        toast(`工具调用不可用：${formatDiagnosis(diag)}`);
+        return;
+    }
+    if (getPending(ctx)) {
+        toast('已经有一次待学习了，下一次生成就会用掉它');
+        return;
+    }
+    if (!armManual(ctx)) {
+        toast('没能挂上待学习，请稍后再试');
+        return;
+    }
+
+    saveChat(ctx);
+    syncFromContext(ctx);
+    refreshUI(ctx);
 }
 
 /** 写入 / 强制覆盖。失败时把原因说清楚，别让按钮看起来"没反应" */

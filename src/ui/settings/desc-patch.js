@@ -1,9 +1,8 @@
 /**
  * ui/settings/desc-patch.js · 「描述改动先暂存」这个开关
  *
- * 独立成文件是因为它被两处用到：设置页的勾选框，以及浮动面板每次重绘都要更新
- * 这一行小字（面板里能写入 / 丢弃 diff，改完得让设置页跟上）。谁都能 import 它，
- * 它只依赖 refresh.js 与 store.js，不会成环。
+ * 设置页里剩下的只是"要不要暂存"这个跨对话一致的选择。暂存出来的那一份 diff、
+ * 有没有待处理，都只属于当前对话——那些在浮动面板里看，这一页不跟着对话变（ADR-043）。
  */
 
 import { getContext } from '../../../../../../extensions.js';
@@ -37,7 +36,7 @@ export function bindPatchControls() {
 
         settings.patchEnabled = enabled;
         ctx.saveSettingsDebounced?.();
-        updatePatchHint(ctx, settings);
+        updatePatchHint(settings);
 
         if (!enabled) {
             toast('之后的描述改动会直接写入角色卡');
@@ -65,13 +64,12 @@ export function syncPatchCheck(settings) {
  * 暂存状态那一行。
  *
  * 默认（开着、没有待处理）不写任何字：checkbox 勾着就是"会暂存"，再复述一遍只是噪音。
- * 只有两种需要用户动手的情况才出声——关掉了，或者有一份 diff 等着处理。
- * 统一模式下这一段不适用，换成一句"为什么不管用"。
+ * 只有两种跨对话一致的情况才出声——关掉了，或者当前是统一模式（这个开关不管用）。
+ * "有一份待处理改动"属于当前对话，那由浮动面板说，这一页不跟着对话变。
  *
- * @param {object} ctx
  * @param {object} settings
  */
-export function updatePatchHint(ctx, settings) {
+export function updatePatchHint(settings) {
     if (isWorldbookDesc(settings)) {
         paintHint('thrive_patch_hint', '统一模式下不做暂存：描述直接写进世界书条目，也不提供 diff。', false);
         return;
@@ -79,11 +77,6 @@ export function updatePatchHint(ctx, settings) {
 
     if (settings.patchEnabled === false) {
         paintHint('thrive_patch_hint', '已关闭：改动直接落盘，只能靠上一版快照回退。', true);
-        return;
-    }
-
-    if (isUnresolved(getPatch(ctx))) {
-        paintHint('thrive_patch_hint', '有一份待处理改动，去浮动面板里写入或丢弃。', true);
         return;
     }
 

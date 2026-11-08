@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.24.0</span>
+                <span class="thrive-version">v0.25.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -17,27 +17,20 @@
                 </div>
             </div>
 
-            <!-- 基本设置：对话级开关、写入模块、写入目标 -->
+            <!-- 基本设置：这一页只放"跨对话都一样"的设置；按对话生效的都在浮动面板里 -->
             <div class="inline-drawer thrive-group">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>基本设置</b>
-                        <small class="thrive-group__hint">对话 · 模块 · 写入</small>
+                        <small class="thrive-group__hint">模块 · 写入</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <div class="thrive-row">
-                        <span class="thrive-row__label">
-                            当前对话
-                            <button type="button" class="thrive-help" data-help="thrive_help_chat"
-                                aria-expanded="false" aria-controls="thrive_help_chat" title="说明">?</button>
-                        </span>
-                        <span id="thrive_chat_status" class="thrive-status">—</span>
-                    </div>
-                    <div id="thrive_help_chat" class="thrive-help__body">
-                        这一行只读。开关在徽章打开的面板里，按对话保存——在 A 对话开启，切到 B 对话仍是关闭。
-                    </div>
+                    <small class="thrive-hint thrive-hint--moved">
+                        主动 / 被动开关、被动判据、待确认改动与写入记录都只作用于当前对话，
+                        都在徽章打开的面板里——这一页的设置对所有对话一致。
+                    </small>
 
                     <div class="thrive-check">
                         <label class="checkbox_label" for="thrive_enabled_by_default">
@@ -55,8 +48,8 @@
                             aria-expanded="false" aria-controls="thrive_help_badge" title="说明">?</button>
                     </div>
                     <div id="thrive_help_badge" class="thrive-help__body">
-                        徽章是输入框旁那颗图标：点一下开 / 关浮动面板，主动与被动两个开关都在面板里。
-                        强调色 = 主动开着，右下角亮小灯 = 对应模式开着，灯在闪 = 已挂上一次临时学习，
+                        徽章是输入框旁那颗图标：点一下开 / 关浮动面板，按对话生效的开关与判据都在面板里。
+                        强调色 = 主动开着，Em 色 = 只有被动开着，图标在呼吸 = 已挂上一次临时学习，
                         右上角数字 = 待确认的描述改动。
                     </div>
 
@@ -166,75 +159,6 @@
                             暂存期间模型读到的是暂存版。关掉后直接落盘，只有「上一版快照」可回退。
                         </div>
                         <small id="thrive_patch_hint" class="thrive-hint"></small>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 被动学习 -->
-            <div class="inline-drawer thrive-group">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <div class="thrive-group__title">
-                        <b>被动学习</b>
-                        <small class="thrive-group__hint">命中判据借一轮</small>
-                    </div>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_passive_enabled">
-                            <input id="thrive_passive_enabled" type="checkbox">
-                            <span>自动学习</span>
-                        </label>
-                        <button type="button" class="thrive-help" data-help="thrive_help_passive"
-                            aria-expanded="false" aria-controls="thrive_help_passive" title="说明">?</button>
-                    </div>
-                    <div id="thrive_help_passive" class="thrive-help__body">
-                        与主动开关互不影响。开着时，下面两条判据任一命中就借一轮：下一轮临时打开学习模式，
-                        回复结束后立刻关闭；主动已经开着的时候不重复触发。
-                    </div>
-                    <small id="thrive_passive_hint" class="thrive-hint"></small>
-
-                    <div class="thrive-row">
-                        <span class="thrive-row__label">
-                            <label for="thrive_passive_interval">每 N 条消息</label>
-                            <button type="button" class="thrive-help" data-help="thrive_help_interval"
-                                aria-expanded="false" aria-controls="thrive_help_interval" title="说明">?</button>
-                        </span>
-                        <span id="thrive_passive_progress" class="thrive-count">—</span>
-                    </div>
-                    <div id="thrive_help_interval" class="thrive-help__body">
-                        0 = 不用这条判据。只数聊天消息，一问一答算 2 条；工具日志这类系统消息不算。
-                    </div>
-                    <input id="thrive_passive_interval" class="text_pole" type="number" min="0" max="500" step="1"
-                        inputmode="numeric" placeholder="0">
-
-                    <div class="thrive-row">
-                        <span class="thrive-row__label">
-                            <label for="thrive_passive_keywords">关键词</label>
-                            <button type="button" class="thrive-help" data-help="thrive_help_keywords"
-                                aria-expanded="false" aria-controls="thrive_help_keywords" title="说明">?</button>
-                        </span>
-                    </div>
-                    <div id="thrive_help_keywords" class="thrive-help__body">
-                        留空 = 不按关键词触发。多个关键词用逗号、分号或换行分隔；大小写不敏感，子串命中即算；
-                        只看最近一轮的用户与角色消息。
-                    </div>
-                    <textarea id="thrive_passive_keywords" class="text_pole thrive-block-text thrive-block-text--short"
-                        rows="3" spellcheck="false" placeholder="记住，设定，补充设定"></textarea>
-                    <small id="thrive_passive_keyword_hint" class="thrive-hint"></small>
-
-                    <div class="thrive-actions">
-                        <span class="thrive-action">
-                            <div id="thrive_passive_once" class="menu_button thrive-reset">
-                                <i class="fa-solid fa-bolt"></i>
-                                <span>现在触发一次</span>
-                            </div>
-                            <button type="button" class="thrive-help" data-help="thrive_help_once"
-                                aria-expanded="false" aria-controls="thrive_help_once" title="说明">?</button>
-                        </span>
-                    </div>
-                    <div id="thrive_help_once" class="thrive-help__body">
-                        不等判据，立刻给下一轮挂一次学习，用来验证关键词配得对不对。
                     </div>
                 </div>
             </div>

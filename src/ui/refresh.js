@@ -1,9 +1,9 @@
 /**
  * ui/refresh.js · 刷新编排 + 面板开关
  *
- * 界面有七块要看同一份状态：设置页的控件、设置页那行状态、设置页的被动提示、
- * 设置页顶部的环境诊断、世界书下拉、徽章、面板。它们各自在哪个文件里实现，
- * 这里不 import——各自把刷新函数登记到下面的表里。
+ * 界面有好几块要看同一份状态：设置页的控件、设置页顶部的环境诊断、世界书下拉、徽章、
+ * 浮动面板、压缩面板。它们各自在哪个文件里实现，这里不 import——各自把刷新函数
+ * 登记到下面的表里。
  *
  * 为什么不直接 import：settings / panel / badge 在"绑定改了状态"时都要叫 refreshUI，
  * 反过来 refreshUI 又要调它们的刷新函数，直接互相 import 就是环。用一张登记表打平。
@@ -40,10 +40,6 @@ const SURFACES = {
     controls: () => {},
     /** 设置页：顶部的环境诊断 */
     diagnostics: () => {},
-    /** 设置页：「当前对话」那一行 */
-    status: () => {},
-    /** 设置页：被动学习那段说明 */
-    passiveHint: () => {},
     /** 设置页：世界书下拉的选项 */
     books: () => {},
     /** 聊天区：徽章 */
@@ -133,7 +129,6 @@ export function refreshUI(ctx = getContext()) {
     const view = { ctx, settings, available, diag };
     paint('diagnostics', view);
     paint('badge', view);
-    paint('status', view);
     paint('controls', view);
     paint('panel', view);
 
@@ -148,10 +143,12 @@ export function refreshUI(ctx = getContext()) {
 }
 
 /**
- * 只刷徽章与"当前对话"那一行，不重建世界书下拉。
+ * 只刷徽章，不重建世界书下拉。
  *
  * 每发一条消息都要跑一次被动学习评估，评估完徽章得立刻变（否则"待学"要等到
- * 下次打开设置页才看见）。走 refreshUI 会顺带重建下拉列表，没必要。
+ * 下次打开面板才看见）。走 refreshUI 会顺带重建下拉列表，没必要。
+ *
+ * 设置页不在这条路径上：它只放跨对话一致的设置，发消息 / 触发学习都不该动它（ADR-043）。
  *
  * @param {object} [ctx]
  */
@@ -162,8 +159,6 @@ export function refreshBadgeOnly(ctx = getContext()) {
 
     const view = { ctx, settings, available, diag };
     paint('badge', view);
-    paint('status', view);
-    paint('passiveHint', view);
 
     /*
      * 面板里也有这两个开关与「待学」提示。开着就顺手同步一次——

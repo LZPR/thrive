@@ -109,11 +109,14 @@ export const DEFAULT_SETTINGS = Object.freeze({
      *   panelWidth       展开时的宽度（窄屏会被 `min(…, 92vw)` 再收一次）
      *   panelHeight      展开时的最大高度
      *   panelOpacity     整块面板的不透明度，调低可以透出后面的聊天内容
+     *
+     * 默认值随面板瘦身一起调小过一档（ADR-043）：正文只剩两块开关 + 一个折叠块，
+     * 再给 480×620 就只是空着。用户自己拖过 / 调过的值不动。
      */
     panelX: -1,
     panelY: -1,
-    panelWidth: 480,
-    panelHeight: 620,
+    panelWidth: 400,
+    panelHeight: 520,
     panelOpacity: 1,
 });
 

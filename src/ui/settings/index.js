@@ -7,13 +7,16 @@
  *   2. 把各组的绑定函数叫一遍（bindSettingsEvents）
  *   3. 把状态回填到各组的控件上（refreshSettingsControls），并登记进刷新编排
  *
+ * 这一页**只放跨对话一致的设置**：按对话生效的（学习模式开关、被动判据、待确认改动、
+ * 写入记录）都在浮动面板里，所以切对话不该让这一页有任何变化（ADR-043）。
+ *
  *   common.js       取元素、回填勾选框、状态小字、防抖落盘
  *   help.js         标签旁那个「?」的展开 / 收起
  *   diagnostics.js  顶部环境诊断
  *   basics.js       新对话默认开启、显示徽章
  *   write-targets.js 写入模块、可写书、读取范围
- *   desc-patch.js   描述改动暂存（面板也 import 它）
- *   passive-trigger.js 自动学习与两条判据
+ *   desc-patch.js   描述改动暂存
+ *   desc-storage.js 角色描述存在哪（角色卡 / 世界书条目）
  *   limit-fields.js 14 个数值上限
  *   prompt-cards.js 提示词卡片、拖动、编辑弹窗
  *   tool-catalog.js 只读工具清单与复制
@@ -33,7 +36,6 @@ import { bindPatchControls, syncPatchCheck, updatePatchHint } from './desc-patch
 import { bindDescStorageControls, syncDescStorage, updateDescStorageHint } from './desc-storage.js';
 import { bindHelpButtons } from './help.js';
 import { bindLimitControls, syncLimitControls } from './limit-fields.js';
-import { bindPassiveControls, refreshPassive, syncPassiveControls } from './passive-trigger.js';
 import { bindPromptControls, updatePromptCards, updatePromptStats } from './prompt-cards.js';
 import { bindToolCatalog, renderToolCatalog } from './tool-catalog.js';
 import {
@@ -92,7 +94,6 @@ function bindSettingsEvents() {
     bindWriteTargetControls();
     bindDescStorageControls();
     bindPatchControls();
-    bindPassiveControls();
     bindLimitControls();
     bindPromptControls();
     bindToolCatalog();
@@ -121,10 +122,7 @@ function refreshSettingsControls(ctx, settings) {
     updateDescStorageHint(ctx, settings);
 
     syncPatchCheck(settings);
-    updatePatchHint(ctx, settings);
-
-    syncPassiveControls(settings);
-    refreshPassive(ctx, settings);
+    updatePatchHint(settings);
 
     syncLimitControls(settings);
     syncAppearanceControls(settings);
@@ -138,7 +136,6 @@ function refreshSettingsControls(ctx, settings) {
 registerSurfaces({
     controls: ({ ctx, settings }) => refreshSettingsControls(ctx, settings),
     diagnostics: ({ ctx, diag }) => refreshDiagnostics(ctx, diag),
-    passiveHint: ({ ctx, settings }) => refreshPassive(ctx, settings),
     books: ({ ctx }) => {
         void refreshBookOptions(ctx);
     },

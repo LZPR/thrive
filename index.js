@@ -23,6 +23,8 @@
  *      并按一组一个文件拆进 src/ui/settings/（ADR-041）
  *  17. 角色描述可选存进世界书：与角色同名那本书里的一条常驻条目，desc_* 工具照旧，
  *      lore_* 工具看不到它也改不了它（src/desc.js，ADR-042）
+ *  18. 界面按作用域分区：对话级的（两个开关、被动判据、触发一次、待确认、记录）全在浮动面板，
+ *      设置页只留跨对话一致的设置，切对话不再跟着变（ADR-043）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -72,7 +74,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.24.0 · 角色描述可选存进世界书条目`);
+    console.log(`${LOG} 启动 v0.25.0 · 对话级设置搬进浮动面板`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -211,7 +213,7 @@ function runThriveCommand(raw) {
         }
 
         /*
-         * 被动学习是全局开关（判据也在设置页里配），所以这里不区分对话；
+         * 被动学习是全局开关（判据在浮动面板的「更多设置」里配），所以这里不区分对话；
          * 但已经挂上的待学习是对话级的，关掉时一并清掉。
          */
         case 'passive': {

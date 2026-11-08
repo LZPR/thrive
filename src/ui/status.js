@@ -1,10 +1,8 @@
 /**
- * ui/status.js · 状态摘要的两种写法
+ * ui/status.js · 一行状态摘要
  *
- *   - describeStatus：一行给 `/thrive status` 看的纯文本
- *   - refreshStatusText：设置页「当前对话」那一行
- *
- * 两者都只是"把状态读成人话"，不写任何状态。
+ * 只服务 `/thrive status`：它回答的是"这个对话现在什么状态"，所以读的仍是对话级状态，
+ * 但不占设置页的位置——设置页只放跨对话一致的设置（ADR-043）。
  */
 
 import { getContext } from '../../../../../extensions.js';
@@ -12,9 +10,8 @@ import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
-import { ensureSettings, getPending, hasAnyModule, isChatAvailable, isEnabled } from '../store.js';
+import { ensureSettings, getPending, isChatAvailable, isEnabled } from '../store.js';
 import { getWritableBook, isBookScanned } from '../targets.js';
-import { registerSurfaces } from './refresh.js';
 
 /**
  * 一行状态摘要，给 `/thrive status` 用。
@@ -98,40 +95,3 @@ function describePassiveState(ctx, settings) {
     const tail = interval > 0 && isChatAvailable(ctx) ? `，还差 ${progress.remaining} 条` : '';
     return `已开启（${rules.join(' + ')}${tail}）`;
 }
-
-function refreshStatusText(ctx, settings, available) {
-    const status = document.getElementById('thrive_chat_status');
-    if (!status) {
-        return;
-    }
-
-    const none = !hasAnyModule(settings);
-    if (none) {
-        status.textContent = '无可写模块';
-        status.classList.remove('thrive-status--on');
-        return;
-    }
-
-    if (!available) {
-        status.textContent = '未打开对话';
-        status.classList.remove('thrive-status--on');
-        return;
-    }
-
-    const active = isEnabled(ctx);
-    const passive = settings.passiveEnabled === true;
-    const pending = getPending(ctx);
-
-    status.textContent = [
-        `主动${active ? '开' : '关'}`,
-        `被动${passive ? '开' : '关'}`,
-        pending ? '待学' : '',
-    ].filter(Boolean).join(' · ');
-
-    status.classList.toggle('thrive-status--on', active || Boolean(pending));
-}
-
-/* 登记给刷新编排 */
-registerSurfaces({
-    status: ({ ctx, settings, available }) => refreshStatusText(ctx, settings, available),
-});

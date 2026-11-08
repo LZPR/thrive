@@ -41,6 +41,9 @@ export const TRIGGER = Object.freeze({
 /** 关键词分隔符：中英文逗号、分号、换行、竖线都当分隔符 */
 const KEYWORD_SEPARATORS = /[,，;；\n\r|]+/;
 
+/** 条数判据的上限。再大就不是"定期抽查"，是"永远不会触发" */
+export const PASSIVE_INTERVAL_MAX = 500;
+
 /** 单个关键词的长度上限，防止整段贴进来变成一个巨大的 includes */
 const KEYWORD_MAX_CHARS = 40;
 
