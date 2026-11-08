@@ -7,27 +7,24 @@
  *   2. 把各组的绑定函数叫一遍（bindSettingsEvents）
  *   3. 把状态回填到各组的控件上（refreshSettingsControls），并登记进刷新编排
  *
- * 这一页放的多数是跨对话一致的设置，但有两处例外，它们**按对话**生效（ADR-044）：
- *   - 可写书（write-targets.js）
- *   - 角色描述存储：角色卡 / 世界书条目（desc-storage.js）
+ * 作用域原则（ADR-043 / ADR-045）：**位置即作用域**。这一页只放跨对话一致的设置；
+ * 按对话生效的一律在浮动面板里，一个都不留在这儿——
+ *   - 主动 / 被动开关、描述存哪儿、可写书、待确认改动、写入记录 → ui/panel.js
  *
- * 被动学习的开关与判据都不在这一页：判据是全局的、开关是对话级的，两者都在浮动面板的
- * 「更多设置」里（这一页只有「新对话默认开启被动学习」这一个全局初值）。
+ * 所以这一页的内容不随对话变化，切对话时它不需要重铺任何下拉。被动判据（每 N 条 /
+ * 关键词）是全局的，因此回到这一页的「被动学习」组（passive-criteria.js）。
  *
- * 按对话生效意味着切对话之后它们要重新回填，所以这两个控件都不吃传进来的 settings，
- * 而是自己现取 ctx。刷新编排每次都重跑 refreshSettingsControls，天然覆盖这一点。
- *
- *   common.js       取元素、回填勾选框、状态小字、防抖落盘
- *   help.js         标签旁那个「?」的展开 / 收起
- *   diagnostics.js  顶部环境诊断
- *   basics.js       新对话默认开启、显示徽章
- *   write-targets.js 写入模块、可写书、读取范围
- *   desc-patch.js   描述改动暂存
- *   desc-storage.js 角色描述存在哪（角色卡 / 世界书条目）
- *   limit-fields.js 14 个数值上限
- *   prompt-cards.js 提示词卡片、拖动、编辑弹窗
- *   tool-catalog.js 只读工具清单与复制
- *   appearance.js   旧日志清理、浮动面板外观、压缩面板入口
+ *   common.js         取元素、回填勾选框、状态小字、防抖落盘
+ *   help.js           标签旁那个「?」的展开 / 收起
+ *   diagnostics.js    顶部环境诊断
+ *   basics.js         新对话默认开启（主动 / 被动）、显示徽章
+ *   write-targets.js  写入模块、读取范围
+ *   passive-criteria.js 被动判据：每 N 条、关键词
+ *   desc-patch.js     描述改动暂存
+ *   limit-fields.js   14 个数值上限
+ *   prompt-cards.js   提示词卡片、拖动、编辑弹窗
+ *   tool-catalog.js   只读工具清单与复制
+ *   appearance.js     旧日志清理、浮动面板外观、压缩面板入口
  *
  * 加一项设置：挑一个现有的组文件改，不新建文件；实在不属于任何一组，再开一个文件
  * 并在下面两处各加一行。
@@ -40,17 +37,15 @@ import { bindAppearanceControls, syncAppearanceControls } from './appearance.js'
 import { bindBasicsControls, syncBasicsControls } from './basics.js';
 import { bindDiagnosticRefresh, refreshDiagnostics } from './diagnostics.js';
 import { bindPatchControls, syncPatchCheck, updatePatchHint } from './desc-patch.js';
-import { bindDescStorageControls, syncDescStorage, updateDescStorageHint } from './desc-storage.js';
 import { bindHelpButtons } from './help.js';
 import { bindLimitControls, syncLimitControls } from './limit-fields.js';
+import { bindPassiveCriteria, syncPassiveCriteria } from './passive-criteria.js';
 import { bindPromptControls, updatePromptCards, updatePromptStats } from './prompt-cards.js';
 import { bindToolCatalog, renderToolCatalog } from './tool-catalog.js';
 import {
     bindWriteTargetControls,
-    refreshBookOptions,
     syncReadScope,
     syncWriteTargetControls,
-    updateBookHint,
     updateModuleHints,
     updateScopeHint,
 } from './write-targets.js';
@@ -91,7 +86,6 @@ export async function initSettingsPanel(ctx = getContext()) {
     bindDiagnosticRefresh();
     bindSettingsEvents();
 
-    await refreshBookOptions();
     refreshUI();
 }
 
@@ -99,7 +93,7 @@ export async function initSettingsPanel(ctx = getContext()) {
 function bindSettingsEvents() {
     bindBasicsControls();
     bindWriteTargetControls();
-    bindDescStorageControls();
+    bindPassiveCriteria();
     bindPatchControls();
     bindLimitControls();
     bindPromptControls();
@@ -110,8 +104,8 @@ function bindSettingsEvents() {
 /**
  * 设置页所有控件的回填。
  *
- * 顺序按模板里从上到下：同一块里后面几项会读前面刚写进 settings 的值（比如模块关了
- * 之后可写书的提示要变），所以不排成随意的顺序。
+ * 顺序按模板里从上到下：同一块里后面几项会读前面刚写进 settings 的值，所以不排成
+ * 随意的顺序。
  *
  * @param {object} ctx
  * @param {object} settings
@@ -122,11 +116,9 @@ function refreshSettingsControls(ctx, settings) {
     syncWriteTargetControls(settings);
     updateModuleHints(ctx, settings);
     syncReadScope(settings);
-    updateBookHint(ctx);
     updateScopeHint(ctx, settings);
 
-    syncDescStorage(ctx);
-    updateDescStorageHint(ctx);
+    syncPassiveCriteria(settings);
 
     syncPatchCheck(ctx, settings);
     updatePatchHint(ctx);
@@ -143,7 +135,4 @@ function refreshSettingsControls(ctx, settings) {
 registerSurfaces({
     controls: ({ ctx, settings }) => refreshSettingsControls(ctx, settings),
     diagnostics: ({ ctx, diag }) => refreshDiagnostics(ctx, diag),
-    books: ({ ctx }) => {
-        void refreshBookOptions(ctx);
-    },
 });

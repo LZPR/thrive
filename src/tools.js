@@ -449,7 +449,7 @@ async function handleLoreList(params) {
         return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
     }
     if (!getWritableBook(ctx)) {
-        return errorResult('NO_BOOK', '还没有选择可写书，请让用户到扩展设置里选一本。');
+        return errorResult('NO_BOOK', '还没有选择可写书，请让用户在浮动面板里选一本。');
     }
 
     const listed = await listLore(ctx, settings);
@@ -535,7 +535,7 @@ async function handleLoreRead(params) {
         return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
     }
     if (!getWritableBook(ctx)) {
-        return errorResult('NO_BOOK', '还没有选择可写书，请让用户到扩展设置里选一本。');
+        return errorResult('NO_BOOK', '还没有选择可写书，请让用户在浮动面板里选一本。');
     }
 
     const title = String(params?.title ?? '').trim();

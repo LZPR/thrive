@@ -9,13 +9,18 @@
  *   ui/panel-layout.js  面板的位置、尺寸、不透明度与拖拽
  *   ui/compress-panel.js 压缩面板（独立窗口：超长条目、手动编辑、智能压缩占位）
  *   ui/badge.js         输入框旁的状态徽章
- *   ui/status.js        状态摘要文本（`/thrive status` 与设置页那一行）
+ *   ui/status.js        状态摘要文本（`/thrive status`）
+ *   ui/desc-target.js   两个落点：描述存哪儿、可写书（对话级，面板的「更多设置」用它）
  *   ui/refresh.js       刷新编排：谁该在什么时候刷，以及面板开合的开关
  *   ui/shared.js        共用的常量、toast、确认弹窗、面板开合状态
  *
  * 设置页内部也是"一组设置一个文件"：common / help / diagnostics / basics /
- * write-targets / desc-patch / passive-trigger / limit-fields / prompt-cards /
+ * write-targets / passive-criteria / desc-patch / limit-fields / prompt-cards /
  * tool-catalog / appearance，入口是 ui/settings/index.js。改哪一组就只碰那个文件。
+ *
+ * 一条界线值得记住：**对话级的界面件不放在 ui/settings/ 里**。落点那两块之所以在
+ * ui/desc-target.js 而不是 settings/desc-storage.js，就是因为面板要用它们，而面板不该
+ * 反过来 import 设置页的文件（ADR-045）。
  *
  * 跨界面的协调动作（改完状态要刷哪些地方）统一写在 ui/refresh.js 里。
  *

@@ -235,23 +235,6 @@
     opacity: 0.55;
 }
 
-/*
- * 「对话」小标签：贴在设置项名称后面，说明这一项按对话生效（ADR-044）。
- *
- * 用描边而不是实心底：它是一句提示，不是一个可点的按钮，太重会和旁边的「?」抢注意力。
- * nowrap 是必须的——窄屏下折成两行会比不写还难认。
- */
-.thrive-settings .thrive-scope {
-    padding: 0 5px;
-    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 28%, transparent);
-    border-radius: 4px;
-    font-size: 0.8em;
-    line-height: 1.6;
-    opacity: 0.65;
-    white-space: nowrap;
-    cursor: help;
-}
-
 /* -------------------------------------------------------------- 说明按钮 */
 
 /*
@@ -1071,8 +1054,8 @@ body.thrive-panel-dragging {
 /* --------------------------------------------------- 面板里的「更多设置」 */
 
 /*
- * 从设置页搬过来的判据：块内平铺，一行一样东西，不再套第二层折叠。
- * 面板窄，两栏并排会挤成两行字，所以一律竖着排。
+ * 这一块只剩"落点"：描述存哪儿、可写书、现在触发一次。块内平铺，不再套第二层折叠。
+ * 面板窄，标签与下拉并排会挤成两行字，所以一律竖着排。
  */
 .thrive-more {
     display: flex;
@@ -1082,41 +1065,30 @@ body.thrive-panel-dragging {
     border-top: 1px solid var(--SmartThemeBorderColor);
 }
 
-.thrive-more__row {
+.thrive-more__field {
     display: flex;
-    align-items: center;
-    gap: 6px;
+    flex-direction: column;
+    gap: 3px;
 }
 
 .thrive-more__label {
-    flex: 0 0 auto;
     font-size: calc(var(--mainFontSize, 15px) * 0.82);
+    opacity: 0.85;
 }
 
-.thrive-more__number {
-    flex: 0 0 5em;
-    width: 5em;
+/*
+ * 下拉用的是 ST 的 .text_pole（整宽），这里只压高度与字号：面板比设置页挤，
+ * 默认内边距在 360px 宽的窗里太占地方。整宽是有意的——书名可能很长。
+ */
+.thrive-more__select {
+    width: 100%;
     padding: 2px 6px;
     font-size: calc(var(--mainFontSize, 15px) * 0.82);
-    font-variant-numeric: tabular-nums;
 }
 
-/* 「已累计 / 上限」贴在行尾，数字等宽，变化时不会把行推来推去 */
-.thrive-more__meta {
-    margin-left: auto;
-    font-size: calc(var(--mainFontSize, 15px) * 0.72);
-    font-variant-numeric: tabular-nums;
-    opacity: 0.55;
-}
-
-.thrive-more__keywords {
-    width: 100%;
-    box-sizing: border-box;
-    min-height: 2.6em;
-    padding: 4px 6px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.82);
-    line-height: 1.4;
-    resize: vertical;
+.thrive-more__select:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
 }
 
 /* 面板里的输入控件比设置页更矮一档：一块 360px 宽的小窗里，默认内边距太占地方 */

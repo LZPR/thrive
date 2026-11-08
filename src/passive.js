@@ -45,6 +45,21 @@ const KEYWORD_SEPARATORS = /[,，;；\n\r|]+/;
 /** 条数判据的上限。再大就不是"定期抽查"，是"永远不会触发" */
 export const PASSIVE_INTERVAL_MAX = 500;
 
+/**
+ * 条数判据的夹取：空 / 非数字 / 负数都当 0（= 不用这条判据），超过上限收到上限。
+ *
+ * 设置页那个输入框用它。写 9999 时得到的该是上限，而不是一个永远等不到的进度。
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function clampInterval(value) {
+    const num = Math.round(Number(value));
+    if (!Number.isFinite(num) || num <= 0) {
+        return 0;
+    }
+    return Math.min(num, PASSIVE_INTERVAL_MAX);
+}
+
 /** 单个关键词的长度上限，防止整段贴进来变成一个巨大的 includes */
 const KEYWORD_MAX_CHARS = 40;
 
@@ -276,7 +291,7 @@ function arm(ctx, { reason, keyword = '', total, interval = 0, since = 0 }) {
 }
 
 /**
- * 手动挂一次（设置页的「现在触发一次」、`/thrive once`）。
+ * 手动挂一次（浮动面板的「现在触发一次」、`/thrive once`）。
  * 不受被动开关限制——用户明确要求了，就给他一轮。
  *
  * @param {object} ctx
@@ -333,7 +348,7 @@ export function disarm(ctx) {
     return clearPending(ctx);
 }
 
-/** 待学习的原因，一句话：给徽章 title / 设置页提示用 */
+/** 待学习的原因，一句话：给徽章 title / 面板提示用 */
 export function describePending(pending) {
     if (!pending) {
         return '';
@@ -351,7 +366,7 @@ export function describePending(pending) {
     }
 }
 
-/** 条数进度：给设置页那句"已累计 x / N 条"用；总开关关着也算，用户可以先看进度再决定 */
+/** 条数进度：给面板第二行那句"还差 N 条"用；被动关着也算，用户可以先看进度再决定 */
 export function intervalProgress(ctx, settings) {
     const interval = Math.max(0, Math.floor(Number(settings?.passiveInterval) || 0));
     const passive = getPassive(ctx);

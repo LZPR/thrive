@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.26.0</span>
+                <span class="thrive-version">v0.27.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -28,9 +28,8 @@
                 </div>
                 <div class="inline-drawer-content">
                     <small class="thrive-hint thrive-hint--moved">
-                        主动 / 被动开关、被动判据、待确认改动与写入记录都只作用于当前对话，
-                        都在徽章打开的面板里。下面带「对话」标签的两项（角色描述存储、可写书）
-                        也按对话生效——换个对话通常就换了角色。其余设置对所有对话一致。
+                        这一页只放跨对话一致的设置。按对话生效的都在徽章打开的面板里：
+                        主动 / 被动开关、描述存哪儿、可写书、待确认改动、写入记录。
                     </small>
 
                     <div class="thrive-check">
@@ -50,7 +49,7 @@
                     </div>
                     <div id="thrive_help_passive_default" class="thrive-help__body">
                         被动学习的开 / 关按对话记：这里只是新对话的初值，当前这一场的开关在浮动面板里。
-                        判据（每 N 条、关键词）是全局的，也在面板的「更多设置」里配。
+                        判据（每 N 条、关键词）是全局的，在下一条「被动学习」里配——它们对所有对话一致。
                     </div>
 
                     <div class="thrive-check">
@@ -62,7 +61,7 @@
                             aria-expanded="false" aria-controls="thrive_help_badge" title="说明">?</button>
                     </div>
                     <div id="thrive_help_badge" class="thrive-help__body">
-                        徽章是输入框旁那颗图标：点一下开 / 关浮动面板，按对话生效的开关与判据都在面板里。
+                        徽章是输入框旁那颗图标：点一下开 / 关浮动面板，按对话生效的开关与落点都在面板里。
                         强调色 = 主动开着，Em 色 = 只有被动开着，图标在呼吸 = 已挂上一次临时学习，
                         右上角数字 = 待确认的描述改动。
                     </div>
@@ -100,55 +99,6 @@
                     <div class="thrive-field">
                         <div class="thrive-row">
                             <span class="thrive-row__label">
-                                <label for="thrive_desc_storage">角色描述存储</label>
-                                <span class="thrive-scope" title="只对当前对话生效">对话</span>
-                                <button type="button" class="thrive-help" data-help="thrive_help_desc_storage"
-                                    aria-expanded="false" aria-controls="thrive_help_desc_storage" title="说明">?</button>
-                            </span>
-                        </div>
-                        <div id="thrive_help_desc_storage" class="thrive-help__body">
-                            选「世界书条目」后，角色描述存在<b>与角色同名的那本世界书</b>里的一条固定条目
-                            【角色描述】中，并设为常驻——世界书本身就是"一个能存很多条目、各自带条件"的容器，
-                            人物描述没必要再单独维护一套。此时「可写书」也固定为这本同名书。<br>
-                            切换<b>不做内容迁移</b>：条目从空白开始，角色卡上原有的文字也不会被清掉或搬走。
-                            角色卡上的描述仍会被 ST 自己注入，想只留一个来源请手动清空。<br>
-                            这个模式不做暂存、也不在浮动面板里提供 diff；撤销靠「已写入 → 恢复写入前」。
-                            该条目不会出现在世界书工具的目录里，也不会被它们改写。<br>
-                            这一项<b>按对话记</b>：换个对话通常就换了角色，两边各自记各自的落点。
-                        </div>
-                        <select id="thrive_desc_storage" class="text_pole">
-                            <option value="card">角色卡（经典）</option>
-                            <option value="worldbook">世界书条目（统一）</option>
-                        </select>
-                        <small id="thrive_desc_storage_hint" class="thrive-hint"></small>
-                        <div id="thrive_desc_bind" class="menu_button thrive-reset displayNone">
-                            设为本角色的世界书
-                        </div>
-                    </div>
-
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <span class="thrive-row__label">
-                                <label for="thrive_writable_book">可写书</label>
-                                <span class="thrive-scope" title="只对当前对话生效">对话</span>
-                                <button type="button" class="thrive-help" data-help="thrive_help_book"
-                                    aria-expanded="false" aria-controls="thrive_help_book" title="说明">?</button>
-                            </span>
-                        </div>
-                        <div id="thrive_help_book" class="thrive-help__body">
-                            世界书工具只会写这一本。没选书时世界书工具不注册，模型看不见它们。<br>
-                            这一项<b>按对话记</b>：换一个对话可以选另一本书，互不影响。<br>
-                            选「角色描述存储 = 世界书条目」时它不可改：描述必须落在角色同名书里。
-                        </div>
-                        <select id="thrive_writable_book" class="text_pole">
-                            <option value="">未选择</option>
-                        </select>
-                        <small id="thrive_book_hint" class="thrive-hint"></small>
-                    </div>
-
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <span class="thrive-row__label">
                                 <label for="thrive_read_scope">读取范围</label>
                                 <button type="button" class="thrive-help" data-help="thrive_help_scope"
                                     aria-expanded="false" aria-controls="thrive_help_scope" title="说明">?</button>
@@ -179,6 +129,57 @@
                         </div>
                         <small id="thrive_patch_hint" class="thrive-hint"></small>
                     </div>
+                </div>
+            </div>
+
+            <!-- 被动学习：判据是全局的（所有对话共用一套）；开 / 关按对话记，在浮动面板里 -->
+            <div class="inline-drawer thrive-group" id="thrive_passive_group">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <div class="thrive-group__title">
+                        <b>被动学习</b>
+                        <small class="thrive-group__hint">判据 · 全局</small>
+                    </div>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+                    <small class="thrive-hint thrive-hint--moved">
+                        两条判据是 or 关系，任一命中就在下一轮挂一次学习。
+                        它们对所有对话一致，所以放在这一页；开 / 关是每场对话各自的事，在浮动面板里。
+                    </small>
+
+                    <div class="thrive-field">
+                        <div class="thrive-row">
+                            <span class="thrive-row__label">
+                                <label for="thrive_passive_interval">每 N 条</label>
+                                <button type="button" class="thrive-help" data-help="thrive_help_passive_interval"
+                                    aria-expanded="false" aria-controls="thrive_help_passive_interval" title="说明">?</button>
+                            </span>
+                            <input id="thrive_passive_interval" class="text_pole thrive-number" type="number"
+                                inputmode="numeric" min="0" max="500" step="1" placeholder="0">
+                        </div>
+                        <div id="thrive_help_passive_interval" class="thrive-help__body">
+                            从上次学习算起，攒够这么多条可见消息（工具日志这类系统消息不计）就挂一次。
+                            只在角色回复完时结算，用户刚发完消息不会触发。填 0 = 不用这条判据。
+                            上限 500：再大就不是"定期抽查"，是永远等不到。
+                        </div>
+                    </div>
+
+                    <div class="thrive-field">
+                        <span class="thrive-field-title">
+                            关键词
+                            <button type="button" class="thrive-help" data-help="thrive_help_passive_keywords"
+                                aria-expanded="false" aria-controls="thrive_help_passive_keywords" title="说明">?</button>
+                        </span>
+                        <div id="thrive_help_passive_keywords" class="thrive-help__body">
+                            最近一轮的 User / Assistant 消息里出现任意一个词就挂一次，大小写不敏感。
+                            中英文逗号、分号、换行、竖线都当分隔符，单个词最多取 40 字。
+                            只看聊天消息本身，世界书 / 作者注释 / 预设里的字不算。留空 = 不用这条判据。
+                        </div>
+                        <textarea id="thrive_passive_keywords" class="text_pole thrive-block-text thrive-block-text--short"
+                            rows="2" placeholder="逗号或换行分隔，例如：记住，笔记，整理"></textarea>
+                    </div>
+
+                    <small id="thrive_passive_hint" class="thrive-hint"></small>
                 </div>
             </div>
 
@@ -439,7 +440,7 @@
                         </span>
                         <div id="thrive_help_panel" class="thrive-help__body">
                             点徽章打开 / 收起。打开后拖动标题栏能挪到任意位置；位置、大小和不透明度按屏幕记住，
-                            与具体对话无关。面板里是模式开关、待确认改动与写入记录。
+                            与具体对话无关。面板里是模式开关、落点（描述存哪儿、可写书）、待确认改动与写入记录。
                         </div>
 
                         <div class="thrive-row">

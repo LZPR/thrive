@@ -1,21 +1,20 @@
 /**
- * ui/settings/write-targets.js · 写入模块、可写书、读取范围
+ * ui/settings/write-targets.js · 写入模块、读取范围
  *
- * 这一块管"写到哪、从哪读"：两个模块各自的开关、唯一那本可写书、读取是否带上
- * 角色绑定的其他书。三者互相牵连（关掉世界书 = 可写书失去意义），所以放在一起，
- * 提示也一起算——分开写会出现"模块关了、可写书下面还写着一切正常"。
+ * 这一块管"写不写、从哪读"：两个模块各自的开关、读取是否带上角色绑定的其他书。
+ * 两者互相牵连（关掉世界书 = 读范围失去意义），所以放在一起，提示也一起算——
+ * 分开写会出现"模块关了、读取范围下面还写着一切正常"。
  *
- * 作用域是混的：模块开关与读范围跨对话一致，**可写书**按对话（ADR-044）——
- * 换个对话通常就换了个角色，可写书跟着变才是对的。所以这个下拉在切对话后要重铺。
+ * **可写书与「描述存哪儿」不在这里**：它们按对话记（ADR-045），住在浮动面板的
+ * 「更多设置」里。这一页只留一句"缺少可写书时会怎样"的提示，并指一下路。
  *
  * 模板里那个「?」负责解释规则；这里的小字只报状态，一切正常时不写任何字。
  */
 
 import { getContext } from '../../../../../../extensions.js';
 import { refreshUI } from '../refresh.js';
-import { LOG, askConfirm } from '../shared.js';
-import { ensureSettings, getState, isWorldbookDesc, saveChat, setWritableBookSetting } from '../../store.js';
-import { getActiveCharacter, getWritableBook, isBookScanned } from '../../targets.js';
+import { ensureSettings, isWorldbookDesc } from '../../store.js';
+import { getActiveCharacter, getWritableBook } from '../../targets.js';
 import { byId, paintHint, syncCheckbox } from './common.js';
 
 export function bindWriteTargetControls() {
@@ -33,7 +32,7 @@ export function bindWriteTargetControls() {
         refreshUI(ctx);
     });
 
-    bindLoreControls();
+    bindScopeControl();
 }
 
 /** @param {object} settings */
@@ -43,10 +42,13 @@ export function syncWriteTargetControls(settings) {
 }
 
 /**
- * 模块与可写书的提示。
+ * 模块的提示。
  *
- * 只在"模型其实用不了"的时候说话：关掉的模块、没选书的模块。一切正常时保持安静，
+ * 只在"模型其实用不了"的时候说话：关掉的模块、没有可写书的模块。一切正常时保持安静，
  * 勾选框本身就是答案。
+ *
+ * 可写书的位置已经在浮动面板里了，所以这里不能只说"还没选可写书"——那会让人在这一页
+ * 找下拉框。说清"在哪选"，顺手把统一模式下"没有书 = 角色没名字"这个特例分开讲。
  *
  * @param {object} ctx
  * @param {object} settings
@@ -55,10 +57,11 @@ export function updateModuleHints(ctx, settings) {
     const worldbook = settings.moduleWorldbook !== false;
     const description = settings.moduleDescription !== false;
     const book = getWritableBook(ctx);
+
     // 统一模式里"没有书"只有一个原因：角色没有名字，推导不出同名书
     const noBook = isWorldbookDesc(ctx)
         ? '当前角色没有名字，取不到同名书，世界书工具不会注册。'
-        : '还没选可写书，世界书工具不会注册。';
+        : '还没选可写书（在浮动面板的「更多设置」里选），世界书工具不会注册。';
 
     paintHint(
         'thrive_module_worldbook_hint',
@@ -79,129 +82,7 @@ export function updateModuleHints(ctx, settings) {
     byId('thrive_module_note')?.classList.toggle('displayNone', worldbook || description);
 }
 
-/* -------------------------------------------------------------- 世界书选择 */
-
-/**
- * 填充可写书下拉。
- * 数据源用 ctx.getWorldInfoNames()（1.19 提供的副本），不碰内部变量 world_names。
- * @param {object} [ctx]
- */
-export async function refreshBookOptions(ctx = getContext()) {
-    const select = byId('thrive_writable_book');
-    if (!select) {
-        return;
-    }
-
-    let names = [];
-    try {
-        names = ctx.getWorldInfoNames?.() ?? [];
-    } catch {
-        names = [];
-    }
-
-    // 世界书列表在应用启动后才填好，拿不到就主动刷一次
-    if (!names.length && typeof ctx.updateWorldInfoList === 'function') {
-        try {
-            await ctx.updateWorldInfoList();
-            names = ctx.getWorldInfoNames?.() ?? [];
-        } catch (err) {
-            console.warn(`${LOG} 刷新世界书列表失败`, err);
-        }
-    }
-
-    const forced = isWorldbookDesc(ctx);
-    // 统一模式下 getWritableBook 直接给角色同名书，这里不用另算一遍
-    const current = getWritableBook(ctx);
-    const annotations = describeBookAnnotations(getActiveCharacter(ctx));
-
-    select.innerHTML = '<option value="">未选择</option>';
-
-    for (const name of names) {
-        const option = document.createElement('option');
-        option.value = name;
-        // 标记放在选项文字里而不是 title 上：下拉列表里 title 根本看不到
-        const tag = annotations.get(name)?.tag;
-        option.textContent = tag ? `${name}（${tag}）` : name;
-        select.appendChild(option);
-    }
-
-    // 已选的书可能已经被删掉或改名，保留它并标出来，别让用户以为选好了
-    if (current && !names.includes(current)) {
-        const option = document.createElement('option');
-        option.value = current;
-        option.textContent = forced ? `${current}（还没建）` : `${current}（已不存在）`;
-        select.appendChild(option);
-    }
-
-    select.value = current;
-
-    /*
-     * 统一描述模式把可写书钉在角色同名书上（ADR-044）：置灰而不是隐藏——
-     * 用户仍然该看见"现在写到哪本书"，只是这件事此刻不归他选。
-     */
-    select.disabled = forced;
-    select.title = forced ? '「角色描述存储 = 世界书条目」时固定为角色同名书' : '';
-}
-
-/**
- * 两类需要提醒的书（spec §11.1）：
- *   tag  —— 塞进下拉选项的短标记，一行里能放下；
- *   note —— 选中之后写在下面的一句完整说明。
- */
-function describeBookAnnotations(character) {
-    const map = new Map();
-
-    const bound = character?.data?.extensions?.world;
-    if (typeof bound === 'string' && bound.trim()) {
-        map.set(bound.trim(), {
-            tag: '角色自带',
-            note: '这本书是角色自带的：改动会随角色卡分发。',
-        });
-    }
-
-    const embedded = character?.data?.character_book?.name;
-    if (typeof embedded === 'string' && embedded.trim() && !map.has(embedded.trim())) {
-        map.set(embedded.trim(), {
-            tag: '卡内嵌副本',
-            note: '疑似卡内嵌副本：独立文件与卡里那份不会自动同步。',
-        });
-    }
-
-    return map;
-}
-
-function bindLoreControls() {
-    const bookSelect = byId('thrive_writable_book');
-    if (bookSelect) {
-        bookSelect.addEventListener('change', async function () {
-            const ctx = getContext();
-            const next = String(this.value ?? '');
-
-            // 统一模式下这个下拉是置灰的，change 理论上不会来；真来了就当没发生
-            if (isWorldbookDesc(ctx)) {
-                this.value = getWritableBook(ctx);
-                return;
-            }
-
-            const previous = getWritableBook(ctx);
-
-            if (previous && next && previous !== next) {
-                const confirmed = await askConfirm('换书之后，新书里没有旧书的内容，角色不会记得它们。确定切换吗？');
-                if (!confirmed) {
-                    this.value = previous;
-                    return;
-                }
-                // 换书后清掉 lastBook，下一次读取就会带上 switched 提醒（spec §11.3）
-                getState(ctx).lastBook = null;
-                saveChat(ctx);
-            }
-
-            // 可写书按对话保存（ADR-044）：这里只改这一场对话
-            setWritableBookSetting(ctx, next);
-            updateBookHint(ctx);
-        });
-    }
-
+function bindScopeControl() {
     const scopeSelect = byId('thrive_read_scope');
     if (scopeSelect) {
         scopeSelect.addEventListener('change', function () {
@@ -214,50 +95,13 @@ function bindLoreControls() {
     }
 }
 
-function updateBookHint(ctx) {
-    const book = getWritableBook(ctx);
-
-    if (isWorldbookDesc(ctx)) {
-        // 钉死的值 + 来源说明。这里不比"书没激活"那条更值得报警：描述本来就要落在
-        // 角色那本书里，书还没建是第一次写入时才解决的事
-        paintHint(
-            'thrive_book_hint',
-            book
-                ? `「角色描述存储 = 世界书条目」，可写书固定为角色同名书「${book}」。`
-                : '「角色描述存储 = 世界书条目」，但当前角色没有名字，取不到同名书。',
-            !book,
-        );
-        return;
-    }
-
-    if (!book) {
-        // 没选书这件事，上面「世界书」那一行的提示已经说过了，不重复第二遍
-        paintHint('thrive_book_hint', '');
-        return;
-    }
-
-    const inactive = isBookScanned(ctx, book) === false;
-    const note = describeBookAnnotations(getActiveCharacter(ctx)).get(book)?.note ?? '';
-    const parts = [];
-
-    if (inactive) {
-        parts.push(`⚠ 这本书当前没激活，写进去也不会进上下文——到「世界书」面板勾选「${book}」。`);
-    }
-    if (note) {
-        parts.push(note);
-    }
-
-    paintHint('thrive_book_hint', parts.join(' '), inactive);
-}
-
-function updateScopeHint(ctx, settings) {
+export function updateScopeHint(ctx, settings) {
     if (settings.readScope !== 'bound') {
         paintHint('thrive_scope_hint', '');
         return;
     }
 
-    const character = getActiveCharacter(ctx);
-    const bound = String(character?.data?.extensions?.world ?? '').trim();
+    const bound = String(getActiveCharacter(ctx)?.data?.extensions?.world ?? '').trim();
 
     paintHint(
         'thrive_scope_hint',
@@ -276,5 +120,3 @@ export function syncReadScope(settings) {
         select.value = scope;
     }
 }
-
-export { updateBookHint, updateScopeHint };

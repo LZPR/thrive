@@ -1,9 +1,9 @@
 /**
  * ui/refresh.js · 刷新编排 + 面板开关
  *
- * 界面有好几块要看同一份状态：设置页的控件、设置页顶部的环境诊断、世界书下拉、徽章、
- * 浮动面板、压缩面板。它们各自在哪个文件里实现，这里不 import——各自把刷新函数
- * 登记到下面的表里。
+ * 界面有好几块要看同一份状态：设置页的控件、设置页顶部的环境诊断、徽章、浮动面板、
+ * 压缩面板、面板标题栏上的压缩角标。它们各自在哪个文件里实现，这里不 import——各自把
+ * 刷新函数登记到下面的表里。
  *
  * 为什么不直接 import：settings / panel / badge 在"绑定改了状态"时都要叫 refreshUI，
  * 反过来 refreshUI 又要调它们的刷新函数，直接互相 import 就是环。用一张登记表打平。
@@ -40,8 +40,6 @@ const SURFACES = {
     controls: () => {},
     /** 设置页：顶部的环境诊断 */
     diagnostics: () => {},
-    /** 设置页：世界书下拉的选项 */
-    books: () => {},
     /** 聊天区：徽章 */
     badge: () => {},
     /** 聊天区：浮动面板 */
@@ -82,7 +80,7 @@ function paint(name, view) {
  * 开 / 关浮动面板。
  *
  * 徽章点击（走 PANEL_TOGGLE_EVENT）、`/thrive panel`、「收起」按钮、
- * 设置页的「立即触发一次」——都从这里走，保证"面板开着没有"只有一份状态，
+ * 面板弹出的自动展开——都从这里走，保证"面板开着没有"只有一份状态，
  * 不会出现徽章说开着、面板却没了。
  *
  * 放在刷新编排里而不是 panel.js：它要同时重画面板与徽章，是两处界面的协调动作。
@@ -93,8 +91,7 @@ function paint(name, view) {
 export function setPanelOpen(open, ctx = getContext()) {
     markPanelOpen(open);
     paint('panel', { ctx });
-    // 面板可见性变了，徽章的 aria-expanded 与 tooltip 末行要跟上；
-    // 顺带把设置页那行状态也刷一遍，代价很小
+    // 面板可见性变了，徽章的 aria-expanded 与 tooltip 末行要跟上
     refreshBadgeOnly(ctx);
 }
 
@@ -132,9 +129,6 @@ export function refreshUI(ctx = getContext()) {
     paint('controls', view);
     paint('panel', view);
 
-    // 换角色/换对话后，选项上的"角色自带/卡内嵌"标注会变，重新铺一遍
-    void paint('books', view);
-
     /*
      * 顺手排一次"哪些内容超长"的检查。扫描要读世界书，所以去抖；
      * 结果变了会发 COMPRESS_EVENT，各入口自己重画（见 bindCompressRefresh）。
@@ -143,10 +137,10 @@ export function refreshUI(ctx = getContext()) {
 }
 
 /**
- * 只刷徽章，不重建世界书下拉。
+ * 只刷徽章，不重画设置页。
  *
  * 每发一条消息都要跑一次被动学习评估，评估完徽章得立刻变（否则"待学"要等到
- * 下次打开面板才看见）。走 refreshUI 会顺带重建下拉列表，没必要。
+ * 下次打开面板才看见）。走 refreshUI 会连设置页一起回填，没必要。
  *
  * 设置页不在这条路径上：它只放跨对话一致的设置，发消息 / 触发学习都不该动它（ADR-043）。
  *

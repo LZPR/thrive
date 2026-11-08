@@ -3,9 +3,11 @@
  *
  * 面板只装**作用于当前对话**的东西，全局设置一律留在扩展设置页：
  *   - 模式：主动 / 被动两块，整块可点（不再有单独的「开 / 关」按钮）
- *   - 更多设置（默认收起）：被动判据与「现在触发一次」。判据本身是全局的（同一套判据
- *     到处都该一样），但"这场对话要不要被动学"与"现在触发一次"只落在这一场
+ *   - 更多设置（默认收起）：描述存哪儿、可写书、现在触发一次——三样都只落在这一场
  *   - 角色描述落点、待确认改动、写入记录
+ *
+ * 被动**判据**（每 N 条 / 关键词）不在这里：它对所有对话一致，在设置页的「被动学习」组。
+ * 面板里只读它来算"还差几条"，并在没配判据时指一句路（ADR-045）。
  *
  * 另外三件事：
  *   - 重绘：refreshPanel 现算状态，签名没变就不碰 DOM
@@ -22,7 +24,6 @@ import { getDescTargetSnapshot, isWorldbookDesc } from '../desc.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
 import {
-    PASSIVE_INTERVAL_MAX,
     armManual,
     describePending,
     intervalProgress,
@@ -61,6 +62,7 @@ import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '
 import { escapeHtml, normalizeEol } from '../util.js';
 import { syncBadgeOpenState } from './badge.js';
 import { openCompressPanel } from './compress-panel.js';
+import { changeDescStorage, changeWritableBook, descTargetView } from './desc-target.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
 import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
@@ -82,12 +84,12 @@ let historyExpanded = false;
 
 /**
  * 「更多设置」展开着没有。理由同上：默认收起，面板打开的常态是"看状态、拨开关"，
- * 改判据是偶发动作。
+ * 换落点、手动触发都是偶发动作。
  */
 let moreExpanded = false;
 
-/** 判据输入框的落盘防抖（关键词是边打边存的） */
-let moreSaveTimer = 0;
+/** 落点切换进行中：要建书 / 停用条目、还可能弹确认框，期间不接受第二次操作 */
+let descTargetBusy = false;
 
 /**
  * 挂载浮动面板。重复调用安全。
@@ -114,8 +116,7 @@ export function initPanel() {
     panel.addEventListener('click', onPanelClick);
     // 折头是 div + role=button（按钮样式会把标题压成另一套观感），键盘要自己补
     panel.addEventListener('keydown', onPanelKeydown);
-    // 「更多设置」里那两个判据输入框，同样靠外壳接（重绘会把里面的节点换掉）
-    panel.addEventListener('input', onPanelInput);
+    // 「更多设置」里的两个下拉同样靠外壳接（重绘会把里面的节点换掉）
     panel.addEventListener('change', onPanelChange);
     document.addEventListener(PANEL_EVENT, () => refreshPanel());
     // 徽章点击只是发了个事件，开合由这里接（badge.js 不认识面板）
@@ -202,6 +203,7 @@ export function refreshPanel(ctx = getContext()) {
     }
 
     const mode = readModeView(ctx, settings);
+    const descChoice = descTargetView(ctx);
     const compress = getCompressSnapshot();
 
     /*
@@ -223,6 +225,8 @@ export function refreshPanel(ctx = getContext()) {
         settings.passiveInterval,
         settings.passiveKeywords,
         moreExpanded,
+        // 落点两个下拉：模式、书名，以及"列表里有哪些书"（别处新建/删除之后要重排）
+        [descChoice.storage, descChoice.book, descChoice.books.length],
         descTarget ? [descTarget.mode, descTarget.book, descTarget.active, descTarget.cardChars] : null,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
@@ -245,9 +249,9 @@ export function refreshPanel(ctx = getContext()) {
     const focus = capturePanelFocus();
     panel.innerHTML = renderPanel({
         mode,
-        settings,
         patch,
         descTarget,
+        descChoice,
         backups,
         descBackup,
         drift,
@@ -311,15 +315,6 @@ function restorePanelFocus(focus) {
     } catch {
         // number 输入框、或节点已经不接受焦点：忽略即可，不值得为它打断重绘
     }
-}
-
-/** 判据输入框的落盘防抖。和设置页的关键词框一样，边打边存没有意义 */
-function saveSoon(ctx) {
-    clearTimeout(moreSaveTimer);
-    moreSaveTimer = setTimeout(() => {
-        moreSaveTimer = 0;
-        ctx.saveSettingsDebounced?.();
-    }, 300);
 }
 
 /**
@@ -452,9 +447,9 @@ function isDescriptionEditorStale(ctx, applied) {
 
 function renderPanel({
     mode,
-    settings,
     patch,
     descTarget,
+    descChoice,
     backups,
     descBackup,
     drift = false,
@@ -502,7 +497,7 @@ function renderPanel({
 
     const body = [
         renderModeSection(mode),
-        renderMoreSection({ mode, settings, expanded: moreOpen }),
+        renderMoreSection({ mode, choice: descChoice, expanded: moreOpen }),
         renderDescTargetSection(descTarget),
         renderPatchSection(patch, drift, editorStale),
         renderHistorySection(backups, descBackup, historyExpanded),
@@ -601,50 +596,38 @@ function renderModeTile({ action, variant, title, hint, on, usable }) {
 }
 
 /**
- * 「更多设置」：从设置页搬过来的那一组。
+ * 「更多设置」：这一场对话的落点配置 + 手动触发。
  *
- * 这几项的效果都只落在**当前对话**上（判据命中后借的是这一场对话的一轮，手动触发同理），
- * 所以它们跟着模式开关一起住在面板里；设置页只剩"跨对话都一样"的那些。
+ * 三样东西都只作用于当前对话（ADR-044 / ADR-045）：
+ *   · 角色描述存哪儿（角色卡 / 世界书条目）
+ *   · 可写书（世界书工具写哪本；统一描述模式下由插件钉死）
+ *   · 现在触发一次（不等判据，给下一轮挂一次学习）
  *
- * 默认收起：面板打开的常态是"看状态、拨开关"，改判据是偶发动作。
- * 块内平铺，不再套第二层折叠。
+ * 判据（每 N 条 / 关键词）不在这里：那是"我隔多久想被提醒一次"，对所有对话一致，
+ * 住在设置页的「被动学习」组。
  *
- * @param {{mode: ReturnType<typeof readModeView>, settings: object, expanded: boolean}} props
+ * 默认收起：面板打开的常态是"看状态、拨开关"，换落点是偶发动作。块内平铺，不套第二层折叠。
+ *
+ * @param {{mode: ReturnType<typeof readModeView>,
+ *          choice: ReturnType<typeof descTargetView>, expanded: boolean}} props
  */
-function renderMoreSection({ mode, settings, expanded }) {
-    const interval = Math.max(0, Math.floor(Number(settings.passiveInterval) || 0));
-    const keywordCount = mode.keywordCount;
+function renderMoreSection({ mode, choice, expanded }) {
+    /*
+     * 折头上的摘要回答"现在写到哪"：描述落点 + 可写书。它比"N 条 · N 词"更该在这里——
+     * 判据搬走之后，这一块本来就只剩落点了。
+     */
+    const meta = choice.storage === 'worldbook'
+        ? `描述：世界书${choice.book ? ` · ${choice.book}` : ''}`
+        : `描述：角色卡${choice.book ? ` · ${choice.book}` : ' · 未选书'}`;
 
-    const meta = interval > 0 || keywordCount > 0
-        ? [interval > 0 ? `${interval} 条` : '', keywordCount > 0 ? `${keywordCount} 词` : ''].filter(Boolean).join(' · ')
-        : '未配判据';
-
-    const rows = expanded
-        ? `<div class="thrive-more">
-            <div class="thrive-more__row">
-                <label class="thrive-more__label" for="thrive_more_interval">每 N 条</label>
-                <input id="thrive_more_interval" class="text_pole thrive-more__number" type="number"
-                    min="0" max="${PASSIVE_INTERVAL_MAX}" step="1" inputmode="numeric" placeholder="0"
-                    data-thrive-field="interval" value="${interval > 0 ? interval : ''}">
-                <span class="thrive-more__meta">${mode.since} / ${interval > 0 ? interval : '—'}</span>
-            </div>
-            <textarea id="thrive_more_keywords" class="text_pole thrive-more__keywords" rows="2"
-                spellcheck="false" placeholder="关键词，逗号分隔"
-                data-thrive-field="keywords">${escapeHtml(settings.passiveKeywords ?? '')}</textarea>
-            <div class="thrive-panel__actions">
-                <small class="thrive-hint">判据对所有对话一致；0 条 = 不用条数判据，命中后只借当前对话一轮。</small>
-                <div class="menu_button thrive-panel__button" data-thrive-action="trigger-once"
-                    title="不等判据，立刻给下一轮挂一次学习，用来验证判据配得对不对">现在触发一次</div>
-            </div>
-        </div>`
-        : '';
+    const rows = expanded ? renderMoreRows({ mode, choice }) : '';
 
     return `
         <section class="thrive-panel__section thrive-panel__section--fold">
             <div class="thrive-panel__head thrive-panel__fold${expanded ? ' is-open' : ''}"
                 role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}"
                 data-thrive-action="toggle-more"
-                title="展开 / 收起被动学习判据（判据对所有对话一致，开关只作用于本对话）">
+                title="展开 / 收起落点设置（描述存哪儿、可写书、现在触发一次；都只作用于本对话）">
                 <span class="thrive-panel__section-title">
                     <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>更多设置
                 </span>
@@ -652,6 +635,57 @@ function renderMoreSection({ mode, settings, expanded }) {
             </div>
             ${rows}
         </section>`;
+}
+
+/**
+ * 折起来的那几行。单独拆出来是因为它只在展开时存在，和折头的摘要不是一回事。
+ *
+ * 两个下拉都钉 `data-thrive-field`：重绘靠它保住焦点，事件靠它认字段。
+ */
+function renderMoreRows({ mode, choice }) {
+    const storageOptions = [
+        { value: 'card', label: '角色卡' },
+        { value: 'worldbook', label: '世界书条目' },
+    ].map(item => `<option value="${item.value}"${choice.storage === item.value ? ' selected' : ''}>`
+        + `${escapeHtml(item.label)}</option>`).join('');
+
+    const bookOptions = choice.books
+        .map(item => `<option value="${escapeHtml(item.value)}"${choice.book === item.value ? ' selected' : ''}>`
+            + `${escapeHtml(item.label)}</option>`).join('');
+
+    /*
+     * 判据一个都没配时，被动开着也是空转。这句提示得说清楚"去哪配"——
+     * 判据已经不在面板里了，不指路等于让用户在面板里找一圈。
+     */
+    const noRule = mode.passive && mode.interval <= 0 && mode.keywordCount === 0;
+
+    return `
+        <div class="thrive-more">
+            <div class="thrive-more__field">
+                <label class="thrive-more__label" for="thrive_more_storage">描述存哪儿</label>
+                <select id="thrive_more_storage" class="text_pole thrive-more__select"
+                    data-thrive-field="storage">${storageOptions}</select>
+            </div>
+
+            <div class="thrive-more__field">
+                <label class="thrive-more__label" for="thrive_more_book">可写书</label>
+                <select id="thrive_more_book" class="text_pole thrive-more__select"
+                    data-thrive-field="book"${choice.forced ? ' disabled' : ''}
+                    title="${choice.forced
+                        ? '「描述存哪儿 = 世界书条目」时固定为角色同名书'
+                        : '世界书工具只会写这一本；没选书时它们不注册'}">${bookOptions}</select>
+            </div>
+
+            <div class="thrive-panel__actions">
+                <small class="thrive-hint">${
+                    choice.forced
+                        ? '世界书条目模式下可写书固定为角色同名书，描述就存在那本里。'
+                        : '两项都只对当前对话生效；换对话可以各选各的。'
+                }${noRule ? ' 被动还没配判据，到扩展设置的「被动学习」里配。' : ''}</small>
+                <div class="menu_button thrive-panel__button" data-thrive-action="trigger-once"
+                    title="不等判据，立刻给下一轮挂一次学习，用来验证判据配得对不对">现在触发一次</div>
+            </div>
+        </div>`;
 }
 
 /**
@@ -1017,55 +1051,42 @@ function onPanelKeydown(event) {
 }
 
 /**
- * 「更多设置」里的输入框：外壳接 input / change，重绘换掉节点也不会丢事件。
+ * 「更多设置」里的两个下拉。
  *
- * 关键词边打边存（和设置页的关键词框同一套手感）；条数只在 change（失焦 / 回车）时落值——
- * 边打字边存盘会把 "12" 中间那个 "1" 也存进去。
+ * 都是对话级的落点（ADR-044），切换带副作用：要建书 / 停用条目 / 弹一次确认。
+ * 所以处理完一律整块重绘——下拉的值从状态重新读，切换失败（比如没有选中角色）时
+ * 会自己弹回原值，不用手写回滚。
  */
-function onPanelInput(event) {
-    if (event.target?.dataset?.thriveField !== 'keywords') {
-        return;
-    }
-
-    const ctx = getContext();
-    ensureSettings(ctx).passiveKeywords = String(event.target.value ?? '');
-    saveSoon(ctx);
-}
-
 function onPanelChange(event) {
     const field = event.target?.dataset?.thriveField;
-    if (!field) {
+    if (!field || (field !== 'storage' && field !== 'book')) {
         return;
     }
 
+    if (descTargetBusy) {
+        // 上一次还在等确认框 / 建书：先把它读回状态值，别让下拉停在一个没生效的选项上
+        refreshPanel(getContext());
+        return;
+    }
+
+    descTargetBusy = true;
     const ctx = getContext();
-    const settings = ensureSettings(ctx);
+    const value = String(event.target.value ?? '');
 
-    if (field === 'interval') {
-        const value = clampInterval(event.target.value);
-        settings.passiveInterval = value;
-        // 回填成夹取后的值：写 999 会被收成上限，用户得看见这件事
-        event.target.value = value > 0 ? String(value) : '';
-        saveSoon(ctx);
-        // 折头上的"N 条"与被动块里的"还差几条"都要跟着变
-        refreshPanel(ctx);
-        return;
-    }
+    const done = () => {
+        descTargetBusy = false;
+        // 落点变了：注入不变，但面板与设置页的提示、patch 开关的可用性都要跟着刷
+        syncFromContext(ctx);
+        refreshUI(ctx);
+    };
 
-    if (field === 'keywords') {
-        settings.passiveKeywords = String(event.target.value ?? '');
-        ctx.saveSettingsDebounced?.();
-        refreshPanel(ctx);
-    }
-}
-
-/** 条数判据的夹取。设置页的输入框与这里共用同一个上限 */
-function clampInterval(value) {
-    const num = Math.round(Number(value));
-    if (!Number.isFinite(num) || num <= 0) {
-        return 0;
-    }
-    return Math.min(num, PASSIVE_INTERVAL_MAX);
+    (field === 'storage'
+        ? changeDescStorage(ctx, value)
+        : changeWritableBook(ctx, value)
+    ).then(done, err => {
+        console.error(`${LOG} 切换落点失败`, err);
+        done();
+    });
 }
 
 /**

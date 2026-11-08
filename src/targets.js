@@ -489,7 +489,7 @@ const SELECTIVE_LOGIC = Object.freeze({ any: 0, not_all: 1, not_any: 2, all: 3 }
 export async function loadWritableBook(ctx) {
     const book = getWritableBook(ctx);
     if (!book) {
-        return noBook('还没有选择可写书。请让用户到扩展设置里选一本。');
+        return noBook('还没有选择可写书。请让用户在浮动面板里选一本。');
     }
 
     return loadBook(ctx, book);

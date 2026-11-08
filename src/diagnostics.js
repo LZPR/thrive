@@ -170,7 +170,7 @@ export function formatDiagnosis(diag) {
 export const ERROR_HINTS = Object.freeze({
     // —— 工具契约里的通用码（spec §7）
     NO_CHAR: '当前没有选中角色。请让用户先在角色列表里选一个，再重试。',
-    NO_BOOK: '还没有选择可写书。请让用户到扩展设置里选一本，再重试。',
+    NO_BOOK: '还没有选择可写书。请让用户在浮动面板里选一本，再重试。',
     MODULE_DISABLED: '这个模块已关闭，不能写这一类内容；现在只能记另一类，不要改道写进别的目标。',
     READ_REQUIRED: '本轮还没读过这个目标。先调用对应的读取工具，拿到当前内容再写。',
     STALE_READ: '内容在你读取之后被改动过。请重新读取拿最新正文，不要重试原来的参数。',
