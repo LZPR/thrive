@@ -1178,7 +1178,7 @@ body.thrive-panel-dragging {
     opacity: 1;
 }
 
-.thrive-panel .thrive-diff {
+.thrive-panel .thrive-diff, .thrive-draft .thrive-diff {
     flex: 1 1 auto;
     /* 兜住底：两条记录 + 一份 patch 同时在场时，diff 不该被挤成一行 */
     min-height: 4.5em;
@@ -1192,7 +1192,7 @@ body.thrive-panel-dragging {
     line-height: 1.5;
 }
 
-.thrive-panel .thrive-diff__row {
+.thrive-panel .thrive-diff__row, .thrive-draft .thrive-diff__row {
     display: flex;
     gap: 6px;
     padding: 0 4px;
@@ -1201,37 +1201,37 @@ body.thrive-panel-dragging {
     overflow-wrap: anywhere;
 }
 
-.thrive-panel .thrive-diff__sign {
+.thrive-panel .thrive-diff__sign, .thrive-draft .thrive-diff__sign {
     flex: 0 0 auto;
     width: 1ch;
     opacity: 0.55;
     user-select: none;
 }
 
-.thrive-panel .thrive-diff__text {
+.thrive-panel .thrive-diff__text, .thrive-draft .thrive-diff__text {
     flex: 1 1 auto;
     min-width: 0;
 }
 
 /* 新增：用主题强调色描边 + 淡底，深浅色主题下都跟着走 */
-.thrive-panel .thrive-diff__row--add {
+.thrive-panel .thrive-diff__row--add, .thrive-draft .thrive-diff__row--add {
     border-left-color: var(--SmartThemeQuoteColor);
     background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 12%, transparent);
 }
 
 /* 删除：只压暗，不做删除线——中文长句加删除线会看不清 */
-.thrive-panel .thrive-diff__row--del {
+.thrive-panel .thrive-diff__row--del, .thrive-draft .thrive-diff__row--del {
     opacity: 0.55;
 }
 
-.thrive-panel .thrive-diff__row--fold {
+.thrive-panel .thrive-diff__row--fold, .thrive-draft .thrive-diff__row--fold {
     justify-content: center;
     padding: 2px 0;
     opacity: 0.45;
     font-size: calc(var(--mainFontSize, 15px) * 0.72);
 }
 
-.thrive-panel .thrive-diff__empty {
+.thrive-panel .thrive-diff__empty, .thrive-draft .thrive-diff__empty {
     padding: 4px 6px;
     opacity: 0.55;
     font-family: var(--mainFontFamily, sans-serif);
@@ -1760,7 +1760,7 @@ body.thrive-panel-dragging {
  * 压缩只剩这一颗按钮，放在浮动面板标题栏：图标 + 条数。
  * 有超长内容时整颗点亮（is-alert）；扫描到新条目时闪 4 下（is-flash，由 refresh.js 加）。
  */
-.thrive-panel__compress {
+.thrive-panel__compress, .thrive-panel__draft {
     display: flex;
     flex: 0 0 auto;
     align-items: center;
@@ -1770,13 +1770,13 @@ body.thrive-panel-dragging {
     font-size: calc(var(--mainFontSize, 15px) * 0.8);
 }
 
-.thrive-panel__compress.is-alert {
+.thrive-panel__compress.is-alert, .thrive-panel__draft.is-alert {
     border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 60%, var(--SmartThemeBorderColor));
     color: var(--SmartThemeQuoteColor);
 }
 
 /* 条数：按钮里的一颗小胶囊。不做绝对定位——标题栏只有 360px，溢出的角标会被裁掉 */
-.thrive-panel__compress-count {
+.thrive-panel__compress-count, .thrive-panel__draft-count {
     min-width: 12px;
     padding: 0 3px;
     border-radius: 999px;
@@ -1818,4 +1818,324 @@ body.thrive-panel-dragging {
         border-color: var(--SmartThemeQuoteColor);
         animation: none;
     }
+}
+
+/* ---------------------------------------------------------- 虚拟世界书窗口 */
+
+/*
+ * 第三个窗口：模型改了什么、值不值得留。
+ *
+ * 与另外两个不一样的地方只有一处——它是**居中浮起**的：前两个（面板、压缩侧栏）都贴着
+ * 屏幕边缘，因为它们要长期待在那儿；这个窗口是"看完就关"，挡在正中间才方便对照。
+ * 照样用 absolute：ST 给 html 设了 transform，fixed 的包含块会变成零高度内容盒
+ * （见 .thrive-panel 的注释）。
+ *
+ * 落点用 left + translateX 居中；一旦拖动就换成确定的 left/top（见 draft-window.js），
+ * 那时 transform 会被清掉，否则拖动距离会和指针差半个窗宽。
+ */
+.thrive-draft {
+    position: absolute;
+    top: 9vh;
+    left: 50%;
+    z-index: 4300;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-sizing: border-box;
+    width: min(600px, 94vw);
+    max-height: 78vh;
+    padding: 8px 12px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 32%);
+    font-size: calc(var(--mainFontSize, 15px) * 0.88);
+    line-height: 1.4;
+    transform: translateX(-50%);
+    animation: thrive-draft-in 0.14s ease-out;
+}
+
+@keyframes thrive-draft-in {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thrive-draft {
+        animation: none;
+    }
+}
+
+.thrive-draft--dragging {
+    cursor: grabbing;
+    user-select: none;
+}
+
+/* 保存 / 丢弃进行中：只关交互，别整体降透明度（用户可能调过面板不透明度） */
+.thrive-draft--busy {
+    pointer-events: none;
+}
+
+.thrive-draft--busy .thrive-draft__bar {
+    opacity: 0.6;
+}
+
+.thrive-draft__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.thrive-draft__icon {
+    flex: 0 0 auto;
+    opacity: 0.7;
+}
+
+.thrive-draft__title {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.thrive-draft__meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.76);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.65;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-draft__close {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+}
+
+.thrive-draft__body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+/* 提示行：磁盘被改过、可写书换了，都在这里说一句。字号压小，不和条目抢注意力 */
+.thrive-draft__notice {
+    padding: 4px 8px;
+    border-left: 2px solid var(--SmartThemeBorderColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    opacity: 0.75;
+}
+
+.thrive-draft__notice--warn {
+    border-left-color: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+.thrive-draft__empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 26px 8px;
+    opacity: 0.6;
+    text-align: center;
+}
+
+.thrive-draft__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/*
+ * 一条条目。左侧那道竖线就是状态：新增 / 改写用强调色，将被移除压暗。
+ * 不做成卡片（边框 + 背景），一屏十几条时会变成一排盒子，反而看不清哪条改了。
+ */
+.thrive-draft__entry {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 0 4px 8px;
+    border-left: 2px solid var(--SmartThemeBorderColor);
+}
+
+.thrive-draft__entry--added,
+.thrive-draft__entry--changed {
+    border-left-color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-draft__entry--removed {
+    opacity: 0.6;
+}
+
+.thrive-draft__entry--same {
+    opacity: 0.7;
+}
+
+.thrive-draft__entry-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.thrive-draft__entry-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-draft__tag {
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.68);
+    opacity: 0.75;
+}
+
+.thrive-draft__tag--added,
+.thrive-draft__tag--changed {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+/* 磁盘那边被改过、缓冲区还停着旧版本：这不是这次要保存的东西，别用强调色 */
+.thrive-draft__tag--disk {
+    border-style: dashed;
+    opacity: 0.6;
+}
+
+/*
+ * 触发条件一行：关键词做成小药丸，组合方式做一句说明。
+ * 只显示会被记录下来的东西——工具从来不碰 order / position / probability，
+ * 摆出来只会让人以为它们可能变。
+ */
+.thrive-draft__keys {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.74);
+}
+
+.thrive-draft__keys-label {
+    opacity: 0.5;
+}
+
+.thrive-draft__key {
+    padding: 0 5px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    opacity: 0.85;
+}
+
+.thrive-draft__key--none {
+    border-style: dashed;
+    opacity: 0.5;
+}
+
+.thrive-draft__key-delta--add {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+}
+
+.thrive-draft__key-delta--del {
+    opacity: 0.45;
+    text-decoration: line-through;
+}
+
+.thrive-draft__logic,
+.thrive-draft__flag {
+    opacity: 0.5;
+}
+
+.thrive-draft__flag--off {
+    color: var(--SmartThemeQuoteColor);
+    opacity: 0.9;
+}
+
+/*
+ * 每条自己的 diff 不必占满半个屏幕：36vh 是浮动面板里"整段描述一份 diff"的尺寸，
+ * 这里一屏可能并排十几条。折叠段与符号沿用 .thrive-diff 那一套（见上面）。
+ */
+.thrive-draft .thrive-diff {
+    max-height: 22vh;
+    min-height: 0;
+    border-top: none;
+    border-bottom: none;
+    padding-top: 0;
+}
+
+.thrive-draft__more {
+    align-self: flex-start;
+    width: auto;
+    padding: 2px 10px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.76);
+    opacity: 0.7;
+}
+
+.thrive-draft__foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+.thrive-draft__hint {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.74);
+    opacity: 0.6;
+}
+
+.thrive-draft__ghost {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 2px 10px;
+    border-color: transparent;
+    background-color: transparent;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    opacity: 0.7;
+}
+
+.thrive-draft__ghost:hover {
+    opacity: 1;
+    border-color: var(--SmartThemeBorderColor);
+}
+
+.thrive-draft__save {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 2px 12px;
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.82);
+    font-weight: 600;
+}
+
+.thrive-draft__save:hover {
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 14%, transparent);
 }

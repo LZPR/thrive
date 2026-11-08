@@ -29,6 +29,7 @@ import { isReservedEntry } from './desc-entry.js';
 import { COMPRESS_EVENT } from './events.js';
 import { readLimits } from './limits.js';
 import { diskDescription, getPatch, isUnresolved } from './patch.js';
+import { draftBook, layerFor } from './draft.js';
 import {
     READ_KEY_DESC,
     clearReadHash,
@@ -73,6 +74,11 @@ function emptySnapshot() {
         error: '',
         /** 有没有一份还没应用的描述改动（它不计入统计，只是一句提醒） */
         descPending: false,
+        /**
+         * 扫的是不是虚拟世界书（缓冲区）。面板据此说明"这里改的还没进真实世界书"，
+         * 否则用户会在世界书编辑器里找不到刚压过的那条。
+         */
+        draft: false,
         /** 统计口径，界面直接拿来显示，避免两处各读一次设置算出不同的数 */
         limits: { entrySoft: 0, entryHard: 0, descSoft: 0, descHard: 0 },
     };
@@ -154,6 +160,8 @@ export async function scanCompressTargets(ctx, settings) {
 
     const book = getWritableBook(ctx);
     result.book = book;
+    // 缓冲区开着时，下面读到的、以及保存时写回的，都是缓冲区里的那一份
+    result.draft = Boolean(book) && draftBook(ctx) === book;
 
     if (!book) {
         result.error = '还没选择可写书，世界书条目没有参与检查。';
@@ -376,6 +384,7 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
         book: loaded.book,
         title: item.title,
         action: 'rewritten',
+        layer: layerFor(ctx, loaded.book),
         before,
         beforeKeys: Array.isArray(found.entry.key) ? found.entry.key.map(String) : [],
         chars: text.length,

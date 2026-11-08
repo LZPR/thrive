@@ -5,10 +5,32 @@
  * 目标永远由插件根据当前选中的角色和设置解析出来。
  *
  * 两条路径：角色描述（读 + 写）、世界书（读 + 写）。
+ *
+ * 世界书这一条上有两层（ADR-047）：**真实世界书**与**虚拟世界书**（缓冲区，见 draft.js）。
+ * 分岔只有两处 —— loadBook 读哪一层、persistBook 写哪一层。中间那些解析、守卫、
+ * 长度上限、条目合成全都不知道自己在哪一层上工作，也不该知道：
+ * 工具的行为必须跟"直接写书"时一模一样，否则缓冲区就成了另一套语义。
  */
 
 import { descBookName, isReservedEntry, isReservedTitle } from './desc-entry.js';
-import { getWritableBookSetting, isWorldbookDesc } from './store.js';
+import {
+    DRAFT_LAYER,
+    clearDraft,
+    cloneEntries,
+    getDraft,
+    hashEntries,
+    isDraftBook,
+    readDraftEntries,
+    writeDraft,
+} from './draft.js';
+import { notifyPanel } from './events.js';
+import {
+    dropDraftBackups,
+    getWritableBookSetting,
+    isWorldbookDesc,
+    rememberLoreBackup,
+    saveChat,
+} from './store.js';
 import { appendParagraph, normalizeEol } from './util.js';
 
 /**
@@ -455,15 +477,43 @@ export async function loadWritableBook(ctx) {
 }
 
 /**
- * 按书名取一份世界书数据。
+ * 按书名取一份世界书数据 —— **读缓冲区优先**。
  *
  * 与 loadWritableBook 的区别只在"书名从哪来"：从快照恢复时，记录里的书
  * 可能已经不是当前的可写书（用户中途换过书），但那条记录仍然得能恢复。
+ *
+ * 这本书有缓冲区时，读到的就是缓冲区那份：模型看到的、守卫比对的、写入合成的，
+ * 必须是同一份内容，否则"先读后写"会在两层之间错位（读到磁盘、写到缓冲区）。
  *
  * @param {object} ctx
  * @param {string} book
  */
 export async function loadBook(ctx, book) {
+    const name = String(book ?? '').trim();
+    if (!name) {
+        return noBook('没有指定世界书。');
+    }
+
+    const drafted = readDraftEntries(ctx, name);
+    if (drafted) {
+        return { ok: true, book: name, data: { entries: drafted }, draft: true };
+    }
+
+    return loadBookFromDisk(ctx, name);
+}
+
+/**
+ * 按书名取**磁盘上**那份世界书数据。
+ *
+ * 三种场合用它，且只有这三种：
+ *   - loadBook 判断这本书没有缓冲区之后；
+ *   - 缓冲区保存到真实世界书（要拿磁盘现状比对、并作为写入底本）；
+ *   - 窗口展示"真实世界书 vs 缓冲区"的差异。
+ *
+ * @param {object} ctx
+ * @param {string} book
+ */
+export async function loadBookFromDisk(ctx, book) {
     const name = String(book ?? '').trim();
     if (!name) {
         return noBook('没有指定世界书。');
@@ -626,7 +676,8 @@ function buildNewLoreEntry(settings, fields) {
  * @param {{ title: string, content: string, keys: string[], logic?: string }} fields
  */
 export async function createLoreEntry(ctx, settings, book, data, fields) {
-    if (typeof ctx.saveWorldInfo !== 'function') {
+    // 缓冲区接管时不需要 saveWorldInfo：这一笔先落在内存里，落盘由用户点「保存」触发
+    if (!isDraftBook(ctx, book) && typeof ctx.saveWorldInfo !== 'function') {
         return noSaveApi();
     }
 
@@ -651,7 +702,8 @@ export async function createLoreEntry(ctx, settings, book, data, fields) {
  * @param {{ content?: string, keys?: string[], maxKeywords: number, hardLimit: number }} fields
  */
 export async function appendLoreEntry(ctx, book, data, found, fields) {
-    if (typeof ctx.saveWorldInfo !== 'function') {
+    // 缓冲区接管时不需要 saveWorldInfo：这一笔先落在内存里，落盘由用户点「保存」触发
+    if (!isDraftBook(ctx, book) && typeof ctx.saveWorldInfo !== 'function') {
         return noSaveApi();
     }
 
@@ -701,7 +753,8 @@ export async function appendLoreEntry(ctx, book, data, found, fields) {
  * @param {{ hardLimit: number }} options
  */
 export async function replaceLoreEntry(ctx, book, data, found, content, options) {
-    if (typeof ctx.saveWorldInfo !== 'function') {
+    // 缓冲区接管时不需要 saveWorldInfo：这一笔先落在内存里，落盘由用户点「保存」触发
+    if (!isDraftBook(ctx, book) && typeof ctx.saveWorldInfo !== 'function') {
         return noSaveApi();
     }
 
@@ -804,6 +857,12 @@ function noSaveApi() {
  *
  * 删除只在用户主动点面板按钮时发生，不是工具能力（ADR-011 约束的是模型）。
  *
+ * **恢复必须落在快照当初写入的那一层**（backup.layer）：
+ *   - `draft` 的记录只能恢复到缓冲区里。缓冲区已经保存/丢弃了，那条记录就没有可
+ *     恢复的位置——它的 before 是"缓冲区里当时的样子"，拿去覆盖磁盘等于凭空造内容。
+ *   - `disk` 的记录只能恢复到真实世界书。缓冲区开着时先别动磁盘：缓冲区里存着这份书
+ *     的整本副本，磁盘被改它看不见，之后一保存就把刚恢复的内容又冲掉了。
+ *
  * @param {object} ctx
  * @param {object} backup store.js 里的快照记录
  * @returns {Promise<{ ok: true, action: 'restored'|'deleted'|'gone', book: string, title: string }
@@ -821,7 +880,26 @@ export async function restoreLoreEntry(ctx, backup) {
         };
     }
 
-    if (typeof ctx.saveWorldInfo !== 'function') {
+    const layer = backup.layer === DRAFT_LAYER.DRAFT ? DRAFT_LAYER.DRAFT : DRAFT_LAYER.DISK;
+
+    if (layer === DRAFT_LAYER.DRAFT && !isDraftBook(ctx, book)) {
+        return {
+            ok: false,
+            error: 'DRAFT_GONE',
+            hint: `「${book}」的缓冲区已经保存或丢弃了，这条记录说的那份改动不在任何一层里，没有可恢复的位置。`,
+        };
+    }
+
+    if (layer === DRAFT_LAYER.DISK && isDraftBook(ctx, book)) {
+        return {
+            ok: false,
+            error: 'DRAFT_ACTIVE',
+            hint: `「${book}」的缓冲区正开着。先在虚拟世界书窗口里保存或丢弃它，再来改真实世界书——`
+                + '否则缓冲区里那份旧副本会在保存时把这次恢复盖回去。',
+        };
+    }
+
+    if (!isDraftBook(ctx, book) && typeof ctx.saveWorldInfo !== 'function') {
         return {
             ok: false,
             error: 'WRITE_FAILED',
@@ -876,10 +954,14 @@ export async function restoreLoreEntry(ctx, backup) {
 }
 
 /**
- * 落盘：saveWorldInfo(name, data, true) → 刷新世界书列表 → 刷新世界书编辑器。
+ * 写入的出口：**这本书有缓冲区就写缓冲区，没有才落盘**。
  *
- * `immediately = true` 是硬要求：默认走 debounce，用户切走对话或关页面时
- * 那几百毫秒的窗口足够丢掉一次写入，而这条路径没有别的重试机会。
+ * 整条写入链路（新建 / 追加 / 替换 / 整段重写 / 描述条目 / 压缩面板）都从这里收尾，
+ * 所以"先落缓冲区"只需要在这里判一次，不必每个调用点各判一遍——那迟早会漏一个，
+ * 表现为"改了一条，但世界书里怎么没有"。
+ *
+ * 缓冲区这条路不碰 saveWorldInfo / updateWorldInfoList / 世界书编辑器：
+ * 磁盘一个字都没动，刷新它们只会让用户以为书已经改了。
  *
  * 对外导出是为了让 desc.js 的"角色描述条目"走同一条落盘路径 —— 世界书编辑器的
  * 整本回滚问题（见下面 refreshWorldEditor）对它同样成立，不能另写一份。
@@ -890,6 +972,35 @@ export async function restoreLoreEntry(ctx, backup) {
  * @param {{ uid?: number }} [options] 刚写入的那条，刷新后拿来定位
  */
 export async function persistBook(ctx, book, data, options = {}) {
+    if (isDraftBook(ctx, book)) {
+        const written = writeDraft(ctx, book, data?.entries ?? {});
+        if (!written) {
+            return {
+                ok: false,
+                error: 'WRITE_FAILED',
+                hint: `虚拟世界书「${book}」在半途被换掉了（可能刚被保存或丢弃），这次写入没有落下。请重新读取再写。`,
+            };
+        }
+        return { ok: true, draft: true, editor: { refreshed: false, reason: 'draft' } };
+    }
+
+    return persistBookOnDisk(ctx, book, data, options);
+}
+
+/**
+ * 真的写盘：saveWorldInfo(name, data, true) → 刷新世界书列表 → 刷新世界书编辑器。
+ *
+ * `immediately = true` 是硬要求：默认走 debounce，用户切走对话或关页面时
+ * 那几百毫秒的窗口足够丢掉一次写入，而这条路径没有别的重试机会。
+ *
+ * 只有两处用它：persistBook（这本书没有缓冲区）与 commitDraft（把缓冲区存成真的）。
+ *
+ * @param {object} ctx
+ * @param {string} book
+ * @param {object} data
+ * @param {{ uid?: number }} [options] 刚写入的那条，刷新后拿来定位
+ */
+async function persistBookOnDisk(ctx, book, data, options = {}) {
     try {
         await ctx.saveWorldInfo(book, data, true);
     } catch (err) {
@@ -1075,4 +1186,266 @@ async function refreshWorldEditor(ctx, book, uid) {
     }
 
     return { refreshed: true, focused: Boolean(entryEl) };
+}
+
+/* -------------------------------------------- 虚拟世界书：比对与保存 */
+
+/** `selectiveLogic` → 界面上的说法，与 SELECTIVE_LOGIC 互为反向 */
+const LOGIC_LABELS = Object.freeze({
+    0: '任一命中',
+    1: '不全命中',
+    2: '全不命中',
+    3: '全部命中',
+});
+
+/**
+ * 缓冲区窗口要的那份数据：真实世界书 vs 缓冲区，逐条比。
+ *
+ * 比的是**磁盘此刻**的样子，不是"缓冲区开出来时的样子"：
+ *   - 用户想看的正是"点保存会发生什么"，而保存会把磁盘整本换成缓冲区；
+ *   - 开出来之后用户在世界书编辑器里改过什么，也会如实地出现在差异里
+ *     （`diskChanged` 会说清楚"这些是你自己改的，保存会覆盖掉"）。
+ *
+ * 条目按 uid 对齐：文件名、key 顺序、条目在数组里的位置都可能变，uid 不会。
+ *
+ * @param {object} ctx
+ * @returns {Promise<{ ok: true, exists: false } | { ok: true, exists: true, book: string,
+ *            diskChanged: boolean, items: Array<object>, changed: Array<object>,
+ *            counts: object, createdAt: number, updatedAt: number, writable: string }
+ *          | { ok: false, error: string, hint?: string, book: string }>}
+ */
+export async function buildDraftView(ctx) {
+    const draft = getDraft(ctx);
+    if (!draft) {
+        return { ok: true, exists: false };
+    }
+
+    const disk = await loadBookFromDisk(ctx, draft.book);
+    if (!disk.ok) {
+        // 书被删了 / 改名了：缓冲区还在，但没有可以对照与保存的目标了
+        return { ok: false, error: disk.error, hint: disk.hint, book: draft.book };
+    }
+
+    const items = diffBooks(disk.data.entries, draft.entries, draft.touched);
+    const changed = items.filter(item => item.status !== 'same');
+
+    return {
+        ok: true,
+        exists: true,
+        book: draft.book,
+        diskChanged: Boolean(draft.baseHash) && hashEntries(disk.data.entries) !== draft.baseHash,
+        items,
+        changed,
+        counts: {
+            total: items.length,
+            added: changed.filter(item => item.status === 'added').length,
+            changed: changed.filter(item => item.status === 'changed').length,
+            removed: changed.filter(item => item.status === 'removed').length,
+        },
+        createdAt: Number(draft.createdAt) || 0,
+        updatedAt: Number(draft.updatedAt) || 0,
+        writable: getWritableBook(ctx),
+    };
+}
+
+/**
+ * 把缓冲区保存成真实世界书。
+ *
+ * 三件事，顺序不能换：
+ *   1. 先读磁盘、比指纹。开出来之后磁盘被别处改过就不写，除非用户明确要求覆盖——
+ *      覆盖会把别人（往往是用户自己在世界书编辑器里）的改动整段冲掉。
+ *   2. 写盘（整本替换，与"这就是那本书"的心智模型一致）。
+ *   3. 逐条补一份 `layer: disk` 的快照，再清掉缓冲区。
+ *
+ * 第 3 步是这次保存唯一的退路：缓冲区消失之后，"刚才那一下到底改了哪几条"只能靠
+ * 这些记录回答，面板的「已写入 → 恢复写入前」正是照它们来的。
+ *
+ * @param {object} ctx
+ * @param {{ force?: boolean }} [options] force = 明知磁盘变了也照写
+ * @returns {Promise<{ ok: true, action: 'committed'|'empty', book: string, written: number,
+ *                     added: number, removed: number, editor?: object }
+ *          | { ok: false, error: string, hint?: string }>}
+ */
+export async function commitDraft(ctx, options = {}) {
+    const draft = getDraft(ctx);
+    if (!draft) {
+        return { ok: false, error: 'NO_DRAFT', hint: '虚拟世界书里没有待保存的改动。' };
+    }
+
+    if (typeof ctx.saveWorldInfo !== 'function') {
+        return {
+            ok: false,
+            error: 'WRITE_FAILED',
+            hint: '当前 ST 没有向扩展暴露 saveWorldInfo，写不进真实世界书。',
+        };
+    }
+
+    const disk = await loadBookFromDisk(ctx, draft.book);
+    if (!disk.ok) {
+        return disk;
+    }
+
+    const diskHash = hashEntries(disk.data.entries);
+    if (options.force !== true && draft.baseHash && diskHash !== draft.baseHash) {
+        return {
+            ok: false,
+            error: 'DISK_CHANGED',
+            hint: `真实世界书「${draft.book}」在虚拟世界书开出来之后被改动过。再确认一次才会覆盖那些改动。`,
+        };
+    }
+
+    const items = diffBooks(disk.data.entries, draft.entries, draft.touched);
+    const changed = items.filter(item => item.status !== 'same');
+
+    if (changed.length === 0) {
+        clearDraft(ctx);
+        dropDraftBackups(ctx);
+        saveChat(ctx);
+        return { ok: true, action: 'empty', book: draft.book, written: 0, added: 0, removed: 0 };
+    }
+
+    const data = { ...disk.data, entries: cloneEntries(draft.entries) };
+    const saved = await persistBookOnDisk(ctx, draft.book, data);
+    if (!saved.ok) {
+        return saved;
+    }
+
+    for (const item of changed) {
+        rememberLoreBackup(ctx, {
+            book: draft.book,
+            title: item.title || item.titleBefore,
+            action: item.status === 'added' ? 'created' : 'rewritten',
+            layer: DRAFT_LAYER.DISK,
+            before: item.status === 'added' ? '' : item.before,
+            beforeKeys: item.status === 'added' ? [] : item.keysBefore,
+            chars: String(item.after ?? '').length,
+        });
+    }
+
+    clearDraft(ctx);
+    // 保存完，缓冲区那一层的记录已经指不到任何东西了；刚补的 disk 记录留着
+    dropDraftBackups(ctx);
+    saveChat(ctx);
+
+    return {
+        ok: true,
+        action: 'committed',
+        book: draft.book,
+        written: changed.length,
+        added: changed.filter(item => item.status === 'added').length,
+        removed: changed.filter(item => item.status === 'removed').length,
+        editor: saved.editor,
+    };
+}
+
+/**
+ * 丢弃缓冲区：真实世界书一个字都不动。
+ *
+ * 不弹确认（那在界面里做）：这是模块层的动作，它只负责把状态收干净。
+ *
+ * @param {object} ctx
+ * @returns {{ ok: true } | { ok: false, error: string, hint?: string }}
+ */
+export function discardDraft(ctx) {
+    if (!getDraft(ctx)) {
+        return { ok: false, error: 'NO_DRAFT', hint: '虚拟世界书里没有待丢弃的改动。' };
+    }
+
+    clearDraft(ctx);
+    dropDraftBackups(ctx);
+    saveChat(ctx);
+    notifyPanel();
+    return { ok: true };
+}
+
+/**
+ * 两层条目逐条比对。
+ *
+ * 只比"工具会改的字段"（标题、正文、关键词、组合方式、常驻、停用）：order / position
+ * 这类东西工具从来不碰，它们不同只说明用户在编辑器里调过，不该算成缓冲区的改动。
+ *
+ * `bufferTouched` 区分"这条是工具改的"和"这条是磁盘那边被改过、缓冲区还停在旧版本"。
+ * 两者在界面上都表现为差异，但含义完全不同：前者是这次要保存的东西，后者是保存会
+ * 覆盖掉的东西。合成一个"改写"会让人以为模型动过它。
+ *
+ * @param {object} diskEntries
+ * @param {object} draftEntries
+ * @param {object} [touched] draft.touched：被工具动过的 uid
+ * @returns {Array<object>} 有改动的在前，同状态下按 uid 升序
+ */
+function diffBooks(diskEntries, draftEntries, touched = {}) {
+    const disk = indexByUid(diskEntries);
+    const next = indexByUid(draftEntries);
+    const units = new Set([...disk.keys(), ...next.keys()]);
+    const items = [];
+
+    for (const unit of units) {
+        const left = disk.get(unit);
+        const right = next.get(unit);
+
+        items.push({
+            uid: Number(unit),
+            status: !left ? 'added' : !right ? 'removed' : sameEntry(left.entry, right.entry) ? 'same' : 'changed',
+            bufferTouched: Boolean(touched?.[unit]),
+            title: entryTitle(right?.entry ?? left.entry),
+            titleBefore: left ? entryTitle(left.entry) : '',
+            keys: keyList(right?.entry),
+            keysBefore: keyList(left?.entry),
+            logic: logicLabel(right?.entry ?? left.entry),
+            logicBefore: logicLabel(left?.entry),
+            disabled: (right?.entry ?? left.entry)?.disable === true,
+            constant: (right?.entry ?? left.entry)?.constant === true,
+            before: String(left?.entry?.content ?? ''),
+            after: String(right?.entry?.content ?? ''),
+        });
+    }
+
+    const order = { added: 0, changed: 1, removed: 2, same: 3 };
+    items.sort((a, b) => (order[a.status] - order[b.status])
+        || (Number.isFinite(a.uid) ? a.uid : 0) - (Number.isFinite(b.uid) ? b.uid : 0));
+
+    return items;
+}
+
+/** 按 uid 索引；没有 uid 的条目退回用它在 entries 里的键（老文件里可能真有） */
+function indexByUid(entries) {
+    const map = new Map();
+    for (const [key, entry] of Object.entries(entries ?? {})) {
+        if (!entry || typeof entry !== 'object') {
+            continue;
+        }
+        const uid = Number.isFinite(Number(entry.uid)) ? Number(entry.uid) : Number(key);
+        map.set(String(Number.isFinite(uid) ? uid : key), { key, entry });
+    }
+    return map;
+}
+
+function keyList(entry) {
+    return Array.isArray(entry?.key) ? entry.key.map(String) : [];
+}
+
+function logicLabel(entry) {
+    return LOGIC_LABELS[Number(entry?.selectiveLogic)] ?? LOGIC_LABELS[0];
+}
+
+function sameEntry(left, right) {
+    if (String(left?.content ?? '') !== String(right?.content ?? '')) {
+        return false;
+    }
+    if (String(left?.comment ?? '') !== String(right?.comment ?? '')) {
+        return false;
+    }
+    if (Number(left?.selectiveLogic ?? 0) !== Number(right?.selectiveLogic ?? 0)) {
+        return false;
+    }
+    if ((left?.disable === true) !== (right?.disable === true)) {
+        return false;
+    }
+    if ((left?.constant === true) !== (right?.constant === true)) {
+        return false;
+    }
+
+    const a = keyList(left);
+    const b = keyList(right);
+    return a.length === b.length && a.every((item, index) => item === b[index]);
 }

@@ -8,6 +8,7 @@
  *   ui/panel.js         浮动面板（重绘 / 交互 / 模式开关 / 入口）
  *   ui/panel-layout.js  面板的位置、尺寸、不透明度与拖拽
  *   ui/compress-panel.js 压缩面板（独立窗口：超长条目、手动编辑、智能压缩占位）
+ *   ui/draft-window.js  虚拟世界书（独立窗口：条目的真实世界书 vs 缓冲区 diff、保存 / 丢弃）
  *   ui/badge.js         输入框旁的状态徽章
  *   ui/status.js        状态摘要文本（`/thrive status`）
  *   ui/desc-target.js   两个落点：描述存哪儿、可写书（对话级，面板的「更多设置」用它）
@@ -30,6 +31,7 @@
 export { initSettingsPanel } from './ui/settings/index.js';
 export { initPanel, openPanel, refreshPanel } from './ui/panel.js';
 export { closeCompressPanel, initCompressPanel, openCompressPanel } from './ui/compress-panel.js';
+export { closeDraftWindow, initDraftWindow, isDraftWindowOpen, openDraftWindow } from './ui/draft-window.js';
 export { initBadge } from './ui/badge.js';
 export { describeStatus } from './ui/status.js';
 export { bindCompressRefresh, refreshUI, refreshBadgeOnly } from './ui/refresh.js';

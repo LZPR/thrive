@@ -8,6 +8,7 @@
 import { getContext } from '../../../../../extensions.js';
 import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
+import { summarizeDraft } from '../draft.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import {
@@ -56,6 +57,17 @@ export function describeStatus(ctx = getContext()) {
         `可写书：${bookText}`,
         `待确认：${pending} 份`,
     ];
+
+    /*
+     * 缓冲区：有改动时它才是"待你决定"的东西，说清有几条；
+     * 开着但没改动就只说开着——不然每次 status 都多一句废话。
+     */
+    const draft = summarizeDraft(ctx);
+    if (draft.exists) {
+        parts.push(draft.touched > 0
+            ? `虚拟世界书：${draft.touched} 条改动待保存（面板标题栏那颗书页图标）`
+            : '虚拟世界书：开着，没有改动');
+    }
 
     if (oneShot) {
         parts.push(`待学习：${describePending(oneShot)}（下一轮临时开启）`);

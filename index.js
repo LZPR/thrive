@@ -29,6 +29,8 @@
  *      可写书固定为角色同名书；判据仍是全局（ADR-044）
  *  20. 位置即作用域：落点（描述存哪儿、可写书）搬进浮动面板，被动判据搬回设置页的
  *      「被动学习」组；设置页从此不随对话变化，也不再靠「对话」标签说明作用域（ADR-045）
+ *  21. 虚拟世界书：工具的每一笔世界书改动先落缓冲区，用户在独立窗口里看完 diff 才决定
+ *      保存还是丢弃；真实世界书的文件与编辑器在这之前一个字都不动（src/draft.js，ADR-047）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -55,6 +57,7 @@ import {
     describeStatus,
     initBadge,
     initCompressPanel,
+    initDraftWindow,
     initPanel,
     initSettingsPanel,
     openCompressPanel,
@@ -79,7 +82,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.27.0 · 落点搬进面板，判据搬回设置页`);
+    console.log(`${LOG} 启动 v0.29.0 · 世界书改动先进虚拟世界书`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -91,6 +94,7 @@ async function init() {
     await initBadge();
     initPanel();
     initCompressPanel();
+    initDraftWindow();
     bindCompressRefresh();
     await initSlashCommand();
     bindEvents();

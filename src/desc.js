@@ -22,6 +22,7 @@
  */
 
 import { DESC_ENTRY_TITLE, DESC_STORAGE, descBookName } from './desc-entry.js';
+import { ensureDraft, layerFor, rollbackEmptyDraft } from './draft.js';
 import { descriptionView } from './patch.js';
 import {
     descStorageMode,
@@ -393,6 +394,18 @@ export async function writeDesc(ctx, text) {
         return loaded;
     }
 
+    /*
+     * 这本书有缓冲区时，描述条目也得落在缓冲区里。
+     *
+     * 它是同一本书里的一条，没有理由例外：描述走磁盘而 lore_* 走缓冲区的话，
+     * 缓冲区里那份书的副本就不完整了，保存时会拿旧内容把刚写的描述盖回去。
+     * `loaded.data` 此刻还是改动之前的样子，所以这里也是算指纹的正确时机。
+     */
+    const drafted = ensureDraft(ctx, target.book, loaded.data);
+    if (!drafted.ok) {
+        return drafted;
+    }
+
     let found = findLoreEntry(loaded.data, DESC_ENTRY_TITLE, { includeReserved: true });
     let action = 'rewritten';
 
@@ -417,6 +430,8 @@ export async function writeDesc(ctx, text) {
 
     const saved = await persistBook(ctx, target.book, loaded.data, { uid: found.uid });
     if (!saved.ok) {
+        // 缓冲区是这一笔才开出来的、又被拒了：收掉，别留一块空壳挡住真实世界书
+        rollbackEmptyDraft(ctx);
         return saved;
     }
 
@@ -424,11 +439,14 @@ export async function writeDesc(ctx, text) {
      * 复用世界书的快照：描述在这里就是一条普通条目，撤销走面板「已写入 → 恢复写入前」。
      * 不往 backups.desc 里放 —— 那个槽位属于 card 模式，两套混着存会让"恢复上一版"
      * 变成猜"这份快照属于哪个模式"。
+     *
+     * `layer` 说明这份快照记的是缓冲区还是真实世界书，恢复时按层走（ADR-047）。
      */
     rememberLoreBackup(ctx, {
         book: target.book,
         title: DESC_ENTRY_TITLE,
         action,
+        layer: layerFor(ctx, target.book),
         before,
         beforeKeys,
         chars: next.length,

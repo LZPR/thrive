@@ -142,6 +142,12 @@ function loreBackupLimit(settings) {
  * 老对话里的快照只有 `{ book, title, before, at }`，这里按 before 是否为空推断 action，
  * 并补一个稳定的 id（`restore` 用它定位，不用下标——下标会随新写入整体前移）。
  *
+ * `layer` 说明这份快照记的是**哪一层**的写入：
+ *   `disk`  写进了真实世界书（保存缓冲区之后、或缓冲区出现之前的那些旧记录）
+ *   `draft` 只写进了虚拟世界书，真实世界书当时一个字都没动
+ * 恢复要按层走：拿缓冲区里的 before 去覆盖磁盘，等于凭空造出一份用户没同意过的内容。
+ * 老记录一律当 `disk`（那时候还没有缓冲区）。
+ *
  * @returns {object|null} 形状完全不认识时返回 null，由调用方丢掉
  */
 function normalizeLoreBackup(raw, index) {
@@ -162,12 +168,55 @@ function normalizeLoreBackup(raw, index) {
         book: String(raw.book ?? ''),
         title: String(raw.title ?? ''),
         action,
+        layer: raw.layer === 'draft' ? 'draft' : 'disk',
         before,
         beforeKeys: Array.isArray(raw.beforeKeys) ? raw.beforeKeys.map(String) : [],
         chars: Number(raw.chars) > 0 ? Number(raw.chars) : 0,
         at,
         restoredAt: Number(raw.restoredAt) > 0 ? Number(raw.restoredAt) : null,
     };
+}
+
+/**
+ * 规范虚拟世界书。
+ *
+ * 就地改写并返回**同一个对象**（理由同 normalizePassive）：每次 getState 都会跑一遍，
+ * 每次返回新对象的话，调用方手里那个引用会在下一次 getState 之后变成孤儿，
+ * 刚写进去的条目就凭空消失了。
+ *
+ * `entries` 是整本书的副本，**不在这里深拷贝**——getState 每次工具调用都会走一遍，
+ * 拷贝一本两百条的书不是"顺手"的成本。写入方自己保证传进来的是副本。
+ *
+ * @param {unknown} raw
+ * @returns {object|null} 形状不认识（没有书名 / 没有条目表）就当没有缓冲区
+ */
+function normalizeDraft(raw) {
+    if (!isPlainObject(raw)) {
+        return null;
+    }
+
+    raw.book = String(raw.book ?? '').trim();
+    if (!raw.book) {
+        return null;
+    }
+
+    if (!isPlainObject(raw.entries)) {
+        raw.entries = {};
+    }
+    if (!isPlainObject(raw.touched)) {
+        raw.touched = {};
+    }
+    if (typeof raw.baseHash !== 'string') {
+        raw.baseHash = '';
+    }
+
+    const created = Number(raw.createdAt);
+    raw.createdAt = Number.isFinite(created) && created > 0 ? created : Date.now();
+
+    const updated = Number(raw.updatedAt);
+    raw.updatedAt = Number.isFinite(updated) && updated > 0 ? updated : raw.createdAt;
+
+    return raw;
 }
 
 /**
@@ -395,6 +444,11 @@ export function createChatState(settings) {
         descStorage: normalizeDescStorage(legacyChatValue(settings, 'descStorage')),
         /** 可写世界书；空 = 这一场对话还没选书（世界书工具不注册） */
         writableBook: typeof legacyBook === 'string' ? legacyBook.trim() : '',
+        /**
+         * 虚拟世界书（缓冲区）：模型的每一笔世界书改动先落在这里，用户点「保存」
+         * 才写进真实世界书。null = 缓冲区是空的。形状与语义见 src/draft.js。
+         */
+        draft: null,
     };
 }
 
@@ -470,6 +524,9 @@ export function getState(ctx) {
     // 被动学习：老对话没有这个字段，补一份"没有待学习、也没累计进度"的空状态
     state.passive = normalizePassive(state.passive, settings);
 
+    // 缓冲区：老对话没有这个字段（null 就是"没有缓冲区"），手改坏的当没有
+    state.draft = normalizeDraft(state.draft);
+
     return state;
 }
 
@@ -529,6 +586,26 @@ export function setWritableBookSetting(ctx, book) {
     dropLegacyChatValue(ctx, 'writableBook');
     saveChat(ctx);
     return state.writableBook;
+}
+
+/* -------------------------------------------------------------- 虚拟世界书 */
+/*
+ * 这里只管"挂在对话状态上的那个对象"，什么时候开、怎么写、什么时候保存到磁盘
+ * 全在 draft.js 与 targets.js。缓冲区内容是一整本书的副本，属于对话数据，
+ * 换一场对话就该换成那一场的。
+ */
+
+/** 当前对话的缓冲区；没有时返回 null */
+export function getDraftState(ctx) {
+    return getState(ctx).draft;
+}
+
+/**
+ * 覆盖缓冲区。传 null 表示清空。
+ * 只写内存，落盘交给调用方（它知道要不要顺带作废别的登记）。
+ */
+export function setDraftState(ctx, draft) {
+    getState(ctx).draft = draft;
 }
 
 /* ---------------------------------------------------------------- 被动学习 */
@@ -880,9 +957,12 @@ export function rememberDescBackup(ctx, before) {
  * `action = created` —— 恢复它等于把这条从书里删掉，那只发生在用户点「撤销新建」时，
  * 是用户的撤销动作，不是给模型的工具能力（ADR-022）。
  *
+ * `layer` 由调用方给（`draft.js` 的 layerFor）：写的是缓冲区还是真实世界书，
+ * 决定这条记录还能不能被恢复（见 normalizeLoreBackup）。
+ *
  * @param {object} ctx
  * @param {{ book: string, title: string, before: string, beforeKeys?: string[],
- *           action?: 'created'|'rewritten', chars?: number }} snapshot
+ *           action?: 'created'|'rewritten', layer?: 'disk'|'draft', chars?: number }} snapshot
  * @returns {object} 记下来的那条记录
  */
 export function rememberLoreBackup(ctx, snapshot = {}) {
@@ -894,6 +974,7 @@ export function rememberLoreBackup(ctx, snapshot = {}) {
         book: snapshot.book,
         title: snapshot.title,
         action: snapshot.action,
+        layer: snapshot.layer,
         before: snapshot.before,
         beforeKeys: snapshot.beforeKeys,
         chars: snapshot.chars,
@@ -931,6 +1012,27 @@ export function markLoreBackupRestored(ctx, id) {
     }
     record.restoredAt = Date.now();
     return true;
+}
+
+/**
+ * 丢掉属于缓冲区的那批写入记录。
+ *
+ * 缓冲区一旦保存或丢弃，这些记录的 `before` 指的就是"缓冲区里当时的样子"，
+ * 而那块缓冲区已经不存在了。留着它们，面板会挂出一颗点了必然报错的按钮
+ * （恢复的目标层已经没了），用户还得读一段解释才知道为什么点了没反应。
+ *
+ * 保存时另有一批 `layer: disk` 的记录补进来，所以"已写入"不会变空——
+ * 它换成的是"这次保存到底动了哪几条"。
+ *
+ * @param {object} ctx
+ * @returns {number} 丢掉了几条
+ */
+export function dropDraftBackups(ctx) {
+    const state = getState(ctx);
+    const list = state.backups.lore;
+    const kept = list.filter(item => item.layer !== 'draft');
+    state.backups.lore = kept;
+    return list.length - kept.length;
 }
 
 /** 描述的上一版（1 槽）；没有时返回 null */

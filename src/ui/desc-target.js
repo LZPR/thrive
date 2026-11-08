@@ -16,6 +16,7 @@
  */
 
 import { ensureDescEntry, setDescEntryEnabled } from '../desc.js';
+import { clearDraft, summarizeDraft } from '../draft.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import {
     isWorldbookDesc,
@@ -119,6 +120,21 @@ export async function changeWritableBook(ctx, book) {
     const previous = getWritableBook(ctx);
     if (next === previous) {
         return { ok: true, changed: false };
+    }
+
+    /*
+     * 缓冲区是"某本书的中间层"：换书之后它既不该跟着走，也不该悄悄丢掉里面没保存的东西。
+     * 有改动就拦住，让用户先去窗口里做完决定；只有一块空壳（一条都没改过）时直接收掉，
+     * 否则它会一直挡着新书——工具写新书时会被 DRAFT_BOOK 拒掉。
+     */
+    const draft = summarizeDraft(ctx);
+    if (draft.exists && draft.book !== next) {
+        if (draft.touched > 0) {
+            toast(`虚拟世界书里还有「${draft.book}」的 ${draft.touched} 条改动没保存：`
+                + '先在面板标题栏那颗书页图标里保存或丢弃，再换书');
+            return { ok: false, changed: false };
+        }
+        clearDraft(ctx);
     }
 
     if (previous && next) {

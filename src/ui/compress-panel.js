@@ -148,6 +148,7 @@ export function refreshCompressPanel(ctx = getContext(), force = false) {
     const signatureNext = JSON.stringify([
         snapshot.error,
         snapshot.book,
+        snapshot.draft,
         snapshot.descPending,
         snapshot.items.map(item => [item.id, item.chars, item.level]),
     ]);
@@ -238,6 +239,11 @@ function renderNotices(snapshot) {
 
     if (snapshot.error) {
         notes.push(`<div class="thrive-compress__notice thrive-compress__notice--warn">${escapeHtml(snapshot.error)}</div>`);
+    }
+
+    if (snapshot.draft) {
+        notes.push('<div class="thrive-compress__notice">这里读的、改的都是虚拟世界书（缓冲区）：'
+            + '改完要等它在浮动面板标题栏那颗按钮里保存，真实世界书才会变。</div>');
     }
 
     if (snapshot.descPending) {

@@ -41,6 +41,7 @@ import {
     rewriteAppliedDescription,
 } from '../patch.js';
 import { syncFromContext } from '../prompt.js';
+import { summarizeDraft } from '../draft.js';
 import {
     clearReadHash,
     ensureSettings,
@@ -62,6 +63,7 @@ import { escapeHtml, normalizeEol } from '../util.js';
 import { syncBadgeOpenState } from './badge.js';
 import { openCompressPanel } from './compress-panel.js';
 import { changeDescStorage, changeWritableBook, descTargetView } from './desc-target.js';
+import { openDraftWindow } from './draft-window.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
 import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
@@ -204,6 +206,7 @@ export function refreshPanel(ctx = getContext()) {
     const mode = readModeView(ctx, settings);
     const descChoice = descTargetView(ctx);
     const compress = getCompressSnapshot();
+    const draft = summarizeDraft(ctx);
 
     /*
      * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
@@ -235,6 +238,8 @@ export function refreshPanel(ctx = getContext()) {
         historyExpanded,
         compress.error,
         compress.items.map(item => [item.id, item.chars, item.level]),
+        // 缓冲区：有几条被工具改过（标题栏那颗按钮的角标就读它）
+        [draft.exists, draft.book, draft.touched],
     ]);
     if (signature === panelSignature) {
         return;
@@ -256,6 +261,7 @@ export function refreshPanel(ctx = getContext()) {
         drift,
         editorStale,
         compress,
+        draft,
         moreExpanded,
     });
     restorePanelFocus(focus);
@@ -450,6 +456,7 @@ function renderPanel({
     drift = false,
     editorStale = false,
     compress = getCompressSnapshot(),
+    draft = { exists: false, touched: 0, book: '' },
     moreExpanded: moreOpen = false,
 }) {
     const pending = isUnresolved(patch);
@@ -475,11 +482,27 @@ function renderPanel({
         ? `压缩：${compressCount} 条超软提醒${compressHard > 0 ? ` · ${compressHard} 条超硬上限` : ''}。点开逐条处理`
         : '压缩：没有超长内容，点开可以确认或重新扫描';
 
+    /*
+     * 虚拟世界书：模型的每一笔世界书写入先落在这里。角标 = 被工具改过几条，
+     * 亮着就说明"真实世界书还没变，等你决定"。它是第三个窗口，所以只占一颗图标。
+     */
+    const draftCount = draft.exists ? draft.touched : 0;
+    const draftAlert = draftCount > 0;
+    const draftTitle = draft.exists
+        ? `虚拟世界书「${draft.book}」：${draftCount} 条改动还没进真实世界书。点开看 diff、保存或丢弃`
+        : '虚拟世界书：模型的改动会先落在这里，真实世界书等你说保存才变';
+
     const bar = `
         <div class="thrive-panel__bar">
             <i class="fa-solid fa-grip-vertical thrive-panel__grip" title="按住拖动可移动面板" aria-hidden="true"></i>
             <span class="thrive-panel__title">Thrive</span>
             <span class="thrive-panel__summary">${escapeHtml(counts.join(' · '))}</span>
+            <div class="menu_button thrive-panel__draft${draftAlert ? ' is-alert' : ''}"
+                data-thrive-action="open-draft" title="${escapeHtml(draftTitle)}"
+                aria-label="${escapeHtml(draftTitle)}">
+                <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+                ${draftAlert ? `<span class="thrive-panel__draft-count">${draftCount}</span>` : ''}
+            </div>
             <div class="menu_button thrive-panel__compress${compressAlert ? ' is-alert' : ''}"
                 data-thrive-action="open-compress" title="${escapeHtml(compressTitle)}"
                 aria-label="${escapeHtml(compressTitle)}">
@@ -821,17 +844,25 @@ function renderHistorySection(backups, descBackup, expanded) {
 
 function renderHistoryRow(item) {
     const created = item.action === 'created';
+    // 缓冲区里的写入还没进真实世界书：写清楚，恢复按钮动的是哪一层才不会含糊
+    const drafted = item.layer === 'draft';
     const meta = [
         item.book,
+        drafted ? '缓冲区' : '',
         created ? '新建' : '改写',
         `${item.chars} 字`,
         formatTime(item.at),
     ].filter(Boolean).join(' · ');
 
+    const tip = drafted
+        ? '只改虚拟世界书里的这一条，真实世界书不动；缓冲区保存或丢弃之后这条记录就失效'
+        : '把真实世界书里的这一条改回写入前；缓冲区开着时不能恢复（先处理缓冲区）';
+
     const restored = Number(item.restoredAt) > 0;
     const action = restored
         ? `<span class="thrive-history__done">已恢复 ${escapeHtml(formatTime(item.restoredAt))}</span>`
-        : `<div class="menu_button thrive-panel__button thrive-history__restore" data-thrive-action="restore-lore" data-backup-id="${escapeHtml(item.id)}">${created ? '撤销新建' : '恢复写入前'}</div>`;
+        : `<div class="menu_button thrive-panel__button thrive-history__restore" data-thrive-action="restore-lore"
+            data-backup-id="${escapeHtml(item.id)}" title="${escapeHtml(tip)}">${created ? '撤销新建' : '恢复写入前'}</div>`;
 
     return `
         <div class="thrive-history__row">
@@ -989,6 +1020,10 @@ function onPanelClick(event) {
         case 'open-compress':
             /* 压缩面板是另一个窗口，浮动面板不动：用户可能想两边对照着看 */
             openCompressPanel(getContext());
+            break;
+        case 'open-draft':
+            /* 同上：虚拟世界书也是独立窗口，开着它还能继续聊 */
+            openDraftWindow(getContext());
             break;
         case 'toggle-active':
             toggleActive(getContext());

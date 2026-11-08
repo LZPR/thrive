@@ -64,6 +64,7 @@ import {
 } from './patch.js';
 import { isWorldbookDesc, readDescription, writeDesc } from './desc.js';
 import { isReservedTitle } from './desc-entry.js';
+import { ensureDraft, layerFor, rollbackEmptyDraft } from './draft.js';
 import { compilePattern, replaceIn, scan } from './regex.js';
 import { TOOL_NAMES } from './tool-names.js';
 import { isToolAvailable, isToolRegistered } from './tool-state.js';
@@ -683,9 +684,16 @@ async function handleLoreAdd(params) {
     const droppedKeys = normalized.keys.length - keys.length;
     const logic = normalizeLogic(params?.logic);
 
+    // 守卫全过完了，才开缓冲区：被 READ_REQUIRED 挡住的写入不该留下一块空壳
+    const drafted = ensureDraft(ctx, book, data);
+    if (!drafted.ok) {
+        return errorResult(drafted.error, drafted.hint);
+    }
+
     const written = await createLoreEntry(ctx, settings, book, data, { title, content, keys, logic });
     if (!written.ok) {
         console.debug(`${LOG} lore_add 失败`, written.error);
+        rollbackEmptyDraft(ctx);
         return written;
     }
 
@@ -693,6 +701,7 @@ async function handleLoreAdd(params) {
         book,
         title,
         action: 'created',
+        layer: layerFor(ctx, book),
         before: '',
         beforeKeys: [],
         chars: written.content.length,
@@ -765,6 +774,11 @@ async function handleLoreAppend(params) {
     const before = String(found.entry.content ?? '');
     const beforeKeys = Array.isArray(found.entry.key) ? found.entry.key.map(String) : [];
 
+    const drafted = ensureDraft(ctx, book, data);
+    if (!drafted.ok) {
+        return errorResult(drafted.error, drafted.hint);
+    }
+
     const written = await appendLoreEntry(ctx, book, data, found, {
         content,
         keys,
@@ -773,6 +787,7 @@ async function handleLoreAppend(params) {
     });
     if (!written.ok) {
         console.debug(`${LOG} lore_append 失败`, written.error);
+        rollbackEmptyDraft(ctx);
         return written;
     }
 
@@ -780,6 +795,7 @@ async function handleLoreAppend(params) {
         book,
         title,
         action: 'rewritten',
+        layer: layerFor(ctx, book),
         before,
         beforeKeys,
         chars: written.content.length,
@@ -873,11 +889,17 @@ async function handleLoreReplace(params) {
         return failed;
     }
 
+    const drafted = ensureDraft(ctx, book, data);
+    if (!drafted.ok) {
+        return errorResult(drafted.error, drafted.hint);
+    }
+
     const written = await replaceLoreEntry(ctx, book, data, found, replaced.text, {
         hardLimit: limits.hardLimitEntry,
     });
     if (!written.ok) {
         console.debug(`${LOG} lore_replace 失败`, written.error);
+        rollbackEmptyDraft(ctx);
         return written;
     }
 
@@ -885,6 +907,7 @@ async function handleLoreReplace(params) {
         book,
         title,
         action: 'rewritten',
+        layer: layerFor(ctx, book),
         before: current,
         beforeKeys: Array.isArray(found.entry.key) ? found.entry.key.map(String) : [],
         chars: written.content.length,
@@ -961,11 +984,17 @@ async function handleLoreRewrite(params) {
             `正文 ${content.length} 字，超过单条上限 ${limits.hardLimitEntry} 字。这次没有写入：请精简到上限以内再整段重写，或者改用 lore_replace 只改其中一段。`);
     }
 
+    const drafted = ensureDraft(ctx, book, data);
+    if (!drafted.ok) {
+        return errorResult(drafted.error, drafted.hint);
+    }
+
     const written = await replaceLoreEntry(ctx, book, data, found, content, {
         hardLimit: limits.hardLimitEntry,
     });
     if (!written.ok) {
         console.debug(`${LOG} lore_rewrite 失败`, written.error);
+        rollbackEmptyDraft(ctx);
         return written;
     }
 
@@ -973,6 +1002,7 @@ async function handleLoreRewrite(params) {
         book,
         title,
         action: 'rewritten',
+        layer: layerFor(ctx, book),
         before: current,
         beforeKeys: Array.isArray(found.entry.key) ? found.entry.key.map(String) : [],
         chars: written.content.length,
