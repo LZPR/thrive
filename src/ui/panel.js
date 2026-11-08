@@ -48,7 +48,6 @@ import {
     getDescBackup,
     getLoreBackups,
     getPending,
-    hasAnyModule,
     isChatAvailable,
     isEnabled,
     isPassiveEnabled,
@@ -227,7 +226,7 @@ export function refreshPanel(ctx = getContext()) {
         moreExpanded,
         // 落点两个下拉：模式、书名，以及"列表里有哪些书"（别处新建/删除之后要重排）
         [descChoice.storage, descChoice.book, descChoice.books.length],
-        descTarget ? [descTarget.mode, descTarget.book, descTarget.active, descTarget.cardChars] : null,
+        descTarget ? [descTarget.mode, descTarget.book, descTarget.active] : null,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
         descBackup ? descBackup.at : null,
@@ -326,7 +325,6 @@ function restorePanelFocus(focus) {
  * @param {object} settings
  */
 function readModeView(ctx, settings) {
-    const none = !hasAnyModule(settings);
     const available = isChatAvailable(ctx);
     const diag = diagnoseEnvironment(ctx);
     const progress = intervalProgress(ctx, settings);
@@ -336,9 +334,8 @@ function readModeView(ctx, settings) {
         active: isEnabled(ctx),
         passive: isPassiveEnabled(ctx),
         pending: getPending(ctx),
-        // 三种"不可用"共用一档：没有可写模块、没有对话、环境不支持工具调用
-        usable: available && !none && diag.ok,
-        none,
+        // 两种"不可用"共用一档：没有对话、环境不支持工具调用
+        usable: available && diag.ok,
         available,
         diag,
         interval: progress.interval,
@@ -357,22 +354,20 @@ function readModeView(ctx, settings) {
  * 拨一下开关就弹一条 toast，在窄屏上挡住半块面板，比不给反馈更烦人。
  *
  * @param {object} ctx
- * @param {object} settings
  * @returns {boolean} 能不能切
  */
-function canToggleMode(ctx, settings) {
-    // 模块全关时开关没有意义；没对话 / 环境不支持工具调用时开了也只是"灯亮着"
+function canToggleMode(ctx) {
+    // 没对话 / 环境不支持工具调用时开了也只是"灯亮着"
     // （ADR-020：不替用户去改 ST 的设置与模块）
-    return hasAnyModule(settings) && isChatAvailable(ctx) && diagnoseEnvironment(ctx).ok;
+    return isChatAvailable(ctx) && diagnoseEnvironment(ctx).ok;
 }
 
 /**
  * 主动开关（对话级，存在 chat_metadata 里）。
  * @param {object} ctx
- * @param {object} settings
  */
-function toggleActive(ctx, settings) {
-    if (!canToggleMode(ctx, settings)) {
+function toggleActive(ctx) {
+    if (!canToggleMode(ctx)) {
         return;
     }
 
@@ -390,8 +385,8 @@ function toggleActive(ctx, settings) {
  *
  * 切完不弹 toast：被动那块自己的第二行就写着"还差几条 / 没有判据"，状态已经在眼前。
  */
-function togglePassive(ctx, settings) {
-    if (!canToggleMode(ctx, settings)) {
+function togglePassive(ctx) {
+    if (!canToggleMode(ctx)) {
         return;
     }
 
@@ -516,7 +511,7 @@ function renderPanel({
  * @param {ReturnType<typeof readModeView>} mode
  */
 function renderModeSection(mode) {
-    const { active, passive, usable, none, available, diag, pending, interval, remaining, keywordCount } = mode;
+    const { active, passive, usable, available, diag, pending, interval, remaining, keywordCount } = mode;
 
     /*
      * 被动那块第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
@@ -531,16 +526,14 @@ function renderModeSection(mode) {
                 : '没有判据';
 
     /*
-     * 不可用的原因只能写一条：三条同时列出来，用户还是不知道该先改哪个。
-     * 顺序和以前徽章的 tooltip 一致——先看模块，再看对话，最后看环境。
+     * 不可用的原因只能写一条：同时列两条，用户还是不知道该先改哪个。
+     * 先看对话，再看环境。
      */
-    const blocked = none
-        ? '两个模块都关着，请先在扩展设置里开启至少一个。'
-        : !available
-            ? '请先打开一个对话。'
-            : !diag.ok
-                ? `工具调用不可用：${formatDiagnosis(diag)}`
-                : '';
+    const blocked = !available
+        ? '请先打开一个对话。'
+        : !diag.ok
+            ? `工具调用不可用：${formatDiagnosis(diag)}`
+            : '';
 
     return `
         <section class="thrive-panel__section thrive-modes">
@@ -689,30 +682,26 @@ function renderMoreRows({ mode, choice }) {
 }
 
 /**
- * 统一模式的说明段：描述存在哪本书的哪条条目、有没有被扫描到。
+ * 统一模式的说明段：一行字回答"现在生不生效"（ADR-046）。
  *
- * 这里刻意不显示正文、也不做 diff —— 新模式明确不再提供"旧人物描述的 diff"（ADR-042）。
- * 要改内容就去世界书编辑器或压缩面板；面板只负责回答"它现在在哪儿、生不生效"。
+ * 只说这一件事，别的都收掉：书名在标题旁边，正文在哪、能不能改都有各自的入口，
+ * 面板里再复述一遍只会让这一块变成说明书。"角色卡上还留着 N 字"那条警告也去掉了——
+ * 它描述的是切换模式时的历史残留，用户既不知道该怎么处理，也不影响本模式的读写，
+ * 放在这里只是噪音。
  *
- * @param {{book: string, title: string, active: boolean|null, cardChars: number}|null} descTarget
+ * @param {{book: string, active: boolean|null}|null} descTarget
  */
 function renderDescTargetSection(descTarget) {
     if (!descTarget) {
         return '';
     }
 
-    const { book, title, active, cardChars } = descTarget;
+    const { book, active } = descTarget;
     const inactive = active === false;
 
     const notice = inactive
-        ? `「${book}」当前没有被扫描到：这条常驻条目不会进入上下文。`
-            + '到「世界书」面板勾选这本书，或在扩展设置里把它设为本角色的世界书。'
-        : '常驻条目，每一轮都会注入。要直接改内容，去世界书编辑器或压缩面板。';
-
-    const cardWarn = cardChars > 0
-        ? `<div class="thrive-panel__notice thrive-panel__notice--warn">角色卡上还留着 ${cardChars} 字描述，`
-            + 'ST 仍会把它注入，模型会看到两份。要单一来源请到角色卡里清空（插件不会自动改）。</div>'
-        : '';
+        ? `「${book}」还没有激活：到「世界书」面板勾选这本书。`
+        : '每一轮都会注入。';
 
     return `
         <section class="thrive-panel__section">
@@ -721,10 +710,6 @@ function renderDescTargetSection(descTarget) {
                 <span class="thrive-panel__meta">${escapeHtml(book || '（没有书名）')}</span>
             </div>
             <div class="thrive-panel__notice${inactive ? ' thrive-panel__notice--warn' : ''}">${escapeHtml(notice)}</div>
-            ${cardWarn}
-            <div class="thrive-panel__actions">
-                <small class="thrive-hint">存在「${escapeHtml(book)}」的 ${escapeHtml(title)} 里。这个模式不做暂存，也没有 diff。</small>
-            </div>
         </section>`;
 }
 
@@ -1006,10 +991,10 @@ function onPanelClick(event) {
             openCompressPanel(getContext());
             break;
         case 'toggle-active':
-            toggleActive(getContext(), ensureSettings(getContext()));
+            toggleActive(getContext());
             break;
         case 'toggle-passive':
-            togglePassive(getContext(), ensureSettings(getContext()));
+            togglePassive(getContext());
             break;
         case 'restore-lore':
             void restoreLoreAndReport(trigger.dataset.backupId);
@@ -1100,12 +1085,7 @@ function onPanelChange(event) {
  */
 function triggerOnceAndReport() {
     const ctx = getContext();
-    const settings = ensureSettings(ctx);
 
-    if (!hasAnyModule(settings)) {
-        toast('两个模块都关着，请先在扩展设置里开启至少一个');
-        return;
-    }
     if (!isChatAvailable(ctx)) {
         toast('请先打开一个对话');
         return;

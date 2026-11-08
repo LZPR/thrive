@@ -217,13 +217,6 @@ export function evaluatePassive(ctx, stage = 'assistant') {
         return result;
     }
 
-    // 两个模块都关着时没有可写的地方：注入了学习块也没有工具可用，
-    // 只会让模型干说一句"我记住了"。和主动开关的兜底保持同一个判断。
-    if (settings.moduleWorldbook === false && settings.moduleDescription === false) {
-        result.reason = 'NO_MODULE';
-        return result;
-    }
-
     if (isEnabled(ctx)) {
         // 主动已经开着：不重复触发，进度归零，免得关掉主动后立刻补一次
         passive.baseline = total;

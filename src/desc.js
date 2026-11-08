@@ -30,7 +30,6 @@ import {
     rememberLoreBackup,
 } from './store.js';
 import {
-    cardDescription,
     clampEntryPosition,
     findLoreEntry,
     getActiveCharacter,
@@ -493,21 +492,17 @@ export async function setDescEntryEnabled(ctx, enabled) {
  * 正文要 load 世界书，是异步的；界面每帧都读一遍不划算，而且说明文字里也用不到。
  *
  * @param {object} ctx
- * @returns {{ mode: string, book: string, title: string, active: boolean|null,
- *             boundBook: string, cardChars: number }}
+ * @returns {{ mode: string, book: string, title: string, active: boolean|null }}
  */
 export function getDescTargetSnapshot(ctx) {
     const character = getActiveCharacter(ctx);
+    const book = cachedBook(character) || descBookName(character);
 
     return {
         mode: descStorageMode(ctx),
-        book: cachedBook(character) || descBookName(character),
+        book,
         title: DESC_ENTRY_TITLE,
-        active: (cachedBook(character) || descBookName(character))
-            ? isBookScanned(ctx, cachedBook(character) || descBookName(character))
-            : null,
-        boundBook: boundBookName(character),
-        cardChars: cardDescription(ctx).length,
+        active: book ? isBookScanned(ctx, book) : null,
     };
 }
 

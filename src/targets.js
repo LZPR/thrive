@@ -261,29 +261,6 @@ export function getBoundBookNames(ctx) {
 }
 
 /**
- * 本次实际要读的书列表，可写书永远排第一。
- * @returns {{ writable: string, books: string[] }}
- */
-export function resolveReadBooks(ctx, settings) {
-    const writable = getWritableBook(ctx);
-    const books = [];
-
-    const push = name => {
-        const value = String(name ?? '').trim();
-        if (value && !books.includes(value)) {
-            books.push(value);
-        }
-    };
-
-    push(writable);
-    if (settings?.readScope === 'bound') {
-        getBoundBookNames(ctx).forEach(push);
-    }
-
-    return { writable, books };
-}
-
-/**
  * 这本书会不会被 ST 扫描到 —— 决定写进去的条目有没有机会进入上下文。
  *
  * 三条路都能让一本书进入扫描范围：
@@ -333,15 +310,14 @@ export function isBookScanned(ctx, book) {
  * 正文一起端上去，一次目录就能吃掉几千 token，而它多半只是想确认
  * "这条写没写过"。
  *
- * 只列可写书：目录的用途是写之前先看看，而写只能落到可写书。绑定书塞进来
- * 只会让模型以为那些条目可改（ADR-018 的读范围只作用于 lore_read）。
+ * 只列可写书：目录的用途是写之前先看看，而写只能落到可写书。读范围也只剩这一本
+ * （ADR-046），所以目录与读、写是同一本书，模型不会看到"读得到但改不了"的标题。
  *
  * @param {object} ctx
- * @param {object} settings
  * @returns {Promise<{ ok: true, book: string, items: Array<{ title: string, uid: number, disabled: boolean }> }
  *          | { ok: false, error: string, hint?: string }>}
  */
-export async function listLore(ctx, settings) {
+export async function listLore(ctx) {
     const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return loaded;
@@ -365,20 +341,21 @@ export async function listLore(ctx, settings) {
 }
 
 /**
- * 定位一条条目：可写书优先，`readScope=bound` 时再找角色绑定的书（只读）。
+ * 定位一条条目，只在可写书里找（ADR-046）。
  *
- * 写路径不走这里 —— 写只认可写书。读路径需要它，是因为"这条设定是不是已经
- * 记在别处"常常要去绑定的书里看一眼；看到了就得告诉模型那本不可写，否则它会
- * 拿着刚读到的标题去 append，然后收到一个莫名其妙的 NOT_FOUND。
+ * 以前还能去角色绑定的书里读一眼，但那带来一个无解的问题：模型读到一条改不了的内容，
+ * 它该认为"这条已经记在别处"，还是"这条还不存在"？两个答案都会让它做错事，
+ * 所以读范围收成一本：能读的就是能改的。
+ *
+ * 写路径本来也只认可写书，两边现在是同一本。
  *
  * @param {object} ctx
- * @param {object} settings
  * @param {string} title
- * @returns {Promise<{ ok: true, book: string, writable: boolean, data: object,
+ * @returns {Promise<{ ok: true, book: string, data: object,
  *                     found: { key: string, uid: number, entry: object } }
  *          | { ok: false, error: string, hint?: string }>}
  */
-export async function locateLoreEntry(ctx, settings, title) {
+export async function locateLoreEntry(ctx, title) {
     const wanted = String(title ?? '').trim();
     if (!wanted) {
         return {
@@ -393,44 +370,26 @@ export async function locateLoreEntry(ctx, settings, title) {
         return reservedHint();
     }
 
-    if (typeof ctx.loadWorldInfo !== 'function') {
-        return noBook('当前 ST 没有向扩展暴露 loadWorldInfo，读不到世界书。');
+    const writable = getWritableBook(ctx);
+    if (!writable) {
+        return noBook('还没有选择可写书。请让用户在浮动面板里选一本。');
     }
 
-    const { writable, books } = resolveReadBooks(ctx, settings);
-    const loaded = [];
-
-    for (const name of books) {
-        const one = await loadBook(ctx, name);
-        if (one.ok) {
-            loaded.push({ name, data: one.data });
-        }
+    const loaded = await loadBook(ctx, writable);
+    if (!loaded.ok) {
+        return loaded;
     }
 
-    // 可写书读不到 = 书被删了/改名了。这时找不到条目不是"这条不存在"，
-    // 而是整个目标没了，得说清楚
-    if (!loaded.some(item => item.name === writable)) {
-        return noBook(`读不到可写书「${writable}」，它可能已被删除或改名。请让用户重新选择。`);
+    const found = findLoreEntry(loaded.data, wanted);
+    if (!found) {
+        return {
+            ok: false,
+            error: 'NOT_FOUND',
+            hint: `「${writable}」里没有标题为「${wanted}」的条目。先用 lore_list 看现有标题，标题必须与列表里完全一致。`,
+        };
     }
 
-    for (const item of loaded) {
-        const found = findLoreEntry(item.data, wanted);
-        if (found) {
-            return {
-                ok: true,
-                book: item.name,
-                writable: item.name === writable,
-                data: item.data,
-                found,
-            };
-        }
-    }
-
-    return {
-        ok: false,
-        error: 'NOT_FOUND',
-        hint: `可写书里没有标题为「${wanted}」的条目。先用 lore_list 看现有标题，标题必须与列表里完全一致。`,
-    };
+    return { ok: true, book: writable, data: loaded.data, found };
 }
 
 function noBook(hint) {

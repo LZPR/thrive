@@ -24,7 +24,6 @@ const TOOL_STATE_LABEL = Object.freeze({
 const TOOL_REASON_LABEL = Object.freeze({
     'learning-off': '学习模式没开',
     'resident-off': '常驻关且没开学习',
-    'module-off': '模块已关',
     'no-book': '没选可写书',
 });
 

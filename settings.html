@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.27.0</span>
+                <span class="thrive-version">v0.28.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -22,7 +22,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>基本设置</b>
-                        <small class="thrive-group__hint">模块 · 写入</small>
+                        <small class="thrive-group__hint">默认状态 · 徽章</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -64,70 +64,6 @@
                         徽章是输入框旁那颗图标：点一下开 / 关浮动面板，按对话生效的开关与落点都在面板里。
                         强调色 = 主动开着，Em 色 = 只有被动开着，图标在呼吸 = 已挂上一次临时学习，
                         右上角数字 = 待确认的描述改动。
-                    </div>
-
-                    <span class="thrive-field-title">
-                        写入模块
-                        <button type="button" class="thrive-help" data-help="thrive_help_modules"
-                            aria-expanded="false" aria-controls="thrive_help_modules" title="说明">?</button>
-                    </span>
-                    <div id="thrive_help_modules" class="thrive-help__body">
-                        两个模块互相独立：关掉的那个，模型看不到对应工具，插件也不会把内容偷偷塞到另一个里。
-                        两个都关时，模型看不到任何 Thrive 工具。
-                    </div>
-
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_module_worldbook">
-                            <input id="thrive_module_worldbook" type="checkbox">
-                            <span>世界书</span>
-                        </label>
-                    </div>
-                    <small id="thrive_module_worldbook_hint" class="thrive-hint"></small>
-
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_module_description">
-                            <input id="thrive_module_description" type="checkbox">
-                            <span>角色描述</span>
-                        </label>
-                    </div>
-                    <small id="thrive_module_description_hint" class="thrive-hint"></small>
-
-                    <small id="thrive_module_note" class="thrive-hint thrive-hint--warn displayNone">
-                        两个模块都关着：没有可写的地方，请先开启至少一个。
-                    </small>
-
-                    <div class="thrive-field">
-                        <div class="thrive-row">
-                            <span class="thrive-row__label">
-                                <label for="thrive_read_scope">读取范围</label>
-                                <button type="button" class="thrive-help" data-help="thrive_help_scope"
-                                    aria-expanded="false" aria-controls="thrive_help_scope" title="说明">?</button>
-                            </span>
-                        </div>
-                        <div id="thrive_help_scope" class="thrive-help__body">
-                            只看可写书最省 token。带上角色绑定的书时，返回的每条都会标注来源。
-                        </div>
-                        <select id="thrive_read_scope" class="text_pole">
-                            <option value="writable">只看可写书</option>
-                            <option value="bound">可写书 + 角色绑定书</option>
-                        </select>
-                        <small id="thrive_scope_hint" class="thrive-hint"></small>
-                    </div>
-
-                    <div class="thrive-field">
-                        <div class="thrive-check">
-                            <label class="checkbox_label" for="thrive_patch_enabled">
-                                <input id="thrive_patch_enabled" type="checkbox">
-                                <span>描述改动先暂存</span>
-                            </label>
-                            <button type="button" class="thrive-help" data-help="thrive_help_patch"
-                                aria-expanded="false" aria-controls="thrive_help_patch" title="说明">?</button>
-                        </div>
-                        <div id="thrive_help_patch" class="thrive-help__body">
-                            开着时，模型的描述改动先存成一份 diff，等你在浮动面板里点「写入角色卡」才落盘；
-                            暂存期间模型读到的是暂存版。关掉后直接落盘，只有「上一版快照」可回退。
-                        </div>
-                        <small id="thrive_patch_hint" class="thrive-hint"></small>
                     </div>
                 </div>
             </div>

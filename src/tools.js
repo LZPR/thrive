@@ -39,7 +39,6 @@ import {
     loreReadKey,
     loreSeenKey,
     READ_KEY_DESC,
-    rememberDescBackup,
     rememberLoreBackup,
     saveChat,
     setReadHash,
@@ -47,7 +46,6 @@ import {
 import { readLimits } from './limits.js';
 import {
     appendLoreEntry,
-    applyDescriptionLocally,
     createLoreEntry,
     findLoreEntry,
     getActiveCharacter,
@@ -57,7 +55,6 @@ import {
     loadWritableBook,
     locateLoreEntry,
     replaceLoreEntry,
-    saveDescription,
 } from './targets.js';
 import {
     diskDescription,
@@ -445,14 +442,14 @@ async function handleLoreList(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
 
-    if (!isWorldbookModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
     if (!getWritableBook(ctx)) {
         return errorResult('NO_BOOK', '还没有选择可写书，请让用户在浮动面板里选一本。');
     }
 
-    const listed = await listLore(ctx, settings);
+    const listed = await listLore(ctx);
     if (!listed.ok) {
         return errorResult(listed.error, listed.hint);
     }
@@ -531,8 +528,8 @@ async function handleLoreRead(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
 
-    if (!isWorldbookModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
     if (!getWritableBook(ctx)) {
         return errorResult('NO_BOOK', '还没有选择可写书，请让用户在浮动面板里选一本。');
@@ -543,12 +540,12 @@ async function handleLoreRead(params) {
         return errorResult('INVALID_TITLE', 'title 是必填的。要浏览这本书有什么，用 lore_list。');
     }
 
-    const located = await locateLoreEntry(ctx, settings, title);
+    const located = await locateLoreEntry(ctx, title);
     if (!located.ok) {
         return errorResult(located.error, located.hint);
     }
 
-    const { book, writable, found } = located;
+    const { book, found } = located;
     const full = String(found.entry.content ?? '');
     const limits = readLimits(settings);
 
@@ -579,7 +576,7 @@ async function handleLoreRead(params) {
         } else if (hit.count === 0) {
             payload.hint = '这条里没有命中。换一个关键词，或去掉 pattern 读全文。';
         }
-        applyReadNotes(ctx, settings, book, writable, payload);
+        applyReadNotes(ctx, book, payload);
         return payload;
     }
 
@@ -616,14 +613,13 @@ async function handleLoreRead(params) {
      * 模型侧只剩硬上限：写不进去就是写不进去。
      */
 
-    applyReadNotes(ctx, settings, book, writable, payload);
+    applyReadNotes(ctx, book, payload);
 
     console.debug(`${LOG} lore_read`, {
         book,
         title,
         chars: full.length,
         truncated: Boolean(cut.truncated),
-        writable,
     });
 
     return payload;
@@ -636,8 +632,8 @@ async function handleLoreAdd(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isWorldbookModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
 
     const title = String(params?.title ?? '').trim();
@@ -731,8 +727,8 @@ async function handleLoreAppend(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isWorldbookModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
 
     const title = String(params?.title ?? '').trim();
@@ -827,8 +823,8 @@ async function handleLoreReplace(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isWorldbookModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
 
     const title = String(params?.title ?? '').trim();
@@ -923,8 +919,8 @@ async function handleLoreRewrite(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isWorldbookModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
 
     const title = String(params?.title ?? '').trim();
@@ -1007,8 +1003,8 @@ async function handleDescRead(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
 
-    if (!isDescriptionModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '角色描述模块已关闭，不能读写角色描述；现在只能记录世界书条目。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
 
     const limits = readLimits(settings);
@@ -1115,7 +1111,7 @@ async function handleDescAppend(params) {
             `追加后共 ${next.length} 字，超过上限 ${hardLimit} 字。这次没有写入：请少追加一些，或改用 desc_replace 顺手删掉一段再写。`);
     }
 
-    const committed = await commitDescription(ctx, gate.character, { next, fullText: false });
+    const committed = await commitDescription(ctx, { next, fullText: false });
     if (!committed.ok) {
         return committed;
     }
@@ -1177,7 +1173,7 @@ async function handleDescReplace(params) {
             `替换后共 ${replaced.text.length} 字，超过上限 ${hardLimit} 字。这次没有写入：把替换内容写短一些，或分几次局部替换。`);
     }
 
-    const committed = await commitDescription(ctx, gate.character, { next: replaced.text, fullText: false });
+    const committed = await commitDescription(ctx, { next: replaced.text, fullText: false });
     if (!committed.ok) {
         return committed;
     }
@@ -1236,7 +1232,7 @@ async function handleDescRewrite(params) {
             `正文 ${next.length} 字，超过上限 ${hardLimit} 字。这次没有写入：整段重写必须一次给到上限以内，否则先用 desc_replace 删掉一部分。`);
     }
 
-    const committed = await commitDescription(ctx, gate.character, { next, fullText: true });
+    const committed = await commitDescription(ctx, { next, fullText: true });
     if (!committed.ok) {
         return committed;
     }
@@ -1257,7 +1253,7 @@ async function handleDescRewrite(params) {
 /* ------------------------------------------------------------------ 内部 */
 
 /**
- * 三个描述写入共用的前置：模块开着、有角色、没有冲突的 patch。
+ * 三个描述写入共用的前置：学习模式开着、有角色、没有冲突的 patch。
  *
  * 顺序不可调（spec §8）：先判"能不能写"，再判"读没读过"，最后才是参数。
  * 反过来的话，模型会因为参数错误而一直发现不了自己漏了读取。
@@ -1265,8 +1261,8 @@ async function handleDescRewrite(params) {
 function checkDescriptionWrite(ctx) {
     const settings = ensureSettings(ctx);
 
-    if (!isDescriptionModuleActive(ctx)) {
-        return errorResult('MODULE_DISABLED', '角色描述模块已关闭，不能读写角色描述；现在只能记录世界书条目。');
+    if (!isLearningActive(ctx)) {
+        return errorResult('TOOL_UNAVAILABLE');
     }
 
     const character = getActiveCharacter(ctx);
@@ -1276,18 +1272,17 @@ function checkDescriptionWrite(ctx) {
 
     // worldbook 模式没有 patch，也就不存在"冲突待处理"这件事
     if (isWorldbookDesc(ctx)) {
-        return { ok: true, character, pending: null };
+        return { ok: true };
     }
 
     // 冲突是用户没做完的决定：这时的磁盘值和 patch.before 都不代表"现在的样子"，
     // 再合进一笔，谁覆盖谁就没有答案了（spec §10）
-    const pending = getPatch(ctx);
-    if (pending?.status === PATCH_STATUS.CONFLICT) {
+    if (getPatch(ctx)?.status === PATCH_STATUS.CONFLICT) {
         return errorResult('PATCH_CONFLICT', '角色描述有一份冲突的改动等着用户处理（暂存之后磁盘被改过）。'
             + '这一轮不要再写描述，继续正文即可；用户处理完再写。');
     }
 
-    return { ok: true, character, pending };
+    return { ok: true };
 }
 
 /**
@@ -1313,14 +1308,14 @@ function registerDescWrite(ctx, next, fullText) {
  * 把读取登记推到新版本 —— 不这么做，同一次回复里的第二笔写入会被自己的
  * STALE_READ 挡住（ADR-007）。
  *
- * card 模式：开 patch 就暂存，否则直写角色卡。
+ * card 模式：恒走暂存，用户确认后才落盘（ADR-005 / ADR-046）。直写那条路已经没有了：
+ *   它唯一的用途是"关掉暂存"，而那个开关不存在了，描述又每轮都在 system 前缀里，
+ *   合并成一笔才值钱。
  * worldbook 模式：直接写进世界书条目，没有暂存也没有 diff（ADR-042）。
  *   不碰角色卡、不碰角色编辑框、不写 backups.desc —— 那条快照槽位属于 card 模式，
  *   世界书的撤销走 backups.lore（面板「已写入 → 恢复写入前」）。
  */
-async function commitDescription(ctx, character, { next, fullText }) {
-    const settings = ensureSettings(ctx);
-
+async function commitDescription(ctx, { next, fullText }) {
     if (isWorldbookDesc(ctx)) {
         const written = await writeDesc(ctx, next);
         if (!written.ok) {
@@ -1341,38 +1336,15 @@ async function commitDescription(ctx, character, { next, fullText }) {
     }
 
     const disk = diskDescription(ctx);
-
-    if (settings.patchEnabled !== false) {
-        stagePatch(ctx, { before: disk, after: next });
-        registerDescWrite(ctx, next, fullText);
-        // 正文变了，之前预读过的正则命中位置都可能不再成立
-        clearReadKeysByPrefix(ctx, descPatternPrefix());
-
-        return {
-            ok: true,
-            staged: true,
-            note: '已暂存，用户确认后才写入角色卡。在此之前你的续写仍按原描述进行。',
-        };
-    }
-
-    const saved = await saveDescription(ctx, character, next);
-    if (!saved.ok) {
-        console.debug(`${LOG} 描述写入失败`, saved.error);
-        return saved;
-    }
-
-    // 顺序：先记快照（写之前那一版），再同步内存与编辑框，最后登记已读
-    rememberDescBackup(ctx, disk);
-    // 传 disk：编辑器里还停着写入前的原文就顺手同步掉，免得用户一次保存把它覆盖回去
-    applyDescriptionLocally(character, next, disk);
+    stagePatch(ctx, { before: disk, after: next });
     registerDescWrite(ctx, next, fullText);
-    saveChat(ctx);
+    // 正文变了，之前预读过的正则命中位置都可能不再成立
+    clearReadKeysByPrefix(ctx, descPatternPrefix());
 
     return {
         ok: true,
-        staged: false,
-        applied: true,
-        note: '已写入角色卡。同一次回复的续写可能已经用上它。',
+        staged: true,
+        note: '已暂存，用户确认后才写入角色卡。在此之前你的续写仍按原描述进行。',
     };
 }
 
@@ -1413,26 +1385,25 @@ function canReplace(ctx, patternKey, fullKey, current) {
     return Boolean(recorded) && fnv1a(current) === recorded;
 }
 
-/** 读侧的两条附注：换书提醒（ADR-017）与"这本书没激活"（ADR-021） */
-function applyReadNotes(ctx, settings, book, writable, payload) {
+/**
+ * 读侧的两条附注：换书提醒（ADR-017）与"这本书没激活"（ADR-021）。
+ *
+ * 读的范围只剩可写书（ADR-046），所以没有"读到只读的那本"这种附注了——
+ * 能读到的条目就是能改的那条。
+ */
+function applyReadNotes(ctx, book, payload) {
     const notes = [];
-
-    if (!writable) {
-        notes.push(`这条在「${book}」里，那本是绑定的只读书，不能改写；可写书是「${getWritableBook(ctx)}」。`);
-    }
 
     if (isBookScanned(ctx, book) === false) {
         notes.push('这本书当前没有激活，写进去的条目生成时不会触发。');
     }
 
     const state = getState(ctx);
-    if (writable && state.lastBook !== null && state.lastBook !== book) {
+    if (state.lastBook !== null && state.lastBook !== book) {
         notes.push('可写书已切换，这里没有之前那本书的内容，不要重复记录。');
         payload.switched = true;
     }
-    if (writable) {
-        state.lastBook = book;
-    }
+    state.lastBook = book;
 
     if (notes.length > 0) {
         payload.note = [payload.note, ...notes].filter(Boolean).join(' ');
@@ -1481,16 +1452,9 @@ function normalizeLogic(raw) {
 }
 
 /*
- * 这两个用于"工具已经在跑"时的二次校验（开关可能在生成途中被改）。
- * 判据同样走 isLearningActive：被动学习挂上的那一轮，模型必须真的能写。
+ * 各处理函数开头那句 isLearningActive 是"工具已经在跑"时的二次校验：
+ * 学习模式可能在生成途中被关掉，而 guardAction 是在调用前判的。
  */
-function isDescriptionModuleActive(ctx) {
-    return isLearningActive(ctx) && ensureSettings(ctx).moduleDescription !== false;
-}
-
-function isWorldbookModuleActive(ctx) {
-    return isLearningActive(ctx) && ensureSettings(ctx).moduleWorldbook !== false;
-}
 
 function errorResult(error, hint) {
     // 兜底用统一目录：任何一条错误回到模型面前时都得有下一步动作，

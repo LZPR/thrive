@@ -127,35 +127,29 @@ export async function scanCompressTargets(ctx, settings) {
 
     result.descPending = isWorldbookDesc(ctx) ? false : isUnresolved(getPatch(ctx));
 
-    if (settings.moduleDescription !== false) {
-        const character = getActiveCharacter(ctx);
-        // 统一模式下正文在条目里（要 load 世界书，异步）；card 模式只看盘上那份
-        const text = isWorldbookDesc(ctx)
-            ? (await readDesc(ctx)).text
-            : diskDescription(ctx);
-        if (character && text.length >= limits.softLimitDesc) {
-            result.items.push({
-                id: DESC_ITEM_ID,
-                kind: 'desc',
-                book: '',
-                title: character.name ? `角色描述（${character.name}）` : '角色描述',
-                /*
-                 * 记下头像文件名：保存时用它确认"还是同一个角色"。面板开着的时候用户
-                 * 完全可能去左侧换一个角色，那时把 A 的正文写进 B 的卡是灾难。
-                 */
-                avatar: String(character.avatar ?? ''),
-                chars: text.length,
-                soft: limits.softLimitDesc,
-                hard: limits.hardLimitDesc,
-                level: text.length > limits.hardLimitDesc ? 'hard' : 'soft',
-                keys: [],
-                text,
-            });
-        }
-    }
-
-    if (settings.moduleWorldbook === false) {
-        return result;
+    const character = getActiveCharacter(ctx);
+    // 统一模式下正文在条目里（要 load 世界书，异步）；card 模式只看盘上那份
+    const text = isWorldbookDesc(ctx)
+        ? (await readDesc(ctx)).text
+        : diskDescription(ctx);
+    if (character && text.length >= limits.softLimitDesc) {
+        result.items.push({
+            id: DESC_ITEM_ID,
+            kind: 'desc',
+            book: '',
+            title: character.name ? `角色描述（${character.name}）` : '角色描述',
+            /*
+             * 记下头像文件名：保存时用它确认"还是同一个角色"。面板开着的时候用户
+             * 完全可能去左侧换一个角色，那时把 A 的正文写进 B 的卡是灾难。
+             */
+            avatar: String(character.avatar ?? ''),
+            chars: text.length,
+            soft: limits.softLimitDesc,
+            hard: limits.hardLimitDesc,
+            level: text.length > limits.hardLimitDesc ? 'hard' : 'soft',
+            keys: [],
+            text,
+        });
     }
 
     const book = getWritableBook(ctx);

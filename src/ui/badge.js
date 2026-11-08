@@ -14,7 +14,7 @@ import { formatDiagnosis } from '../diagnostics.js';
 import { PASSIVE_EVENT, notifyPanelToggle } from '../events.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
-import { getPending, hasAnyModule, isEnabled, isPassiveEnabled } from '../store.js';
+import { getPending, isEnabled, isPassiveEnabled } from '../store.js';
 import { refreshBadgeOnly, registerSurfaces } from './refresh.js';
 import { BADGE_ID, LOG, PANEL_ID, isPanelOpen, toast } from './shared.js';
 
@@ -129,10 +129,9 @@ function refreshBadge(ctx, settings, available, diag) {
         return;
     }
 
-    const none = !hasAnyModule(settings);
     // 环境不支持时置灰：开关切过去也没有任何东西会生效
     const unsupported = !diag.ok;
-    const usable = available && !none && !unsupported;
+    const usable = available && !unsupported;
 
     const activeOn = isEnabled(ctx);
     // 被动开关按对话（ADR-044）；判据仍是全局的，所以进度照旧从 settings 里读
@@ -142,7 +141,7 @@ function refreshBadge(ctx, settings, available, diag) {
     const patchPending = isUnresolved(getPatch(ctx)) ? 1 : 0;
 
     badge.classList.toggle('displayNone', !settings.showBadge);
-    // 三种"不可用"共用同一档置灰：没有可写模块、没有对话、环境不支持工具调用
+    // 两种"不可用"共用同一档置灰：没有对话、环境不支持工具调用
     badge.classList.toggle('thrive-badge--muted', !usable);
     badge.classList.toggle('thrive-badge--active', activeOn);
     badge.classList.toggle('thrive-badge--passive', passiveOn);
@@ -157,9 +156,7 @@ function refreshBadge(ctx, settings, available, diag) {
     }
 
     const lines = [];
-    if (none) {
-        lines.push('两个模块都关着，请先在扩展设置里开启至少一个');
-    } else if (!available) {
+    if (!available) {
         lines.push('请先打开一个对话');
     } else if (unsupported) {
         lines.push(`工具调用不可用：${formatDiagnosis(diag)}`);

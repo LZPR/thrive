@@ -10,7 +10,14 @@ import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
-import { ensureSettings, getPending, isChatAvailable, isEnabled, isPassiveEnabled } from '../store.js';
+import {
+    ensureSettings,
+    getPending,
+    isChatAvailable,
+    isEnabled,
+    isPassiveEnabled,
+    isWorldbookDesc,
+} from '../store.js';
 import { getWritableBook, isBookScanned } from '../targets.js';
 
 /**
@@ -23,12 +30,13 @@ import { getWritableBook, isBookScanned } from '../targets.js';
  */
 export function describeStatus(ctx = getContext()) {
     const settings = ensureSettings(ctx);
-    const modules = [];
 
-    if (settings.moduleWorldbook !== false) {
-        modules.push(getWritableBook(ctx) ? '世界书' : '世界书（未选书）');
-    }
-    if (settings.moduleDescription !== false) {
+    /*
+     * 模块不再是开关（ADR-046）：世界书永远在；角色描述只在 card 模式下算独立模块，
+     * worldbook 模式里描述本来就是书里的一条，再列一遍等于说有两处可写。
+     */
+    const modules = [getWritableBook(ctx) ? '世界书' : '世界书（未选书）'];
+    if (!isWorldbookDesc(ctx)) {
         modules.push('角色描述');
     }
 
@@ -44,7 +52,7 @@ export function describeStatus(ctx = getContext()) {
     const parts = [
         `主动：${isEnabled(ctx) ? '已开启' : '已关闭'}`,
         `被动：${describePassiveState(ctx, settings)}`,
-        `模块：${modules.length > 0 ? modules.join(' + ') : '无可写模块'}`,
+        `模块：${modules.join(' + ')}`,
         `可写书：${bookText}`,
         `待确认：${pending} 份`,
     ];

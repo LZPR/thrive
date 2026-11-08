@@ -18,9 +18,7 @@
  *   help.js           标签旁那个「?」的展开 / 收起
  *   diagnostics.js    顶部环境诊断
  *   basics.js         新对话默认开启（主动 / 被动）、显示徽章
- *   write-targets.js  写入模块、读取范围
  *   passive-criteria.js 被动判据：每 N 条、关键词
- *   desc-patch.js     描述改动暂存
  *   limit-fields.js   14 个数值上限
  *   prompt-cards.js   提示词卡片、拖动、编辑弹窗
  *   tool-catalog.js   只读工具清单与复制
@@ -36,19 +34,11 @@ import { LOG } from '../shared.js';
 import { bindAppearanceControls, syncAppearanceControls } from './appearance.js';
 import { bindBasicsControls, syncBasicsControls } from './basics.js';
 import { bindDiagnosticRefresh, refreshDiagnostics } from './diagnostics.js';
-import { bindPatchControls, syncPatchCheck, updatePatchHint } from './desc-patch.js';
 import { bindHelpButtons } from './help.js';
 import { bindLimitControls, syncLimitControls } from './limit-fields.js';
 import { bindPassiveCriteria, syncPassiveCriteria } from './passive-criteria.js';
 import { bindPromptControls, updatePromptCards, updatePromptStats } from './prompt-cards.js';
 import { bindToolCatalog, renderToolCatalog } from './tool-catalog.js';
-import {
-    bindWriteTargetControls,
-    syncReadScope,
-    syncWriteTargetControls,
-    updateModuleHints,
-    updateScopeHint,
-} from './write-targets.js';
 
 /**
  * 渲染并挂载设置面板。重复调用安全。
@@ -92,9 +82,7 @@ export async function initSettingsPanel(ctx = getContext()) {
 /** 把各组的绑定叫一遍。新增一组只在这里加一行。 */
 function bindSettingsEvents() {
     bindBasicsControls();
-    bindWriteTargetControls();
     bindPassiveCriteria();
-    bindPatchControls();
     bindLimitControls();
     bindPromptControls();
     bindToolCatalog();
@@ -112,17 +100,7 @@ function bindSettingsEvents() {
  */
 function refreshSettingsControls(ctx, settings) {
     syncBasicsControls(settings);
-
-    syncWriteTargetControls(settings);
-    updateModuleHints(ctx, settings);
-    syncReadScope(settings);
-    updateScopeHint(ctx, settings);
-
     syncPassiveCriteria(settings);
-
-    syncPatchCheck(ctx, settings);
-    updatePatchHint(ctx);
-
     syncLimitControls(settings);
     syncAppearanceControls(settings);
 

@@ -6,7 +6,7 @@
  * 迟早出现"提示词说可用、调用却被拒"的分裂，所以判定收在这里。
  *
  * 两个概念要分开：
- *   exposed    这个工具的名字在不在请求里（模块开着、世界书还要选了可写书）
+ *   exposed    这个工具的名字在不在请求里（世界书工具还要选了可写书）
  *   available  exposed 且这一轮学习模式开着
  *
  * 常驻模式只影响 exposed 的"生命周期"（它不再随对话开关消失），不改变这套判定。
@@ -53,8 +53,11 @@ export function toolGroup(name) {
 /**
  * 这个工具此刻**在不在请求里**。
  *
- * 只由结构性条件决定（模块开关、可写书），与"这一轮开没开学习模式"无关：
+ * 只由结构性条件决定（描述存哪儿、可写书），与"这一轮开没开学习模式"无关：
  * 常驻模式下它就是"工具定义还在不在 tools 数组里"。
+ *
+ * 描述工具两种模式都有：`card` 写角色卡，`worldbook` 写同名书里的保留条目——
+ * 换的是落点，不是"有没有这个能力"（ADR-042/046）。
  *
  * @param {object} ctx
  * @param {string} name
@@ -62,24 +65,20 @@ export function toolGroup(name) {
  */
 export function isToolExposed(ctx, name) {
     const group = toolGroup(name);
-    if (!group) {
-        return false;
-    }
-
-    const settings = ensureSettings(ctx);
-
     if (group === 'desc') {
-        return settings.moduleDescription !== false;
+        return true;
     }
-
-    return settings.moduleWorldbook !== false && Boolean(getWritableBook(ctx));
+    if (group === 'lore') {
+        return Boolean(getWritableBook(ctx));
+    }
+    return false;
 }
 
 /**
  * 不可用的原因代号。空串 = 可用。
  * @param {object} ctx
  * @param {string} name
- * @returns {''|'learning-off'|'module-off'|'no-book'|'unknown'}
+ * @returns {''|'learning-off'|'no-book'|'unknown'}
  */
 export function toolUnavailableReason(ctx, name) {
     const group = toolGroup(name);
@@ -91,17 +90,11 @@ export function toolUnavailableReason(ctx, name) {
         return 'learning-off';
     }
 
-    const settings = ensureSettings(ctx);
-
-    if (group === 'desc') {
-        return settings.moduleDescription === false ? 'module-off' : '';
+    if (group === 'lore' && !getWritableBook(ctx)) {
+        return 'no-book';
     }
 
-    if (settings.moduleWorldbook === false) {
-        return 'module-off';
-    }
-
-    return getWritableBook(ctx) ? '' : 'no-book';
+    return '';
 }
 
 /** 这个工具此刻可用吗 */
@@ -128,16 +121,11 @@ export function isToolRegistered(ctx, name) {
     return ensureSettings(ctx).toolsResident === true || isLearningActive(ctx);
 }
 
-/** 没注册的原因：分得清"模块/书没配好"和"这一轮没开常驻也没开学习" */
+/** 没注册的原因：分得清"书没配好"和"这一轮没开常驻也没开学习" */
 function notRegisteredReason(ctx, name) {
-    const settings = ensureSettings(ctx);
-
-    if (toolGroup(name) === 'lore' && settings.moduleWorldbook !== false && !getWritableBook(ctx)) {
-        return 'no-book';
-    }
-
+    // 没注册的结构性原因只剩一个：世界书工具没有可写书
     if (!isToolExposed(ctx, name)) {
-        return 'module-off';
+        return 'no-book';
     }
 
     return 'resident-off';

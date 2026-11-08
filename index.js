@@ -173,9 +173,6 @@ function runThriveCommand(raw) {
             if (!diag.ok) {
                 return report(`工具调用不可用，开了也没有工具可用：${formatDiagnosis(diag)}`);
             }
-            if (settings.moduleWorldbook === false && settings.moduleDescription === false) {
-                return report('两个模块都关着，请先在扩展设置里开启至少一个');
-            }
             if (!isChatAvailable(ctx)) {
                 return report('请先打开一个对话');
             }
@@ -247,10 +244,6 @@ function runThriveCommand(raw) {
         case 'once': {
             if (!isChatAvailable(ctx)) {
                 return report('请先打开一个对话');
-            }
-
-            if (settings.moduleWorldbook === false && settings.moduleDescription === false) {
-                return report('两个模块都关着，请先在扩展设置里开启至少一个');
             }
 
             const diag = diagnoseEnvironment(ctx);

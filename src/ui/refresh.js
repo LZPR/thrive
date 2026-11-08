@@ -13,17 +13,7 @@ import { getContext } from '../../../../../extensions.js';
 import { getCompressSnapshot, requestCompressScan } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
 import { COMPRESS_EVENT } from '../events.js';
-import { syncFromContext } from '../prompt.js';
-import {
-    ensureSettings,
-    getPending,
-    getState,
-    hasAnyModule,
-    isChatAvailable,
-    isEnabled,
-    saveChat,
-    setEnabled,
-} from '../store.js';
+import { ensureSettings, isChatAvailable } from '../store.js';
 import { COMPRESS_ID, isPanelOpen, markPanelOpen, toast } from './shared.js';
 
 /* ------------------------------------------------------------ 分区登记表 */
@@ -103,21 +93,6 @@ export function setPanelOpen(open, ctx = getContext()) {
  */
 export function refreshUI(ctx = getContext()) {
     const settings = ensureSettings(ctx);
-
-    // 没有可写模块时整个扩展无从谈起：对话里还开着就顺手关掉，
-    // 否则徽章亮着"学习"、模型却一个工具都看不到。
-    // 放在这里也兜住"手改 settings.json 把两个模块都关了"的情况。
-    if (!hasAnyModule(settings) && isEnabled(ctx)) {
-        setEnabled(ctx, false);
-        syncFromContext(ctx);
-        toast('两个模块都关着，学习模式已自动关闭');
-    }
-
-    // 被动学习的待学习同理：留着它只会在徽章上闪一个永远不会生效的「待学」
-    if (!hasAnyModule(settings) && getPending(ctx)) {
-        getState(ctx).passive.pending = null;
-        saveChat(ctx);
-    }
 
     const available = isChatAvailable(ctx);
     // 每次都现算：用户可能刚在 ST 面板里改了函数调用开关，缓存下来的结论会撒谎

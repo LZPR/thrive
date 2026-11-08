@@ -178,8 +178,10 @@ async function switchToWorldbook(ctx) {
 
     setDescStorageMode(ctx, 'worldbook');
 
+    // 未激活只说"去哪开"：这一刻用户已经决定换模式了，解释为什么、要不要处理角色卡上的旧描述
+    // 都帮不上忙（ADR-046）
     if (isBookScanned(ctx, ensured.book) === false) {
-        toast(`已切到世界书条目，但「${ensured.book}」没有被扫描到：要让它进上下文，得在「世界书」面板里勾选`);
+        toast(`「${ensured.book}」还没有激活：到「世界书」面板勾选这本书`);
     } else {
         toast(`已切到世界书条目：描述存在「${ensured.book}」的【角色描述】里`);
     }

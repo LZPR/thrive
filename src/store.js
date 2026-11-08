@@ -18,7 +18,7 @@ import { fnv1a } from './util.js';
 export const MODULE_NAME = 'thrive';
 
 /**
- * 本步骤只需要这几项设置。后续步骤（模块开关、写入目标、长度上限等）
+ * 本步骤只需要这几项设置。后续步骤（写入目标、长度上限等）
  * 会往 DEFAULT_SETTINGS 里继续补，ensureSettings 的补全逻辑不用改。
  */
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -66,22 +66,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     blockCommon: '',
     blockActive: '',
     blockPassive: '',
-    /** 角色描述模块开关。Step 07 会把模块权限补齐 */
-    moduleDescription: true,
     /*
      * 「角色描述存哪儿」（descStorage）与「可写书」（writableBook）不在这里：
      * 它们按对话保存（ADR-044），见 createChatState。老版本留在全局的旧值只当
      * 未设置过的对话的初值，见 legacyChatValue。
      */
-    /**
-     * 描述改动是否先暂存成 patch。
-     * 关掉之后三个描述写入工具都回到直写，返回里的 staged 换成 applied。
-     */
-    patchEnabled: true,
-    /** 世界书模块开关 */
-    moduleWorldbook: true,
-    /** 读范围：writable 只看可写书 / bound 含当前角色绑定的其他书 */
-    readScope: 'writable',
     /** 新建条目的插入位置：0 角色定义前 / 1 角色定义后 / 2 作者注释顶 / 3 作者注释底 */
     entryPosition: 0,
     /**
@@ -241,6 +230,23 @@ export function ensureSettings(ctx) {
         dirty = true;
     }
 
+    /*
+     * v0.28：三项设置被固定成规则，不再可调（ADR-046）。
+     *   moduleWorldbook / moduleDescription  描述存哪儿说了算：card 两个都能写，
+     *                                        worldbook 只有那本书能写，没有"关掉一半"这回事
+     *   patchEnabled                         card 模式恒暂存（ADR-005）
+     *   readScope                            只读可写书：读得到改不了的书会诱发认知冲突
+     *
+     * 旧值一律丢掉而不是留着当默认：它们描述的是"用户可以关掉一个模块"，
+     * 而那个能力已经不存在了，留着只会在别处读到 false 时判出一个不存在的状态。
+     */
+    for (const legacyKey of ['moduleWorldbook', 'moduleDescription', 'patchEnabled', 'readScope']) {
+        if (Object.hasOwn(settings, legacyKey)) {
+            delete settings[legacyKey];
+            dirty = true;
+        }
+    }
+
     for (const [key, fallback] of Object.entries(DEFAULT_SETTINGS)) {
         // 用类型比对而不是 undefined 判断：手改过 settings.json 存进去的 "false" 也能被纠正
         if (typeof settings[key] !== typeof fallback) {
@@ -254,18 +260,6 @@ export function ensureSettings(ctx) {
     }
 
     return settings;
-}
-
-/**
- * 至少有一个可写模块。两个都关时整个扩展没有意义，开关要置灰。
- *
- * 纯判定、不碰 DOM，所以放在 store 而不是界面层：设置页、徽章、面板、状态摘要
- * 都要用它，放在任何一处界面文件里都会让其余几处反过来依赖那一处。
- *
- * @param {object} settings
- */
-export function hasAnyModule(settings) {
-    return settings?.moduleWorldbook !== false || settings?.moduleDescription !== false;
 }
 
 /**
