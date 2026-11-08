@@ -318,6 +318,14 @@ function setPatch(ctx, patch) {
     notify(patch);
 }
 
+function createPatchId() {
+    return `p${Date.now().toString(36)}${Math.floor(Math.random() * 0xffff).toString(36)}`;
+}
+
+function notify(patch) {
+    notifyPanel(patch);
+}
+
 /* -------------------------------------------------------------------- diff */
 
 /*
