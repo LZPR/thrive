@@ -7,6 +7,7 @@
  * 两条路径：角色描述（读 + 写）、世界书（读 + 写）。
  */
 
+import { isReservedEntry, isReservedTitle } from './desc-entry.js';
 import { appendParagraph, normalizeEol } from './util.js';
 
 /**
@@ -20,6 +21,25 @@ export function getActiveCharacter(ctx) {
     }
     const character = ctx.characters?.[index];
     return character ?? null;
+}
+
+/**
+ * 角色卡上的描述（空角色返回空串）。
+ *
+ * 只在 `descStorage = 'card'` 时有意义；统一模式的正文在世界书条目里，
+ * 读数请走 desc.js 的 readDesc（它要 load 世界书，是异步的）。
+ *
+ * @param {object} ctx
+ * @returns {string}
+ */
+export function cardDescription(ctx) {
+    const character = getActiveCharacter(ctx);
+    if (!character) {
+        return '';
+    }
+    return normalizeEol(typeof character.description === 'string'
+        ? character.description
+        : String(character.description ?? ''));
 }
 
 /**
@@ -312,6 +332,8 @@ export async function listLore(ctx, settings) {
 
     const items = Object.values(loaded.data.entries)
         .filter(Boolean)
+        // 角色描述的保留条目不属于"目录"：模型看不到它，也不该拿标题去改它
+        .filter(entry => !isReservedEntry(entry))
         .map(entry => ({
             title: entryTitle(entry),
             uid: uidOf(entry),
@@ -347,6 +369,11 @@ export async function locateLoreEntry(ctx, settings, title) {
             error: 'INVALID_TITLE',
             hint: '标题是空串。标题既是同书内的唯一标识，也是定位条目的唯一方式。',
         };
+    }
+
+    // 保留条目只走 desc_* 工具。这里是 lore_read 的入口，直接说清楚，别让它猜 NOT_FOUND
+    if (isReservedTitle(wanted)) {
+        return reservedHint();
     }
 
     if (typeof ctx.loadWorldInfo !== 'function') {
@@ -391,6 +418,16 @@ export async function locateLoreEntry(ctx, settings, title) {
 
 function noBook(hint) {
     return { ok: false, error: 'NO_BOOK', hint };
+}
+
+/**
+ * 「这是插件保留给角色描述的条目」的统一错误码。
+ *
+ * 只说码，hint 交给 diagnostics.js 的码表（与其它错误码同一个出口，
+ * 免得同一句话在三个文件里各写一版）。
+ */
+export function reservedHint() {
+    return { ok: false, error: 'RESERVED_ENTRY' };
 }
 
 function uidOf(entry) {
@@ -494,18 +531,28 @@ export async function loadBook(ctx, book) {
  * 同书内理论上标题唯一，实际手写完可以重名 —— 取 uid 最小的那条，
  * 之后所有改写都落在它身上，不会每次换一条。
  *
+ * 默认**跳过**角色描述的保留条目：这条对 lore_* 工具不可见。只有 desc.js 与
+ * "恢复写入前"这种明确知道自己在干什么的调用点才传 `includeReserved: true`。
+ *
+ * @param {object} data
+ * @param {string} title
+ * @param {{ includeReserved?: boolean }} [options]
  * @returns {{ key: string, uid: number, entry: object } | null}
  */
-export function findLoreEntry(data, title) {
+export function findLoreEntry(data, title, options = {}) {
     const wanted = String(title ?? '').trim();
     if (!wanted) {
         return null;
     }
 
+    const includeReserved = options.includeReserved === true;
     let found = null;
 
     for (const [key, entry] of Object.entries(data?.entries ?? {})) {
         if (!entry) {
+            continue;
+        }
+        if (!includeReserved && isReservedEntry(entry)) {
             continue;
         }
         if (String(entry.comment ?? '').trim() !== wanted) {
@@ -522,7 +569,7 @@ export function findLoreEntry(data, title) {
 }
 
 /** 下一个可用 uid：现有数字 uid 的最大值 + 1；空书从 0 开始（与 ST 一致） */
-function nextLoreUid(data) {
+export function nextLoreUid(data) {
     const uids = Object.values(data?.entries ?? {})
         .map(entry => Number(entry?.uid))
         .filter(uid => Number.isFinite(uid));
@@ -530,7 +577,7 @@ function nextLoreUid(data) {
     return uids.length ? Math.max(...uids) + 1 : 0;
 }
 
-function clampEntryPosition(value) {
+export function clampEntryPosition(value) {
     const position = Number(value);
     if (!Number.isFinite(position)) {
         return 0;
@@ -813,7 +860,8 @@ export async function restoreLoreEntry(ctx, backup) {
     }
 
     const { data } = loaded;
-    const found = findLoreEntry(data, title);
+    // 恢复是用户动作，保留条目也允许被恢复（否则「撤销新建」删不了它）
+    const found = findLoreEntry(data, title, { includeReserved: true });
 
     if (!found) {
         if (backup.action === 'created') {
@@ -858,12 +906,15 @@ export async function restoreLoreEntry(ctx, backup) {
  * `immediately = true` 是硬要求：默认走 debounce，用户切走对话或关页面时
  * 那几百毫秒的窗口足够丢掉一次写入，而这条路径没有别的重试机会。
  *
+ * 对外导出是为了让 desc.js 的"角色描述条目"走同一条落盘路径 —— 世界书编辑器的
+ * 整本回滚问题（见下面 refreshWorldEditor）对它同样成立，不能另写一份。
+ *
  * @param {object} ctx
  * @param {string} book
  * @param {object} data
  * @param {{ uid?: number }} [options] 刚写入的那条，刷新后拿来定位
  */
-async function persistBook(ctx, book, data, options = {}) {
+export async function persistBook(ctx, book, data, options = {}) {
     try {
         await ctx.saveWorldInfo(book, data, true);
     } catch (err) {

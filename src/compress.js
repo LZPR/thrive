@@ -24,6 +24,8 @@
 
 import { getContext } from '../../../../extensions.js';
 import { compactHint } from './compact.js';
+import { isWorldbookDesc, readDesc, writeDesc } from './desc.js';
+import { isReservedEntry } from './desc-entry.js';
 import { COMPRESS_EVENT } from './events.js';
 import { readLimits } from './limits.js';
 import { diskDescription, getPatch, isUnresolved } from './patch.js';
@@ -123,11 +125,14 @@ export async function scanCompressTargets(ctx, settings) {
         descHard: limits.hardLimitDesc,
     };
 
-    result.descPending = isUnresolved(getPatch(ctx));
+    result.descPending = isWorldbookDesc(settings) ? false : isUnresolved(getPatch(ctx));
 
     if (settings.moduleDescription !== false) {
         const character = getActiveCharacter(ctx);
-        const text = diskDescription(ctx);
+        // 统一模式下正文在条目里（要 load 世界书，异步）；card 模式只看盘上那份
+        const text = isWorldbookDesc(settings)
+            ? (await readDesc(ctx)).text
+            : diskDescription(ctx);
         if (character && text.length >= limits.softLimitDesc) {
             result.items.push({
                 id: DESC_ITEM_ID,
@@ -171,6 +176,10 @@ export async function scanCompressTargets(ctx, settings) {
 
     for (const entry of entries) {
         if (entry.disable === true) {
+            continue;
+        }
+        // 角色描述的保留条目已经作为 desc 那一行进列表了，这里跳过，免得同一条目出现两次
+        if (isReservedEntry(entry)) {
             continue;
         }
 
@@ -393,25 +402,58 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
 
 /** 写回角色描述 */
 async function writeDescription(ctx, item, text) {
-    if (isUnresolved(getPatch(ctx))) {
-        return {
-            ok: false,
-            error: 'PATCH_PENDING',
-            hint: '还有一份待确认的描述改动。它和这里的编辑会互相覆盖，先到浮动面板里写入或丢弃。',
-        };
-    }
+    const settings = ensureSettings(ctx);
 
+    // 面板开着时用户可能换了角色：那这一行说的已经不是眼前这张卡
     const character = getActiveCharacter(ctx);
     if (!character) {
         return { ok: false, error: 'NO_CHAR', hint: '当前没有选中角色，改不了描述。' };
     }
-
-    // 面板开着时用户可能换了角色：那这一行说的已经不是眼前这张卡
     if (item?.avatar && String(character.avatar ?? '') !== item.avatar) {
         return {
             ok: false,
             error: 'CHAR_CHANGED',
             hint: '当前角色已经换了，这一行说的是另一个角色的描述。重新扫描一次再改。',
+        };
+    }
+
+    if (isWorldbookDesc(settings)) {
+        /*
+         * 比的是条目里**现在**的正文，不是列表面板那份快照（item.text）。
+         * 面板可能已经开了很久，条目在中途被模型或世界书编辑器改过；
+         * 拿快照比会漏判"其实没改"，白白再写一遍。
+         */
+        const live = await readDesc(ctx);
+        if (!live.ok) {
+            return live;
+        }
+        if (live.text === text) {
+            return { ok: false, error: 'NO_CHANGE', hint: '内容和条目里的一样，没有需要保存的改动。' };
+        }
+
+        const written = await writeDesc(ctx, text);
+        if (!written.ok) {
+            return written;
+        }
+
+        // 条目内容变了，本轮读取登记作废：让模型重新读，而不是拿旧哈希去写
+        clearReadHash(ctx, READ_KEY_DESC);
+        saveChat(ctx);
+
+        console.debug(`${LOG} 手动压缩描述（世界书条目）`, {
+            book: written.book,
+            before: written.beforeChars,
+            after: text.length,
+        });
+
+        return { ok: true, chars: text.length, beforeChars: written.beforeChars };
+    }
+
+    if (isUnresolved(getPatch(ctx))) {
+        return {
+            ok: false,
+            error: 'PATCH_PENDING',
+            hint: '还有一份待确认的描述改动。它和这里的编辑会互相覆盖，先到浮动面板里写入或丢弃。',
         };
     }
 

@@ -198,6 +198,12 @@ export const ERROR_HINTS = Object.freeze({
     INVALID_REGEX: '正则语法有误。检查括号、方括号和转义，或改用更短的字面词。',
     PATTERN_TOO_LONG: '正则太长。用更短的特征词，不要把整句原文当 pattern。',
 
+    // —— 统一使用世界书（ADR-042）之后新增
+    RESERVED_ENTRY: '【角色描述】是插件为角色描述保留的条目，不属于可编辑的世界书条目。'
+        + '要读写它请用 desc_read / desc_append / desc_replace / desc_rewrite。',
+    NO_DESC_BOOK: '还没找到角色描述所在的世界书。第一次写入时会自动创建；'
+        + '现在没有可写内容，先按现状回复即可。',
+
     // —— 只在插件内部/面板里流转，不会到模型面前
     NO_PATCH: '没有待确认的描述改动。',
     CONFLICT: '磁盘上的描述在暂存之后被改动过。面板里只能选择强制覆盖或拒绝。',

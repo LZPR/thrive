@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.23.1</span>
+                <span class="thrive-version">v0.24.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -89,6 +89,33 @@
                     <small id="thrive_module_note" class="thrive-hint thrive-hint--warn displayNone">
                         两个模块都关着：没有可写的地方，请先开启至少一个。
                     </small>
+
+                    <div class="thrive-field">
+                        <div class="thrive-row">
+                            <span class="thrive-row__label">
+                                <label for="thrive_desc_storage">角色描述存储</label>
+                                <button type="button" class="thrive-help" data-help="thrive_help_desc_storage"
+                                    aria-expanded="false" aria-controls="thrive_help_desc_storage" title="说明">?</button>
+                            </span>
+                        </div>
+                        <div id="thrive_help_desc_storage" class="thrive-help__body">
+                            选「世界书条目」后，角色描述存在<b>与角色同名的那本世界书</b>里的一条固定条目
+                            【角色描述】中，并设为常驻——世界书本身就是"一个能存很多条目、各自带条件"的容器，
+                            人物描述没必要再单独维护一套。<br>
+                            切换<b>不做内容迁移</b>：条目从空白开始，角色卡上原有的文字也不会被清掉或搬走。
+                            角色卡上的描述仍会被 ST 自己注入，想只留一个来源请手动清空。<br>
+                            这个模式不做暂存、也不在浮动面板里提供 diff；撤销靠「已写入 → 恢复写入前」。
+                            该条目不会出现在世界书工具的目录里，也不会被它们改写。
+                        </div>
+                        <select id="thrive_desc_storage" class="text_pole">
+                            <option value="card">角色卡（经典）</option>
+                            <option value="worldbook">世界书条目（统一）</option>
+                        </select>
+                        <small id="thrive_desc_storage_hint" class="thrive-hint"></small>
+                        <div id="thrive_desc_bind" class="menu_button thrive-reset displayNone">
+                            设为本角色的世界书
+                        </div>
+                    </div>
 
                     <div class="thrive-field">
                         <div class="thrive-row">

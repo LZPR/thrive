@@ -60,12 +60,13 @@ import {
     saveDescription,
 } from './targets.js';
 import {
-    descriptionView,
     diskDescription,
     getPatch,
     PATCH_STATUS,
     stagePatch,
 } from './patch.js';
+import { isWorldbookDesc, readDescription, writeDesc } from './desc.js';
+import { isReservedTitle } from './desc-entry.js';
 import { compilePattern, replaceIn, scan } from './regex.js';
 import { TOOL_NAMES } from './tool-names.js';
 import { isToolAvailable, isToolRegistered } from './tool-state.js';
@@ -647,6 +648,11 @@ async function handleLoreAdd(params) {
         return errorResult('TITLE_TOO_LONG', `标题 ${title.length} 字，超过 ${limits.titleMaxChars} 字上限。请精简成一个短的专有名词。`);
     }
 
+    // 保留守卫要排在"读到书"之前：这是目标不对，不是书读不到
+    if (isReservedTitle(title)) {
+        return errorResult('RESERVED_ENTRY');
+    }
+
     const loaded = await loadWritableBook(ctx, settings);
     if (!loaded.ok) {
         return errorResult(loaded.error, loaded.hint);
@@ -732,6 +738,9 @@ async function handleLoreAppend(params) {
     const title = String(params?.title ?? '').trim();
     if (!title) {
         return errorResult('INVALID_TITLE', '标题不能为空。要追加必须先说明追加到哪一条。');
+    }
+    if (isReservedTitle(title)) {
+        return errorResult('RESERVED_ENTRY');
     }
 
     const loaded = await loadWritableBook(ctx, settings);
@@ -826,6 +835,9 @@ async function handleLoreReplace(params) {
     if (!title) {
         return errorResult('INVALID_TITLE', '标题不能为空。要替换必须说明改哪一条。');
     }
+    if (isReservedTitle(title)) {
+        return errorResult('RESERVED_ENTRY');
+    }
 
     const compiled = compilePattern(params?.pattern, params?.flags, limits.patternMaxChars);
     if (!compiled.ok) {
@@ -919,6 +931,9 @@ async function handleLoreRewrite(params) {
     if (!title) {
         return errorResult('INVALID_TITLE', '标题不能为空。要重写必须说明改哪一条。');
     }
+    if (isReservedTitle(title)) {
+        return errorResult('RESERVED_ENTRY');
+    }
 
     const loaded = await loadWritableBook(ctx, settings);
     if (!loaded.ok) {
@@ -997,7 +1012,12 @@ async function handleDescRead(params) {
     }
 
     const limits = readLimits(settings);
-    const view = descriptionView(ctx);
+    // 两种模式在这里合流：card 模式返回 patch 视图（暂存期间是 after），
+    // worldbook 模式返回世界书条目的正文
+    const view = await readDescription(ctx);
+    if (!view.ok) {
+        return errorResult(view.error, view.hint);
+    }
     const text = view.text;
 
     // 看过描述这件事本身：追加的前置。哪怕只是查了一个词，模型也算知道"这里有什么"
@@ -1071,7 +1091,10 @@ async function handleDescAppend(params) {
         return errorResult('READ_REQUIRED', '本轮还没读过角色描述。先调用 desc_read（带 pattern 查一下也行），确认里面已有什么再追加。');
     }
 
-    const view = descriptionView(ctx);
+    const view = await readDescription(ctx);
+    if (!view.ok) {
+        return errorResult(view.error, view.hint);
+    }
     const base = view.text;
 
     // 读过全文的话顺手做一次变更检测：内容变了，模型对"末尾是什么"的认知就不成立了
@@ -1123,7 +1146,11 @@ async function handleDescReplace(params) {
         return errorResult(compiled.error, compiled.hint);
     }
 
-    const base = descriptionView(ctx).text;
+    const view = await readDescription(ctx);
+    if (!view.ok) {
+        return errorResult(view.error, view.hint);
+    }
+    const base = view.text;
 
     // 守卫：这个 pattern 预读过，或者这一轮读过全文。都没有就是闭着眼睛改字
     if (!canReplace(ctx, descPatternKey(compiled.flags, compiled.source), READ_KEY_DESC, base)) {
@@ -1183,7 +1210,11 @@ async function handleDescRewrite(params) {
         return gate;
     }
 
-    const base = descriptionView(ctx).text;
+    const view = await readDescription(ctx);
+    if (!view.ok) {
+        return errorResult(view.error, view.hint);
+    }
+    const base = view.text;
     const recorded = getReadHash(ctx, READ_KEY_DESC);
 
     if (!recorded) {
@@ -1232,6 +1263,8 @@ async function handleDescRewrite(params) {
  * 反过来的话，模型会因为参数错误而一直发现不了自己漏了读取。
  */
 function checkDescriptionWrite(ctx) {
+    const settings = ensureSettings(ctx);
+
     if (!isDescriptionModuleActive(ctx)) {
         return errorResult('MODULE_DISABLED', '角色描述模块已关闭，不能读写角色描述；现在只能记录世界书条目。');
     }
@@ -1239,6 +1272,11 @@ function checkDescriptionWrite(ctx) {
     const character = getActiveCharacter(ctx);
     if (!character) {
         return errorResult('NO_CHAR', '当前没有选中角色，请让用户先在角色列表里选一个。');
+    }
+
+    // worldbook 模式没有 patch，也就不存在"冲突待处理"这件事
+    if (isWorldbookDesc(settings)) {
+        return { ok: true, character, pending: null };
     }
 
     // 冲突是用户没做完的决定：这时的磁盘值和 patch.before 都不代表"现在的样子"，
@@ -1271,14 +1309,37 @@ function registerDescWrite(ctx, next, fullText) {
 }
 
 /**
- * 描述写入的落盘/暂存。
+ * 描述写入的收尾。两种存储模式各走一条，但都要做同一件事：
+ * 把读取登记推到新版本 —— 不这么做，同一次回复里的第二笔写入会被自己的
+ * STALE_READ 挡住（ADR-007）。
  *
- * 三处写入（追加、替换、重写）合成的都是"完整的新描述"，所以收尾完全一样：
- * 开 patch 就暂存，否则直写。写完之后把读取登记推到新版本 —— 不这么做，
- * 同一次回复里的第二笔写入会被自己的 STALE_READ 挡住（ADR-007）。
+ * card 模式：开 patch 就暂存，否则直写角色卡。
+ * worldbook 模式：直接写进世界书条目，没有暂存也没有 diff（ADR-042）。
+ *   不碰角色卡、不碰角色编辑框、不写 backups.desc —— 那条快照槽位属于 card 模式，
+ *   世界书的撤销走 backups.lore（面板「已写入 → 恢复写入前」）。
  */
 async function commitDescription(ctx, character, { next, fullText }) {
     const settings = ensureSettings(ctx);
+
+    if (isWorldbookDesc(settings)) {
+        const written = await writeDesc(ctx, next);
+        if (!written.ok) {
+            console.debug(`${LOG} 描述写入失败`, written.error);
+            return written;
+        }
+
+        registerDescWrite(ctx, next, fullText);
+        // writeDesc 里记了世界书快照（chat_metadata），得落一次盘
+        saveChat(ctx);
+
+        return {
+            ok: true,
+            staged: false,
+            applied: true,
+            note: `已写入世界书「${written.book}」的【角色描述】条目，最迟下一轮生效。`,
+        };
+    }
+
     const disk = diskDescription(ctx);
 
     if (settings.patchEnabled !== false) {

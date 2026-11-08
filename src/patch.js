@@ -1,9 +1,13 @@
 /**
  * patch.js · 角色描述的"磁盘 vs 暂存"
  *
+ * **只在 `descStorage = 'card'` 时生效。** 统一使用世界书的模式里没有 patch：
+ * 描述直接写成一条世界书条目，不在面板里做 diff（ADR-042）。所以本模块的
+ * 所有入口都由调用方按模式收口，不要在这里再判一次模式（会绕成循环 import）。
+ *
  * patch 只表达一份差异（ADR-006）：`before` 是磁盘上的原文，`after` 是模型想让它
  * 变成的样子。同一时刻最多一个。模型在 patch 存在时再写一次，是**往同一份差异上叠**，
- * 而不是再开一条——多条补丁会形成链式依赖，第 1 条被丢弃，第 2 条的基准就失效了。
+ * 而不是再开一条——多条会形成链式依赖，第 1 条被丢弃，第 2 条的基准就失效了。
  *
  * 状态机：
  *
@@ -26,7 +30,12 @@ import {
     saveChat,
     setReadHash,
 } from './store.js';
-import { applyDescriptionLocally, getActiveCharacter, saveDescription } from './targets.js';
+import {
+    applyDescriptionLocally,
+    cardDescription,
+    getActiveCharacter,
+    saveDescription,
+} from './targets.js';
 import { notifyPanel } from './events.js';
 import { fnv1a, normalizeEol } from './util.js';
 
@@ -51,15 +60,9 @@ export function getPatch(ctx) {
     return patch && typeof patch === 'object' && typeof patch.after === 'string' ? patch : null;
 }
 
-/** 磁盘上的描述全文（空角色返回空串） */
+/** 角色卡上的描述全文（空角色返回空串）。统一模式请用 desc.js 的 readDesc */
 export function diskDescription(ctx) {
-    const character = getActiveCharacter(ctx);
-    if (!character) {
-        return '';
-    }
-    return normalizeEol(typeof character.description === 'string'
-        ? character.description
-        : String(character.description ?? ''));
+    return cardDescription(ctx);
 }
 
 /**

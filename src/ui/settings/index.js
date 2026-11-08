@@ -30,6 +30,7 @@ import { bindAppearanceControls, syncAppearanceControls } from './appearance.js'
 import { bindBasicsControls, syncBasicsControls } from './basics.js';
 import { bindDiagnosticRefresh, refreshDiagnostics } from './diagnostics.js';
 import { bindPatchControls, syncPatchCheck, updatePatchHint } from './desc-patch.js';
+import { bindDescStorageControls, syncDescStorage, updateDescStorageHint } from './desc-storage.js';
 import { bindHelpButtons } from './help.js';
 import { bindLimitControls, syncLimitControls } from './limit-fields.js';
 import { bindPassiveControls, refreshPassive, syncPassiveControls } from './passive-trigger.js';
@@ -89,6 +90,7 @@ export async function initSettingsPanel(ctx = getContext()) {
 function bindSettingsEvents() {
     bindBasicsControls();
     bindWriteTargetControls();
+    bindDescStorageControls();
     bindPatchControls();
     bindPassiveControls();
     bindLimitControls();
@@ -114,6 +116,9 @@ function refreshSettingsControls(ctx, settings) {
     syncReadScope(settings);
     updateBookHint(ctx, settings);
     updateScopeHint(ctx, settings);
+
+    syncDescStorage(settings);
+    updateDescStorageHint(ctx, settings);
 
     syncPatchCheck(settings);
     updatePatchHint(ctx, settings);

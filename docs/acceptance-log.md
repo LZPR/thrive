@@ -242,3 +242,38 @@
 
 > 一处判断：没有做"记住展开到哪一组"。刷新后回到全收起，换来的是每次打开都是同一份确定的初始状态；
 > 折叠本身完全交给 ST 的 `.inline-drawer`（默认 `display:none` + `slideToggle`），插件不维护第二份开关状态。
+
+---
+
+## 附：Step 21 · 角色描述存进世界书条目（0.24.0，2026-11-08）
+
+| 套件 | 覆盖 | 结果 |
+| --- | --- | --- |
+| 纯逻辑（node 桩）· 存储 | 28 条：默认 `descStorage = 'card'`；书名净化删掉 `/ : * ?` 与首尾点号；统一模式下自动建同名书并写一条空常驻条目（`comment` / `constant` / `content` / `key` 四个字段）；空读；写入；用户手改 `constant = false` / `disable = true` 后写入会掰回；`lore_list` 目录里看不到它、`lore_read` / `lore_append` / `lore_add` / `lore_rewrite` 全部 `RESERVED_ENTRY`、`findLoreEntry` 默认跳过保留条目；切回 card 后条目 `disable = true` 但正文保留；面板快照（`getDescTargetSnapshot`）的 mode / book / title / 角色卡残留字数 | **28 / 28** |
+| 纯逻辑（node 桩）· 工具路由 | 24 条：统一模式下 `desc_read` 空 → 两次 `desc_append`（都基于最新正文）→ `desc_rewrite` → 预读后 `desc_replace`，四步都返回 `staged: false` 与「已写入世界书「张三」」的说明；`lore_list` 目录 0 条；切回 card 后 `desc_read` 读到卡片旧描述、`desc_append` 回到 `staged: true` | **24 / 24** |
+| 纯逻辑（node 桩）· 边界 | 8 条：角色改名后沿用绑定书里已有的旧条目、不新建书；全新角色完全没有书时 `desc_read` 返回 0 字而不是报错，首笔 `desc_append` 自动建书 | **8 / 8** |
+| 纯逻辑（node 桩）· 压缩面板 | 20 条：统一模式下描述长度与正文取自条目、`descPending` 恒为 false；同一本书里的保留条目不会在列表里再出现一次；`saveManualEdit` 写回条目（角色卡不动、常驻仍是 `true`）；内容与条目现版一致 → `NO_CHANGE`；换了角色 → `CHAR_CHANGED`；超硬上限 → `TOO_LONG`；切回 card 后正文来源换成角色卡 | **20 / 20** |
+| 设置页（真实页面，只读） | 走真实路径打开「扩展」抽屉 → 插件抽屉 → 基本设置组（ST 的抽屉不认合成 `click()`，得用 CDP 真鼠标事件）：`#thrive_desc_storage` 存在、可见、真实尺寸 343×27；两个选项取值 `card` / `worldbook` 与文案一致；选中项与 `extensionSettings.thrive.descStorage` 一致（当前 `card`）；标签「角色描述存储」+「?」说明块 403 字且提到 `【角色描述】`；提示行为空；「设为本角色的世界书」按钮按预期隐藏；控件落在分组内 | **通过**（截图 `.workbuddy/desc-storage-field.png`） |
+| 回归（node 桩） | `limits-check` 32 / 32 绿；`step11-check`、`passive-check`、`compact-check` 的输出与 HEAD（`2390537`）逐字一致（只差栈帧里的绝对路径），红项在 HEAD 上同样红 | **零回归** |
+
+脚本：`node .workbuddy/desc-tests/run.mjs`（按 ST 目录形状搭一次性沙箱，塞一个只导出 `getContext` 的假 `extensions.js`，
+再跑 `case-storage.mjs` / `case-tools.mjs` / `case-bind.mjs` / `case-compress.mjs`；跑完删沙箱，不写仓库里任何文件）。
+页面侧：`.workbuddy/desc-storage-check.py`（headless Chrome + CDP，只读：不切换模式、不改任何设置值）。
+
+> 四处判断：
+> 1. **切模式不清空角色卡上的旧描述。** 按需求「不迁移」，条目从空开始；插件只在设置页提示"角色卡上还有 N 字没被使用"，
+>    替用户删数据不在这次范围内。
+> 2. **`NO_DESC_BOOK` 对「读」不算错误。** 没有书和书里没有内容是同一件事；否则新建角色的第一笔 `desc_append`
+>    会永远卡在"先创建书"上，得让用户先去世界书面板点一次。
+> 3. **压缩面板保存时比的是条目里的现版，不是列表里那份快照。** 面板可能开了很久，条目中途被模型或世界书编辑器改过；
+>    拿快照比会漏判"其实没改"，白白再写一遍。这条是写 `case-compress` 时比出来的：第一版按 `item.text` 判，
+>    连存两次同样内容会写两遍。
+> 4. **切换动作本身还没点过。** 页面侧只核对了控件的渲染与当前取值；真正切一次会写设置、建一本世界书、
+>    停用一条条目，会在用户的真实数据里留下痕迹，所以没放进自动脚本。下一步该在测试角色上手动过一遍，
+>    再把它记成通过。
+
+> 一笔欠账（不是本次引入）：借这次对照跑回归，量出 `step11-check`（35 ✓ / 16 ✗）、`passive-check`（27 / 28）、
+> `compact-check`（14 / 17）在 HEAD 上就已经红。原因是 Step 17 把界面拆进 `src/ui/`、Step 18 把学习块拆成三段、
+> 压缩面板换了入口，检查脚本没跟着改——`targets.readLore` / `prompt.composeBlockText` 这类函数名已改，
+> `#thrive_compact_prompt` 这类 id 已挪走。三段检查现在只是在报"找不到旧接口"，已经失去守护作用，
+> 应在下一步先把它们对齐到新结构，再继续往下加功能。

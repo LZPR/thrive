@@ -12,6 +12,7 @@
 
 import { getContext } from '../../../../../extensions.js';
 import { getCompressSnapshot } from '../compress.js';
+import { getDescTargetSnapshot, isWorldbookDesc } from '../desc.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
@@ -114,9 +115,19 @@ export function refreshPanel(ctx = getContext()) {
         return;
     }
 
-    const patch = getPatch(ctx);
+    const settings = ensureSettings(ctx);
+
+    /*
+     * 统一使用世界书之后，这一段换了语义：描述不在角色卡上，也就没有"暂存 vs 磁盘"
+     * 可对比。所以 patch 整段不参与渲染，改成一句"存在哪本书的哪条条目"（ADR-042）。
+     */
+    const worldbookDesc = isWorldbookDesc(settings);
+    const descTarget = worldbookDesc ? getDescTargetSnapshot(ctx) : null;
+
+    const patch = worldbookDesc ? null : getPatch(ctx);
     const backups = getLoreBackups(ctx);
-    const descBackup = getDescBackup(ctx);
+    // 描述上一版（backups.desc）是 card 模式的槽位；统一模式的撤销走世界书快照
+    const descBackup = worldbookDesc ? null : getDescBackup(ctx);
 
     /*
      * "已写入"但角色卡上的描述已经不是那份内容了 —— 实测最常见的原因是：
@@ -124,7 +135,8 @@ export function refreshPanel(ctx = getContext()) {
      * 这时候面板如果继续说"已写入"，就会出现"面板说写了、编辑器里什么都没有"。
      * 所以单独算一个状态：内容还在聊天记录里（patch.after），给一个「重写角色卡」的出口。
      */
-    const drift = Boolean(patch)
+    const drift = !worldbookDesc
+        && Boolean(patch)
         && patch.status === PATCH_STATUS.APPLIED
         && Boolean(getActiveCharacter(ctx))
         && diskDescription(ctx) !== patch.after;
@@ -134,7 +146,8 @@ export function refreshPanel(ctx = getContext()) {
      * 用户改过、或者写入那一刻正在框里打字，同步就会被跳过（不能盖掉正在敲的字）。
      * 这时给一个「填入编辑框」的出口，省得为了让它显示新内容还得先关掉面板。
      */
-    const editorStale = Boolean(patch)
+    const editorStale = !worldbookDesc
+        && Boolean(patch)
         && patch.status === PATCH_STATUS.APPLIED
         && isDescriptionEditorStale(ctx, patch.after);
 
@@ -163,7 +176,6 @@ export function refreshPanel(ctx = getContext()) {
         return;
     }
 
-    const settings = ensureSettings(ctx);
     const mode = readModeView(ctx, settings);
     const compress = getCompressSnapshot();
 
@@ -182,6 +194,7 @@ export function refreshPanel(ctx = getContext()) {
         mode.interval,
         mode.since,
         mode.keywordCount,
+        descTarget ? [descTarget.mode, descTarget.book, descTarget.active, descTarget.cardChars] : null,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
         descBackup ? descBackup.at : null,
@@ -196,7 +209,7 @@ export function refreshPanel(ctx = getContext()) {
     }
     panelSignature = signature;
 
-    panel.innerHTML = renderPanel({ mode, patch, backups, descBackup, drift, editorStale, compress });
+    panel.innerHTML = renderPanel({ mode, patch, descTarget, backups, descBackup, drift, editorStale, compress });
     // 内容换了高度可能也变了，重新摆一次（拖动后的位置在这里生效）
     applyPanelLayout(panel);
     updatePatchHint(ctx, settings);
@@ -362,7 +375,7 @@ function isDescriptionEditorStale(ctx, applied) {
     return normalizeEol(textarea.value) !== normalizeEol(applied);
 }
 
-function renderPanel({ mode, patch, backups, descBackup, drift = false, editorStale = false, compress = getCompressSnapshot() }) {
+function renderPanel({ mode, patch, descTarget, backups, descBackup, drift = false, editorStale = false, compress = getCompressSnapshot() }) {
     const pending = isUnresolved(patch);
     const counts = [];
     if (pending) {
@@ -403,6 +416,7 @@ function renderPanel({ mode, patch, backups, descBackup, drift = false, editorSt
 
     const body = [
         renderModeSection(mode),
+        renderDescTargetSection(descTarget),
         renderPatchSection(patch, drift, editorStale),
         renderHistorySection(backups, descBackup, historyExpanded),
     ].filter(Boolean).join('');
@@ -501,6 +515,46 @@ function renderModeRow({ action, variant, title, hint, on, usable }) {
                 aria-checked="${on ? 'true' : 'false'}"
                 data-thrive-action="${action}">${on ? '开' : '关'}</span>
         </div>`;
+}
+
+/**
+ * 统一模式的说明段：描述存在哪本书的哪条条目、有没有被扫描到。
+ *
+ * 这里刻意不显示正文、也不做 diff —— 新模式明确不再提供"旧人物描述的 diff"（ADR-042）。
+ * 要改内容就去世界书编辑器或压缩面板；面板只负责回答"它现在在哪儿、生不生效"。
+ *
+ * @param {{book: string, title: string, active: boolean|null, cardChars: number}|null} descTarget
+ */
+function renderDescTargetSection(descTarget) {
+    if (!descTarget) {
+        return '';
+    }
+
+    const { book, title, active, cardChars } = descTarget;
+    const inactive = active === false;
+
+    const notice = inactive
+        ? `「${book}」当前没有被扫描到：这条常驻条目不会进入上下文。`
+            + '到「世界书」面板勾选这本书，或在扩展设置里把它设为本角色的世界书。'
+        : '常驻条目，每一轮都会注入。要直接改内容，去世界书编辑器或压缩面板。';
+
+    const cardWarn = cardChars > 0
+        ? `<div class="thrive-panel__notice thrive-panel__notice--warn">角色卡上还留着 ${cardChars} 字描述，`
+            + 'ST 仍会把它注入，模型会看到两份。要单一来源请到角色卡里清空（插件不会自动改）。</div>'
+        : '';
+
+    return `
+        <section class="thrive-panel__section">
+            <div class="thrive-panel__head">
+                <span class="thrive-panel__section-title">角色描述 · 世界书条目</span>
+                <span class="thrive-panel__meta">${escapeHtml(book || '（没有书名）')}</span>
+            </div>
+            <div class="thrive-panel__notice${inactive ? ' thrive-panel__notice--warn' : ''}">${escapeHtml(notice)}</div>
+            ${cardWarn}
+            <div class="thrive-panel__actions">
+                <small class="thrive-hint">存在「${escapeHtml(book)}」的 ${escapeHtml(title)} 里。这个模式不做暂存，也没有 diff。</small>
+            </div>
+        </section>`;
 }
 
 /**

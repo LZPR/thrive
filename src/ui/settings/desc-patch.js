@@ -7,11 +7,12 @@
  */
 
 import { getContext } from '../../../../../../extensions.js';
+import { isWorldbookDesc } from '../../desc.js';
 import { getPatch, isUnresolved } from '../../patch.js';
 import { ensureSettings } from '../../store.js';
 import { setPanelOpen } from '../refresh.js';
 import { PANEL_ID, toast } from '../shared.js';
-import { byId, paintHint, syncCheckbox } from './common.js';
+import { byId, paintHint } from './common.js';
 
 export function bindPatchControls() {
     const toggle = byId('thrive_patch_enabled');
@@ -46,7 +47,18 @@ export function bindPatchControls() {
 
 /** @param {object} settings */
 export function syncPatchCheck(settings) {
-    syncCheckbox('thrive_patch_enabled', settings.patchEnabled);
+    const el = byId('thrive_patch_enabled');
+    if (!el) {
+        return;
+    }
+
+    // 统一模式没有 patch 这回事：置灰而不是隐藏，用户能看出"这个开关还在，只是不管用了"
+    const unified = isWorldbookDesc(settings);
+    el.disabled = unified;
+    const wanted = unified ? false : Boolean(settings.patchEnabled);
+    if (el.checked !== wanted) {
+        el.checked = wanted;
+    }
 }
 
 /**
@@ -54,11 +66,17 @@ export function syncPatchCheck(settings) {
  *
  * 默认（开着、没有待处理）不写任何字：checkbox 勾着就是"会暂存"，再复述一遍只是噪音。
  * 只有两种需要用户动手的情况才出声——关掉了，或者有一份 diff 等着处理。
+ * 统一模式下这一段不适用，换成一句"为什么不管用"。
  *
  * @param {object} ctx
  * @param {object} settings
  */
 export function updatePatchHint(ctx, settings) {
+    if (isWorldbookDesc(settings)) {
+        paintHint('thrive_patch_hint', '统一模式下不做暂存：描述直接写进世界书条目，也不提供 diff。', false);
+        return;
+    }
+
     if (settings.patchEnabled === false) {
         paintHint('thrive_patch_hint', '已关闭：改动直接落盘，只能靠上一版快照回退。', true);
         return;

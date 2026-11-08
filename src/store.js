@@ -66,6 +66,15 @@ export const DEFAULT_SETTINGS = Object.freeze({
     /** 角色描述模块开关。Step 07 会把模块权限补齐 */
     moduleDescription: true,
     /**
+     * 角色描述存在哪（ADR-042）：
+     *   'card'      角色卡的 description 字段（老机制，默认）
+     *   'worldbook' 与角色同名那本世界书里的 `【角色描述】` 常驻条目
+     *
+     * 存字符串而不是布尔：以后要加第三处落点时不用再动一遍设置键。
+     * 取值归一在 ensureSettings 里做 —— 手改 settings.json 写成别的值也能被纠正。
+     */
+    descStorage: 'card',
+    /**
      * 描述改动是否先暂存成 patch。
      * 关掉之后三个描述写入工具都回到直写，返回里的 staged 换成 applied。
      */
@@ -225,6 +234,12 @@ export function ensureSettings(ctx) {
             settings[key] = fallback;
             dirty = true;
         }
+    }
+
+    // 枚举值归一：类型对了也可能是个拼错的字符串（比如手改成 'worldBook'）
+    if (settings.descStorage !== 'card' && settings.descStorage !== 'worldbook') {
+        settings.descStorage = 'card';
+        dirty = true;
     }
 
     if (dirty) {

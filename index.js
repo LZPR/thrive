@@ -21,6 +21,8 @@
  *  15. 压缩改成手动：软提醒不再进工具返回，超长内容由独立的压缩面板处理（src/compress.js）
  *  16. 设置页收敛：解释收进「?」、可见小字只报状态、基本设置合并两组，
  *      并按一组一个文件拆进 src/ui/settings/（ADR-041）
+ *  17. 角色描述可选存进世界书：与角色同名那本书里的一条常驻条目，desc_* 工具照旧，
+ *      lore_* 工具看不到它也改不了它（src/desc.js，ADR-042）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -70,7 +72,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.23.1 · 设置页分组收敛，「?」收起细节说明`);
+    console.log(`${LOG} 启动 v0.24.0 · 角色描述可选存进世界书条目`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
