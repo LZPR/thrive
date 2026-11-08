@@ -101,10 +101,9 @@ ST 左侧「AI 响应配置」里必须勾上 **启用函数调用**（Enable fu
 
 | 文件 | 内容 |
 |---|---|
-| [`docs/spec.md`](docs/spec.md) | 功能规格：范围与不做的事、读写一致性、权限矩阵、用户看到什么 |
-| [`docs/adr.md`](docs/adr.md) | 架构决策记录：为什么这样设计，踩过哪些坑 |
-| [`docs/user_stories.md`](docs/user_stories.md) | 用户故事与验收标准 |
-| [`docs/acceptance-log.md`](docs/acceptance-log.md) | 验收记录与偏差判定 |
+| [`docs/spec.md`](docs/spec.md) | 功能规格：范围与不做的事、读写一致性、权限边界、用户看到什么 |
+| [`docs/adr.md`](docs/adr.md) | 架构决策记录：只留方向性决策与被否决的路线 |
+| [`docs/user_stories.md`](docs/user_stories.md) | 用户故事：作为…我想…以便… |
 
 **代码即文档**：默认提示词、设置项与默认值、工具参数与返回字段、错误码、写入上限、条目模板字段——这些只在源码里存在一份，文档不抄第二遍（抄了必漂）。各模块职责写在文件头注释里，从 `index.js` 进，或直接看 `src/`：
 
