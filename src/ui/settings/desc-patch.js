@@ -2,7 +2,10 @@
  * ui/settings/desc-patch.js · 「描述改动先暂存」这个开关
  *
  * 设置页里剩下的只是"要不要暂存"这个跨对话一致的选择。暂存出来的那一份 diff、
- * 有没有待处理，都只属于当前对话——那些在浮动面板里看，这一页不跟着对话变（ADR-043）。
+ * 有没有待处理，都只属于当前对话——那些在浮动面板里看（ADR-043）。
+ *
+ * 但这个开关在统一描述模式下不管用，而"是不是统一模式"是对话级的（ADR-044），
+ * 所以它的置灰状态会随对话变，回填时要现取 ctx。
  */
 
 import { getContext } from '../../../../../../extensions.js';
@@ -36,7 +39,7 @@ export function bindPatchControls() {
 
         settings.patchEnabled = enabled;
         ctx.saveSettingsDebounced?.();
-        updatePatchHint(settings);
+        updatePatchHint(ctx);
 
         if (!enabled) {
             toast('之后的描述改动会直接写入角色卡');
@@ -44,15 +47,21 @@ export function bindPatchControls() {
     });
 }
 
-/** @param {object} settings */
-export function syncPatchCheck(settings) {
+/**
+ * 回填「描述改动先暂存」。
+ *
+ * 带着 ctx：统一模式是对话级的（ADR-044），换对话之后这个开关的可用状态会变。
+ * @param {object} ctx
+ * @param {object} settings
+ */
+export function syncPatchCheck(ctx, settings) {
     const el = byId('thrive_patch_enabled');
     if (!el) {
         return;
     }
 
     // 统一模式没有 patch 这回事：置灰而不是隐藏，用户能看出"这个开关还在，只是不管用了"
-    const unified = isWorldbookDesc(settings);
+    const unified = isWorldbookDesc(ctx);
     el.disabled = unified;
     const wanted = unified ? false : Boolean(settings.patchEnabled);
     if (el.checked !== wanted) {
@@ -64,13 +73,13 @@ export function syncPatchCheck(settings) {
  * 暂存状态那一行。
  *
  * 默认（开着、没有待处理）不写任何字：checkbox 勾着就是"会暂存"，再复述一遍只是噪音。
- * 只有两种跨对话一致的情况才出声——关掉了，或者当前是统一模式（这个开关不管用）。
- * "有一份待处理改动"属于当前对话，那由浮动面板说，这一页不跟着对话变。
+ * 只有两种情况才出声——「先暂存」关掉了（全局），或者这一场对话是统一模式（这个开关不管用）。
+ * "有一份待处理改动"属于当前对话，那由浮动面板说。
  *
- * @param {object} settings
+ * @param {object} ctx
  */
-export function updatePatchHint(settings) {
-    if (isWorldbookDesc(settings)) {
+export function updatePatchHint(ctx) {
+    if (isWorldbookDesc(ctx)) {
         paintHint('thrive_patch_hint', '统一模式下不做暂存：描述直接写进世界书条目，也不提供 diff。', false);
         return;
     }

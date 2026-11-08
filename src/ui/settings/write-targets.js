@@ -5,13 +5,16 @@
  * 角色绑定的其他书。三者互相牵连（关掉世界书 = 可写书失去意义），所以放在一起，
  * 提示也一起算——分开写会出现"模块关了、可写书下面还写着一切正常"。
  *
+ * 作用域是混的：模块开关与读范围跨对话一致，**可写书**按对话（ADR-044）——
+ * 换个对话通常就换了个角色，可写书跟着变才是对的。所以这个下拉在切对话后要重铺。
+ *
  * 模板里那个「?」负责解释规则；这里的小字只报状态，一切正常时不写任何字。
  */
 
 import { getContext } from '../../../../../../extensions.js';
 import { refreshUI } from '../refresh.js';
 import { LOG, askConfirm } from '../shared.js';
-import { ensureSettings, getState, saveChat } from '../../store.js';
+import { ensureSettings, getState, isWorldbookDesc, saveChat, setWritableBookSetting } from '../../store.js';
 import { getActiveCharacter, getWritableBook, isBookScanned } from '../../targets.js';
 import { byId, paintHint, syncCheckbox } from './common.js';
 
@@ -51,14 +54,18 @@ export function syncWriteTargetControls(settings) {
 export function updateModuleHints(ctx, settings) {
     const worldbook = settings.moduleWorldbook !== false;
     const description = settings.moduleDescription !== false;
-    const book = getWritableBook(settings);
+    const book = getWritableBook(ctx);
+    // 统一模式里"没有书"只有一个原因：角色没有名字，推导不出同名书
+    const noBook = isWorldbookDesc(ctx)
+        ? '当前角色没有名字，取不到同名书，世界书工具不会注册。'
+        : '还没选可写书，世界书工具不会注册。';
 
     paintHint(
         'thrive_module_worldbook_hint',
         !worldbook
             ? '已关闭：模型看不到世界书工具。'
             : !book
-                ? '还没选可写书，世界书工具不会注册。'
+                ? noBook
                 : '',
         !worldbook || !book,
     );
@@ -102,8 +109,9 @@ export async function refreshBookOptions(ctx = getContext()) {
         }
     }
 
-    const settings = ensureSettings(ctx);
-    const current = getWritableBook(settings);
+    const forced = isWorldbookDesc(ctx);
+    // 统一模式下 getWritableBook 直接给角色同名书，这里不用另算一遍
+    const current = getWritableBook(ctx);
     const annotations = describeBookAnnotations(getActiveCharacter(ctx));
 
     select.innerHTML = '<option value="">未选择</option>';
@@ -121,11 +129,18 @@ export async function refreshBookOptions(ctx = getContext()) {
     if (current && !names.includes(current)) {
         const option = document.createElement('option');
         option.value = current;
-        option.textContent = `${current}（已不存在）`;
+        option.textContent = forced ? `${current}（还没建）` : `${current}（已不存在）`;
         select.appendChild(option);
     }
 
     select.value = current;
+
+    /*
+     * 统一描述模式把可写书钉在角色同名书上（ADR-044）：置灰而不是隐藏——
+     * 用户仍然该看见"现在写到哪本书"，只是这件事此刻不归他选。
+     */
+    select.disabled = forced;
+    select.title = forced ? '「角色描述存储 = 世界书条目」时固定为角色同名书' : '';
 }
 
 /**
@@ -160,9 +175,15 @@ function bindLoreControls() {
     if (bookSelect) {
         bookSelect.addEventListener('change', async function () {
             const ctx = getContext();
-            const settings = ensureSettings(ctx);
             const next = String(this.value ?? '');
-            const previous = getWritableBook(settings);
+
+            // 统一模式下这个下拉是置灰的，change 理论上不会来；真来了就当没发生
+            if (isWorldbookDesc(ctx)) {
+                this.value = getWritableBook(ctx);
+                return;
+            }
+
+            const previous = getWritableBook(ctx);
 
             if (previous && next && previous !== next) {
                 const confirmed = await askConfirm('换书之后，新书里没有旧书的内容，角色不会记得它们。确定切换吗？');
@@ -175,9 +196,9 @@ function bindLoreControls() {
                 saveChat(ctx);
             }
 
-            settings.writableBook = next;
-            ctx.saveSettingsDebounced?.();
-            updateBookHint(ctx, settings);
+            // 可写书按对话保存（ADR-044）：这里只改这一场对话
+            setWritableBookSetting(ctx, next);
+            updateBookHint(ctx);
         });
     }
 
@@ -193,8 +214,21 @@ function bindLoreControls() {
     }
 }
 
-function updateBookHint(ctx, settings) {
-    const book = getWritableBook(settings);
+function updateBookHint(ctx) {
+    const book = getWritableBook(ctx);
+
+    if (isWorldbookDesc(ctx)) {
+        // 钉死的值 + 来源说明。这里不比"书没激活"那条更值得报警：描述本来就要落在
+        // 角色那本书里，书还没建是第一次写入时才解决的事
+        paintHint(
+            'thrive_book_hint',
+            book
+                ? `「角色描述存储 = 世界书条目」，可写书固定为角色同名书「${book}」。`
+                : '「角色描述存储 = 世界书条目」，但当前角色没有名字，取不到同名书。',
+            !book,
+        );
+        return;
+    }
 
     if (!book) {
         // 没选书这件事，上面「世界书」那一行的提示已经说过了，不重复第二遍

@@ -3,7 +3,8 @@
  *
  * 面板只装**作用于当前对话**的东西，全局设置一律留在扩展设置页：
  *   - 模式：主动 / 被动两块，整块可点（不再有单独的「开 / 关」按钮）
- *   - 更多设置（默认收起）：被动判据与「现在触发一次」——它们的效果只落在这一场对话
+ *   - 更多设置（默认收起）：被动判据与「现在触发一次」。判据本身是全局的（同一套判据
+ *     到处都该一样），但"这场对话要不要被动学"与"现在触发一次"只落在这一场
  *   - 角色描述落点、待确认改动、写入记录
  *
  * 另外三件事：
@@ -46,14 +47,15 @@ import {
     getDescBackup,
     getLoreBackups,
     getPending,
-    getState,
     hasAnyModule,
     isChatAvailable,
     isEnabled,
+    isPassiveEnabled,
     loreReadKey,
     markLoreBackupRestored,
     saveChat,
     setEnabled,
+    setPassiveEnabled,
 } from '../store.js';
 import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '../targets.js';
 import { escapeHtml, normalizeEol } from '../util.js';
@@ -144,7 +146,7 @@ export function refreshPanel(ctx = getContext()) {
      * 统一使用世界书之后，这一段换了语义：描述不在角色卡上，也就没有"暂存 vs 磁盘"
      * 可对比。所以 patch 整段不参与渲染，改成一句"存在哪本书的哪条条目"（ADR-042）。
      */
-    const worldbookDesc = isWorldbookDesc(settings);
+    const worldbookDesc = isWorldbookDesc(ctx);
     const descTarget = worldbookDesc ? getDescTargetSnapshot(ctx) : null;
 
     const patch = worldbookDesc ? null : getPatch(ctx);
@@ -337,7 +339,7 @@ function readModeView(ctx, settings) {
 
     return {
         active: isEnabled(ctx),
-        passive: settings.passiveEnabled === true,
+        passive: isPassiveEnabled(ctx),
         pending: getPending(ctx),
         // 三种"不可用"共用一档：没有可写模块、没有对话、环境不支持工具调用
         usable: available && !none && diag.ok,
@@ -386,10 +388,10 @@ function toggleActive(ctx, settings) {
 }
 
 /**
- * 被动学习的总开关（全局设置，不按对话保存）。
+ * 被动学习的开关（对话级，ADR-044）。判据仍是全局的，开关不是。
  *
- * 关掉时把已经挂上的待学习一并丢掉：它本来就是被动学习攒出来的，
- * 留着会出现"被动显示关闭、徽章却在闪待学"这种自相矛盾的状态。
+ * 关掉时把已经挂上的待学习一并丢掉（在 setPassiveEnabled 里做）：那个记号本来就是
+ * 被动机制攒出来的，留着会出现"被动显示关闭、徽章却在闪待学"这种自相矛盾的状态。
  *
  * 切完不弹 toast：被动那块自己的第二行就写着"还差几条 / 没有判据"，状态已经在眼前。
  */
@@ -398,14 +400,7 @@ function togglePassive(ctx, settings) {
         return;
     }
 
-    const next = settings.passiveEnabled !== true;
-    settings.passiveEnabled = next;
-    ctx.saveSettingsDebounced?.();
-
-    if (!next) {
-        getState(ctx).passive.pending = null;
-        saveChat(ctx);
-    }
+    setPassiveEnabled(ctx, !isPassiveEnabled(ctx));
 
     syncFromContext(ctx);
     refreshUI(ctx);
@@ -533,7 +528,7 @@ function renderModeSection(mode) {
      * 只写"全局"等于没说——用户以为开了就会自己学。
      */
     const passiveHint = !passive
-        ? '全局'
+        ? '本对话'
         : interval > 0
             ? `还差 ${remaining} 条`
             : keywordCount > 0
@@ -637,7 +632,7 @@ function renderMoreSection({ mode, settings, expanded }) {
                 spellcheck="false" placeholder="关键词，逗号分隔"
                 data-thrive-field="keywords">${escapeHtml(settings.passiveKeywords ?? '')}</textarea>
             <div class="thrive-panel__actions">
-                <small class="thrive-hint">0 条 = 不用条数判据；命中后只借当前对话一轮。</small>
+                <small class="thrive-hint">判据对所有对话一致；0 条 = 不用条数判据，命中后只借当前对话一轮。</small>
                 <div class="menu_button thrive-panel__button" data-thrive-action="trigger-once"
                     title="不等判据，立刻给下一轮挂一次学习，用来验证判据配得对不对">现在触发一次</div>
             </div>
@@ -649,7 +644,7 @@ function renderMoreSection({ mode, settings, expanded }) {
             <div class="thrive-panel__head thrive-panel__fold${expanded ? ' is-open' : ''}"
                 role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}"
                 data-thrive-action="toggle-more"
-                title="展开 / 收起被动学习判据（只影响当前对话的触发）">
+                title="展开 / 收起被动学习判据（判据对所有对话一致，开关只作用于本对话）">
                 <span class="thrive-panel__section-title">
                     <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>更多设置
                 </span>

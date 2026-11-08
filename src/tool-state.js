@@ -72,7 +72,7 @@ export function isToolExposed(ctx, name) {
         return settings.moduleDescription !== false;
     }
 
-    return settings.moduleWorldbook !== false && Boolean(getWritableBook(settings));
+    return settings.moduleWorldbook !== false && Boolean(getWritableBook(ctx));
 }
 
 /**
@@ -101,7 +101,7 @@ export function toolUnavailableReason(ctx, name) {
         return 'module-off';
     }
 
-    return getWritableBook(settings) ? '' : 'no-book';
+    return getWritableBook(ctx) ? '' : 'no-book';
 }
 
 /** 这个工具此刻可用吗 */
@@ -132,7 +132,7 @@ export function isToolRegistered(ctx, name) {
 function notRegisteredReason(ctx, name) {
     const settings = ensureSettings(ctx);
 
-    if (toolGroup(name) === 'lore' && settings.moduleWorldbook !== false && !getWritableBook(settings)) {
+    if (toolGroup(name) === 'lore' && settings.moduleWorldbook !== false && !getWritableBook(ctx)) {
         return 'no-book';
     }
 

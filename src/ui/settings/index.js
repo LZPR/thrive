@@ -7,8 +7,15 @@
  *   2. 把各组的绑定函数叫一遍（bindSettingsEvents）
  *   3. 把状态回填到各组的控件上（refreshSettingsControls），并登记进刷新编排
  *
- * 这一页**只放跨对话一致的设置**：按对话生效的（学习模式开关、被动判据、待确认改动、
- * 写入记录）都在浮动面板里，所以切对话不该让这一页有任何变化（ADR-043）。
+ * 这一页放的多数是跨对话一致的设置，但有两处例外，它们**按对话**生效（ADR-044）：
+ *   - 可写书（write-targets.js）
+ *   - 角色描述存储：角色卡 / 世界书条目（desc-storage.js）
+ *
+ * 被动学习的开关与判据都不在这一页：判据是全局的、开关是对话级的，两者都在浮动面板的
+ * 「更多设置」里（这一页只有「新对话默认开启被动学习」这一个全局初值）。
+ *
+ * 按对话生效意味着切对话之后它们要重新回填，所以这两个控件都不吃传进来的 settings，
+ * 而是自己现取 ctx。刷新编排每次都重跑 refreshSettingsControls，天然覆盖这一点。
  *
  *   common.js       取元素、回填勾选框、状态小字、防抖落盘
  *   help.js         标签旁那个「?」的展开 / 收起
@@ -115,14 +122,14 @@ function refreshSettingsControls(ctx, settings) {
     syncWriteTargetControls(settings);
     updateModuleHints(ctx, settings);
     syncReadScope(settings);
-    updateBookHint(ctx, settings);
+    updateBookHint(ctx);
     updateScopeHint(ctx, settings);
 
-    syncDescStorage(settings);
-    updateDescStorageHint(ctx, settings);
+    syncDescStorage(ctx);
+    updateDescStorageHint(ctx);
 
-    syncPatchCheck(settings);
-    updatePatchHint(settings);
+    syncPatchCheck(ctx, settings);
+    updatePatchHint(ctx);
 
     syncLimitControls(settings);
     syncAppearanceControls(settings);

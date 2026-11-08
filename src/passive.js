@@ -27,6 +27,7 @@ import {
     getPending,
     isChatAvailable,
     isEnabled,
+    isPassiveEnabled,
     PASSIVE_BASELINE_NONE,
     setPending,
 } from './store.js';
@@ -196,7 +197,7 @@ export function evaluatePassive(ctx, stage = 'assistant') {
     result.since = Math.max(0, total - passive.baseline);
     result.remaining = interval > 0 ? Math.max(0, interval - result.since) : 0;
 
-    if (settings.passiveEnabled !== true) {
+    if (!isPassiveEnabled(ctx)) {
         result.reason = 'DISABLED';
         return result;
     }

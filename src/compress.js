@@ -125,12 +125,12 @@ export async function scanCompressTargets(ctx, settings) {
         descHard: limits.hardLimitDesc,
     };
 
-    result.descPending = isWorldbookDesc(settings) ? false : isUnresolved(getPatch(ctx));
+    result.descPending = isWorldbookDesc(ctx) ? false : isUnresolved(getPatch(ctx));
 
     if (settings.moduleDescription !== false) {
         const character = getActiveCharacter(ctx);
         // 统一模式下正文在条目里（要 load 世界书，异步）；card 模式只看盘上那份
-        const text = isWorldbookDesc(settings)
+        const text = isWorldbookDesc(ctx)
             ? (await readDesc(ctx)).text
             : diskDescription(ctx);
         if (character && text.length >= limits.softLimitDesc) {
@@ -158,7 +158,7 @@ export async function scanCompressTargets(ctx, settings) {
         return result;
     }
 
-    const book = getWritableBook(settings);
+    const book = getWritableBook(ctx);
     result.book = book;
 
     if (!book) {
@@ -166,7 +166,7 @@ export async function scanCompressTargets(ctx, settings) {
         return result;
     }
 
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         result.error = loaded.hint ?? `读不到可写书「${book}」。`;
         return result;
@@ -340,7 +340,7 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
      * 先确认可写书没被换掉：面板里那一行说的是「哪本书里的哪条」，
      * 而写入永远落在"当前可写书"。换过书还照写，就会拿 A 书的正文去覆盖 B 书的同 uid 条目。
      */
-    const book = getWritableBook(settings);
+    const book = getWritableBook(ctx);
     if (!book || (item.book && book !== item.book)) {
         return {
             ok: false,
@@ -349,7 +349,7 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
         };
     }
 
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return loaded;
     }
@@ -417,7 +417,7 @@ async function writeDescription(ctx, item, text) {
         };
     }
 
-    if (isWorldbookDesc(settings)) {
+    if (isWorldbookDesc(ctx)) {
         /*
          * 比的是条目里**现在**的正文，不是列表面板那份快照（item.text）。
          * 面板可能已经开了很久，条目在中途被模型或世界书编辑器改过；

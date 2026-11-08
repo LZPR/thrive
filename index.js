@@ -25,21 +25,24 @@
  *      lore_* 工具看不到它也改不了它（src/desc.js，ADR-042）
  *  18. 界面按作用域分区：对话级的（两个开关、被动判据、触发一次、待确认、记录）全在浮动面板，
  *      设置页只留跨对话一致的设置，切对话不再跟着变（ADR-043）
+ *  19. 作用域补齐到存储层：可写书、角色描述存储、被动开关改成按对话记；统一描述模式下
+ *      可写书固定为角色同名书；判据仍是全局（ADR-044）
  */
 
 import { getContext } from '../../../extensions.js';
 import { requestCompressScan } from './src/compress.js';
 import { syncFromContext } from './src/prompt.js';
 import {
-    clearPending,
     ensureSettings,
     isChatAvailable,
     isEnabled,
+    isPassiveEnabled,
     isPending,
     markPendingUsed,
     resetReads,
     saveChat,
     setEnabled,
+    setPassiveEnabled,
 } from './src/store.js';
 import { armManual, consumePending, evaluatePassive } from './src/passive.js';
 import { registerTools } from './src/tools.js';
@@ -74,7 +77,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.25.0 · 对话级设置搬进浮动面板`);
+    console.log(`${LOG} 启动 v0.26.0 · 可写书与描述存储改为按对话`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -213,8 +216,8 @@ function runThriveCommand(raw) {
         }
 
         /*
-         * 被动学习是全局开关（判据在浮动面板的「更多设置」里配），所以这里不区分对话；
-         * 但已经挂上的待学习是对话级的，关掉时一并清掉。
+         * 被动学习的开关是对话级的（ADR-044），判据在浮动面板的「更多设置」里配；
+         * 关掉时一并清掉已经挂上的待学习。
          */
         case 'passive': {
             if (!isChatAvailable(ctx)) {
@@ -226,20 +229,15 @@ function runThriveCommand(raw) {
                 return report(`工具调用不可用：${formatDiagnosis(diag)}`);
             }
 
-            settings.passiveEnabled = settings.passiveEnabled !== true;
-            ctx.saveSettingsDebounced?.();
-
-            if (!settings.passiveEnabled && clearPending(ctx)) {
-                saveChat(ctx);
-            }
+            setPassiveEnabled(ctx, !isPassiveEnabled(ctx));
 
             syncFromContext(ctx);
             refreshUI(ctx);
 
             const hasRule = Number(settings.passiveInterval) > 0 || String(settings.passiveKeywords).trim();
-            return report(settings.passiveEnabled
+            return report(isPassiveEnabled(ctx)
                 ? (hasRule
-                    ? '被动学习已开启（命中判据后下一轮临时学一次）'
+                    ? '主动 / 被动学习都已开启（命中判据后下一轮临时学一次）'
                     : '被动学习已开启，但还没配间隔或关键词，不会触发')
                 : '被动学习已关闭（主动开关不受影响）');
         }

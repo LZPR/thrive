@@ -9,6 +9,7 @@
  * 切换聊天时 ST 会整体替换 chat_metadata 对象，旧 ctx 会指向上一个对话。
  */
 
+import { DESC_STORAGE } from './desc-entry.js';
 import { notifyPanel } from './events.js';
 import { LIMIT_DEFAULTS, readLimit } from './limits.js';
 import { HEAD_PROMPT_ORDER } from './prompt-order.js';
@@ -26,13 +27,15 @@ export const DEFAULT_SETTINGS = Object.freeze({
     /** 输入框旁是否显示状态徽章 */
     showBadge: true,
     /**
-     * 被动学习总开关。与"主动"（对话级 enabled）是两套独立的开关，可以同时开：
-     * 主动开着时被动不再触发，但配置本身保留，关掉主动就立刻恢复。
+     * 新对话默认是否开启被动学习。
+     *
+     * **被动学习的开关是对话级的**（`state.passive.enabled`），这里只是新对话的初值，
+     * 与 `enabledByDefault` 是同一套约定：默认值全局一份，开没开按对话各记各的。
      */
-    passiveEnabled: false,
-    /** 被动学习：每多少条消息触发一次；0 = 不用条数触发 */
+    passiveByDefault: false,
+    /** 被动学习：每多少条消息触发一次；0 = 不用条数触发（全局） */
     passiveInterval: 0,
-    /** 被动学习：关键词，逗号/分号/换行分隔；空 = 不用关键词触发 */
+    /** 被动学习：关键词，逗号/分号/换行分隔；空 = 不用关键词触发（全局） */
     passiveKeywords: '',
     /**
      * 是否让工具定义常驻。
@@ -65,15 +68,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     blockPassive: '',
     /** 角色描述模块开关。Step 07 会把模块权限补齐 */
     moduleDescription: true,
-    /**
-     * 角色描述存在哪（ADR-042）：
-     *   'card'      角色卡的 description 字段（老机制，默认）
-     *   'worldbook' 与角色同名那本世界书里的 `【角色描述】` 常驻条目
-     *
-     * 存字符串而不是布尔：以后要加第三处落点时不用再动一遍设置键。
-     * 取值归一在 ensureSettings 里做 —— 手改 settings.json 写成别的值也能被纠正。
+    /*
+     * 「角色描述存哪儿」（descStorage）与「可写书」（writableBook）不在这里：
+     * 它们按对话保存（ADR-044），见 createChatState。老版本留在全局的旧值只当
+     * 未设置过的对话的初值，见 legacyChatValue。
      */
-    descStorage: 'card',
     /**
      * 描述改动是否先暂存成 patch。
      * 关掉之后三个描述写入工具都回到直写，返回里的 staged 换成 applied。
@@ -81,8 +80,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
     patchEnabled: true,
     /** 世界书模块开关 */
     moduleWorldbook: true,
-    /** 可写世界书；空 = 世界书模块未就绪，相关工具不注册 */
-    writableBook: '',
     /** 读范围：writable 只看可写书 / bound 含当前角色绑定的其他书 */
     readScope: 'writable',
     /** 新建条目的插入位置：0 角色定义前 / 1 角色定义后 / 2 作者注释顶 / 3 作者注释底 */
@@ -231,18 +228,25 @@ export function ensureSettings(ctx) {
         dirty = true;
     }
 
+    /*
+     * v0.26：被动学习的开关从全局搬到对话（state.passive.enabled）。
+     * 旧值转成「新对话默认」而不是丢掉：老对话补字段时按这个默认值初始化，
+     * 升级前后看到的状态才对得上（ADR-044）。转换只发生一次。
+     */
+    if (Object.hasOwn(settings, 'passiveEnabled')) {
+        if (typeof settings.passiveEnabled === 'boolean') {
+            settings.passiveByDefault = settings.passiveEnabled;
+        }
+        delete settings.passiveEnabled;
+        dirty = true;
+    }
+
     for (const [key, fallback] of Object.entries(DEFAULT_SETTINGS)) {
         // 用类型比对而不是 undefined 判断：手改过 settings.json 存进去的 "false" 也能被纠正
         if (typeof settings[key] !== typeof fallback) {
             settings[key] = fallback;
             dirty = true;
         }
-    }
-
-    // 枚举值归一：类型对了也可能是个拼错的字符串（比如手改成 'worldBook'）
-    if (settings.descStorage !== 'card' && settings.descStorage !== 'worldbook') {
-        settings.descStorage = 'card';
-        dirty = true;
     }
 
     if (dirty) {
@@ -266,6 +270,7 @@ export function hasAnyModule(settings) {
 
 /**
  * 被动学习的对话状态。
+ *   enabled             这一场对话开没开被动学习（0.26 起按对话记，ADR-044）
  *   baseline            上一次"学过 / 已同步"时的可见消息条数；-1 = 还没初始化
  *   pending             已经触发、等待下一轮消耗的一次性学习；null = 没有
  *   lastLearnedUserHash 刚学完的那一轮的用户消息哈希，用来避免同一轮重复触发
@@ -283,8 +288,10 @@ export const LEARNING_MODE = Object.freeze({
     PASSIVE: 'passive',
 });
 
-function createPassiveState() {
+function createPassiveState(settings) {
     return {
+        // 新对话的初值；判据（条数 / 关键词）是全局的，开关是这一场对话自己的
+        enabled: Boolean(settings?.passiveByDefault),
         baseline: PASSIVE_BASELINE_NONE,
         pending: null,
         lastLearnedUserHash: '',
@@ -300,8 +307,9 @@ function createPassiveState() {
  * 下一次 getState 之后变成孤儿——写进去的 pending / baseline 会凭空消失。
  *
  * @param {unknown} raw
+ * @param {object} settings 只用来取新字段的初值（passiveByDefault）
  */
-function normalizePassive(raw) {
+function normalizePassive(raw, settings) {
     const source = isPlainObject(raw) ? raw : {};
     const baseline = Number(source.baseline);
     const rawPending = isPlainObject(source.pending) ? source.pending : null;
@@ -309,6 +317,12 @@ function normalizePassive(raw) {
     source.baseline = Number.isFinite(baseline) && baseline >= 0
         ? Math.floor(baseline)
         : PASSIVE_BASELINE_NONE;
+
+    // 0.26 之前的聊天文件没有这个字段：按全局默认补，而那个默认值正是从
+    // 旧的全局开关转过来的，所以老对话不会因为升级而"被动突然关了"
+    if (typeof source.enabled !== 'boolean') {
+        source.enabled = Boolean(settings?.passiveByDefault);
+    }
 
     source.pending = rawPending
         ? {
@@ -329,18 +343,64 @@ function normalizePassive(raw) {
 }
 
 /**
+ * 0.25 及以前，「可写书」与「角色描述存储」是全局设置。0.26 起按对话记（ADR-044），
+ * 老键只当**初值**用：
+ *
+ *   - 哪个对话还没有自己的值，就先认全局那个 —— 升级后打开任何一场对话都不会
+ *     突然变成"没选书 / 角色卡"，用户看不出区别；
+ *   - 用户在某个对话里真正选过一次（走 setWritableBookSetting / setDescStorageMode），
+ *     就删掉全局键，从那一刻起"每个对话各记各的"。
+ *
+ * 不在 getState 里直接删：那样只有升级时正开着的那一场能拿到旧值，其余对话
+ * 会凭空丢掉设置，看起来像插件把人家的书弄丢了。
+ */
+function legacyChatValue(settings, key) {
+    return Object.hasOwn(settings, key) ? settings[key] : undefined;
+}
+
+/** 用户显式写过之后丢掉旧全局键；没有这个键时是空操作 */
+function dropLegacyChatValue(ctx, key) {
+    const settings = ensureSettings(ctx);
+    if (!Object.hasOwn(settings, key)) {
+        return false;
+    }
+    delete settings[key];
+    ctx.saveSettingsDebounced?.();
+    return true;
+}
+
+/** 存储模式归一：手改过的聊天文件写成 'worldBook' 也当 worldbook 认 */
+function normalizeDescStorage(value) {
+    return value === DESC_STORAGE.WORLDBOOK ? DESC_STORAGE.WORLDBOOK : DESC_STORAGE.CARD;
+}
+
+/**
  * 新建一份对话状态。字段与默认值以本文件为准（spec §4 不列清单），
  * 这样后续步骤加字段时不需要写迁移。
  * @param {object} settings
  */
 export function createChatState(settings) {
+    const legacyBook = legacyChatValue(settings, 'writableBook');
+
     return {
         enabled: Boolean(settings.enabledByDefault),
         reads: {},
         lastBook: null,
         patch: null,
         backups: { lore: [], desc: [] },
-        passive: createPassiveState(),
+        passive: createPassiveState(settings),
+        /**
+         * 角色描述存在哪（ADR-042）：
+         *   'card'      角色卡的 description 字段（默认）
+         *   'worldbook' 与角色同名那本世界书里的 `【角色描述】` 常驻条目
+         *
+         * 存字符串而不是布尔：以后要加第三处落点时不用再动一遍字段。
+         * 按对话保存的理由见 ADR-044 —— 它决定"这一场对话的描述读哪儿、写哪儿"，
+         * 换个对话就换个角色，本来就不该共用。
+         */
+        descStorage: normalizeDescStorage(legacyChatValue(settings, 'descStorage')),
+        /** 可写世界书；空 = 这一场对话还没选书（世界书工具不注册） */
+        writableBook: typeof legacyBook === 'string' ? legacyBook.trim() : '',
     };
 }
 
@@ -375,6 +435,18 @@ export function getState(ctx) {
     if (!Object.hasOwn(state, 'lastBook')) {
         state.lastBook = null;
     }
+    /*
+     * 0.26 新增的两项。老对话没有这两个字段：先认全局的旧值（见 legacyChatValue），
+     * 这样升级不会把"统一模式 / 可写书"抹掉；新对话在 createChatState 里已经填好，
+     * 这里再判一次是为了手改过的聊天文件。
+     */
+    state.descStorage = normalizeDescStorage(
+        state.descStorage ?? legacyChatValue(settings, 'descStorage'),
+    );
+    if (typeof state.writableBook !== 'string') {
+        const legacyBook = legacyChatValue(settings, 'writableBook');
+        state.writableBook = typeof legacyBook === 'string' ? legacyBook.trim() : '';
+    }
     if (!Object.hasOwn(state, 'patch')) {
         state.patch = null;
     }
@@ -402,7 +474,7 @@ export function getState(ctx) {
     }
 
     // 被动学习：老对话没有这个字段，补一份"没有待学习、也没累计进度"的空状态
-    state.passive = normalizePassive(state.passive);
+    state.passive = normalizePassive(state.passive, settings);
 
     return state;
 }
@@ -410,6 +482,59 @@ export function getState(ctx) {
 /** 当前对话是否开着学习模式 */
 export function isEnabled(ctx) {
     return getState(ctx).enabled === true;
+}
+
+/* ------------------------------------------------- 角色描述存在哪 / 可写书 */
+/*
+ * 这两项 0.26 起按对话保存（ADR-044）。放在这里而不是 desc.js：
+ * targets.js 要用它们算"这次读写哪本书"，而 desc.js 反过来要用 targets.js 的读写原语
+ * ——住在 store 里两边都能 import，desc.js 只做转发。
+ */
+
+/**
+ * 当前对话的角色描述存在哪。
+ * @returns {'card'|'worldbook'}
+ */
+export function descStorageMode(ctx) {
+    return normalizeDescStorage(getState(ctx).descStorage);
+}
+
+/** 是否统一模式（描述存到角色同名书的常驻条目里） */
+export function isWorldbookDesc(ctx) {
+    return descStorageMode(ctx) === DESC_STORAGE.WORLDBOOK;
+}
+
+/**
+ * 切换存储模式并落盘。
+ *
+ * 只改"从哪儿读写"，不搬内容（ADR-042）：两边的正文各自留在原地。
+ * @param {object} ctx
+ * @param {'card'|'worldbook'} mode
+ */
+export function setDescStorageMode(ctx, mode) {
+    const state = getState(ctx);
+    state.descStorage = normalizeDescStorage(mode);
+    dropLegacyChatValue(ctx, 'descStorage');
+    saveChat(ctx);
+    return state.descStorage;
+}
+
+/** 这一场对话选的可写世界书；空串 = 还没选 */
+export function getWritableBookSetting(ctx) {
+    return String(getState(ctx).writableBook ?? '').trim();
+}
+
+/**
+ * 设置这一场对话的可写世界书并落盘。空串 = 清掉选择。
+ * @param {object} ctx
+ * @param {string} book
+ */
+export function setWritableBookSetting(ctx, book) {
+    const state = getState(ctx);
+    state.writableBook = String(book ?? '').trim();
+    dropLegacyChatValue(ctx, 'writableBook');
+    saveChat(ctx);
+    return state.writableBook;
 }
 
 /* ---------------------------------------------------------------- 被动学习 */
@@ -421,6 +546,37 @@ export function isEnabled(ctx) {
 /** 被动学习的对话状态（可直接改，改完记得 saveChat） */
 export function getPassive(ctx) {
     return getState(ctx).passive;
+}
+
+/**
+ * 这一场对话开没开被动学习。
+ *
+ * 判据（条数 / 关键词）是全局的，只有这个开关按对话记（ADR-044）：
+ * 判据同一个人到处都一样，而"这个对话要不要定期抽查"是就事论事的决定。
+ *
+ * 注意别把它和 isEnabled（主动）混用：主动一开就直接学，被动还要等判据命中。
+ * 注入与门控统一走 getLearningMode。
+ */
+export function isPassiveEnabled(ctx) {
+    return getState(ctx).passive.enabled === true;
+}
+
+/**
+ * 切换被动学习开关并落盘。
+ *
+ * 关掉时顺手丢掉待学习：那个记号是被动机制自己攒出来的，留着会出现
+ * "面板说被动关着、徽章却在闪待学"这种自相矛盾的状态。
+ * @param {object} ctx
+ * @param {boolean} enabled
+ */
+export function setPassiveEnabled(ctx, enabled) {
+    const state = getState(ctx);
+    state.passive.enabled = Boolean(enabled);
+    if (!state.passive.enabled) {
+        state.passive.pending = null;
+    }
+    saveChat(ctx);
+    return state.passive;
 }
 
 /** 有一次已触发、还没消耗的学习。它为 true 时注入与工具门控都当作"已开启" */

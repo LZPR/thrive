@@ -14,7 +14,7 @@ import { formatDiagnosis } from '../diagnostics.js';
 import { PASSIVE_EVENT, notifyPanelToggle } from '../events.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
-import { getPending, hasAnyModule, isEnabled } from '../store.js';
+import { getPending, hasAnyModule, isEnabled, isPassiveEnabled } from '../store.js';
 import { refreshBadgeOnly, registerSurfaces } from './refresh.js';
 import { BADGE_ID, LOG, PANEL_ID, isPanelOpen, toast } from './shared.js';
 
@@ -135,7 +135,8 @@ function refreshBadge(ctx, settings, available, diag) {
     const usable = available && !none && !unsupported;
 
     const activeOn = isEnabled(ctx);
-    const passiveOn = settings.passiveEnabled === true;
+    // 被动开关按对话（ADR-044）；判据仍是全局的，所以进度照旧从 settings 里读
+    const passiveOn = isPassiveEnabled(ctx);
     const pending = getPending(ctx);
     // 徽章计数：待确认的改动只有 patch 一种，且同一时刻最多一份
     const patchPending = isUnresolved(getPatch(ctx)) ? 1 : 0;

@@ -7,7 +7,8 @@
  * 两条路径：角色描述（读 + 写）、世界书（读 + 写）。
  */
 
-import { isReservedEntry, isReservedTitle } from './desc-entry.js';
+import { descBookName, isReservedEntry, isReservedTitle } from './desc-entry.js';
+import { getWritableBookSetting, isWorldbookDesc } from './store.js';
 import { appendParagraph, normalizeEol } from './util.js';
 
 /**
@@ -214,9 +215,25 @@ export function refreshDescriptionEditor(character, text) {
  * 都在 limits.js 里定义，设置页可调；这里只负责按传进来的那套值裁剪。
  */
 
-/** 可写世界书名；空串表示未就绪 */
-export function getWritableBook(settings) {
-    return String(settings?.writableBook ?? '').trim();
+/**
+ * 可写世界书名；空串表示未就绪。
+ *
+ * 两个来源，优先级固定：
+ *   1. 统一描述模式 → **角色同名书**，不看设置。描述就存在那本书里，允许另选一本
+ *      会让"描述写哪儿"出现两个答案（ADR-044）；
+ *   2. 其余情况 → 这一场对话选的那本（chat_metadata，ADR-044）。
+ *
+ * 一个已知的例外：角色改过名、而描述此前已经落在绑定书里时，`resolveDescTarget` 会继续认
+ * 那本旧书（否则改名就等于凭空再建一本空书）。这里按现名给，所以两边会短暂指向不同的书；
+ * 设置页的两条提示会各自写出书名，不是静默分叉。
+ *
+ * @param {object} ctx
+ */
+export function getWritableBook(ctx) {
+    if (isWorldbookDesc(ctx)) {
+        return descBookName(getActiveCharacter(ctx));
+    }
+    return getWritableBookSetting(ctx);
 }
 
 /**
@@ -248,7 +265,7 @@ export function getBoundBookNames(ctx) {
  * @returns {{ writable: string, books: string[] }}
  */
 export function resolveReadBooks(ctx, settings) {
-    const writable = getWritableBook(settings);
+    const writable = getWritableBook(ctx);
     const books = [];
 
     const push = name => {
@@ -325,7 +342,7 @@ export function isBookScanned(ctx, book) {
  *          | { ok: false, error: string, hint?: string }>}
  */
 export async function listLore(ctx, settings) {
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return loaded;
     }
@@ -468,10 +485,9 @@ const SELECTIVE_LOGIC = Object.freeze({ any: 0, not_all: 1, not_any: 2, all: 3 }
  * （spec §11.2）。所以这里只拿副本、用完不再碰。
  *
  * @param {object} ctx
- * @param {object} settings
  */
-export async function loadWritableBook(ctx, settings) {
-    const book = getWritableBook(settings);
+export async function loadWritableBook(ctx) {
+    const book = getWritableBook(ctx);
     if (!book) {
         return noBook('还没有选择可写书。请让用户到扩展设置里选一本。');
     }

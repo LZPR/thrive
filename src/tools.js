@@ -448,7 +448,7 @@ async function handleLoreList(params) {
     if (!isWorldbookModuleActive(ctx)) {
         return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
     }
-    if (!getWritableBook(settings)) {
+    if (!getWritableBook(ctx)) {
         return errorResult('NO_BOOK', '还没有选择可写书，请让用户到扩展设置里选一本。');
     }
 
@@ -534,7 +534,7 @@ async function handleLoreRead(params) {
     if (!isWorldbookModuleActive(ctx)) {
         return errorResult('MODULE_DISABLED', '世界书模块已关闭，不能读写世界书条目；现在只能记录角色描述。');
     }
-    if (!getWritableBook(settings)) {
+    if (!getWritableBook(ctx)) {
         return errorResult('NO_BOOK', '还没有选择可写书，请让用户到扩展设置里选一本。');
     }
 
@@ -653,7 +653,7 @@ async function handleLoreAdd(params) {
         return errorResult('RESERVED_ENTRY');
     }
 
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return errorResult(loaded.error, loaded.hint);
     }
@@ -743,7 +743,7 @@ async function handleLoreAppend(params) {
         return errorResult('RESERVED_ENTRY');
     }
 
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return errorResult(loaded.error, loaded.hint);
     }
@@ -844,7 +844,7 @@ async function handleLoreReplace(params) {
         return errorResult(compiled.error, compiled.hint);
     }
 
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return errorResult(loaded.error, loaded.hint);
     }
@@ -935,7 +935,7 @@ async function handleLoreRewrite(params) {
         return errorResult('RESERVED_ENTRY');
     }
 
-    const loaded = await loadWritableBook(ctx, settings);
+    const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
         return errorResult(loaded.error, loaded.hint);
     }
@@ -1275,7 +1275,7 @@ function checkDescriptionWrite(ctx) {
     }
 
     // worldbook 模式没有 patch，也就不存在"冲突待处理"这件事
-    if (isWorldbookDesc(settings)) {
+    if (isWorldbookDesc(ctx)) {
         return { ok: true, character, pending: null };
     }
 
@@ -1321,7 +1321,7 @@ function registerDescWrite(ctx, next, fullText) {
 async function commitDescription(ctx, character, { next, fullText }) {
     const settings = ensureSettings(ctx);
 
-    if (isWorldbookDesc(settings)) {
+    if (isWorldbookDesc(ctx)) {
         const written = await writeDesc(ctx, next);
         if (!written.ok) {
             console.debug(`${LOG} 描述写入失败`, written.error);
@@ -1418,7 +1418,7 @@ function applyReadNotes(ctx, settings, book, writable, payload) {
     const notes = [];
 
     if (!writable) {
-        notes.push(`这条在「${book}」里，那本是绑定的只读书，不能改写；可写书是「${getWritableBook(settings)}」。`);
+        notes.push(`这条在「${book}」里，那本是绑定的只读书，不能改写；可写书是「${getWritableBook(ctx)}」。`);
     }
 
     if (isBookScanned(ctx, book) === false) {

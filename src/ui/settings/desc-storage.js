@@ -11,13 +11,16 @@
  *     条目却没建出来，模型会读到一份"空描述"而用户以为只是换了个存储位置。
  *   · 切回角色卡：把条目停用（内容保留），否则两处内容会同时进上下文。
  *
- * 模式判定只有 desc.js 的 descStorageMode 一份，这里不重复解释字符串。
+ * 模式判定只有 store.js 的 descStorageMode 一份，这里不重复解释字符串。
+ *
+ * 这个设置**按对话**保存（ADR-044）：它决定"这一场对话的描述读哪儿、写哪儿"，
+ * 而换个对话通常就换了角色。所以切对话后下拉要重新回填，写入也走 setDescStorageMode。
  */
 
 import { getContext } from '../../../../../../extensions.js';
 import { descBookName, ensureDescEntry, isWorldbookDesc, resolveDescTarget, setDescEntryEnabled } from '../../desc.js';
 import { getPatch, isUnresolved } from '../../patch.js';
-import { ensureSettings } from '../../store.js';
+import { setDescStorageMode } from '../../store.js';
 import { cardDescription, getActiveCharacter, isBookScanned } from '../../targets.js';
 import { refreshUI, setPanelOpen } from '../refresh.js';
 import { LOG, PANEL_ID, toast } from '../shared.js';
@@ -38,8 +41,7 @@ export function bindDescStorageControls() {
     if (select) {
         select.addEventListener('change', async function () {
             const ctx = getContext();
-            const settings = ensureSettings(ctx);
-            const previous = isWorldbookDesc(settings) ? 'worldbook' : 'card';
+            const previous = isWorldbookDesc(ctx) ? 'worldbook' : 'card';
             const next = this.value === 'worldbook' ? 'worldbook' : 'card';
 
             if (next === previous) {
@@ -49,14 +51,14 @@ export function bindDescStorageControls() {
             this.disabled = true;
             try {
                 const switched = next === 'worldbook'
-                    ? await switchToWorldbook(ctx, settings)
-                    : await switchToCard(ctx, settings);
+                    ? await switchToWorldbook(ctx)
+                    : await switchToCard(ctx);
                 if (!switched) {
                     this.value = previous;
                 }
             } finally {
                 this.disabled = false;
-                this.value = isWorldbookDesc(ensureSettings(ctx)) ? 'worldbook' : 'card';
+                this.value = isWorldbookDesc(ctx) ? 'worldbook' : 'card';
                 refreshUI(ctx);
             }
         });
@@ -67,10 +69,15 @@ export function bindDescStorageControls() {
     });
 }
 
-/** @param {object} settings */
-export function syncDescStorage(settings) {
+/**
+ * 回填存储模式下拉。
+ *
+ * 带着 ctx 而不是只带 settings：这个值按对话存（ADR-044），换对话之后必须重铺。
+ * @param {object} ctx
+ */
+export function syncDescStorage(ctx) {
     const select = byId('thrive_desc_storage');
-    const value = isWorldbookDesc(settings) ? 'worldbook' : 'card';
+    const value = isWorldbookDesc(ctx) ? 'worldbook' : 'card';
     if (select && select.value !== value) {
         select.value = value;
     }
@@ -83,12 +90,11 @@ export function syncDescStorage(settings) {
  * 插件不去改用户的卡（切换时明确不迁移），只把这件事说出来。
  *
  * @param {object} ctx
- * @param {object} settings
  */
-export function updateDescStorageHint(ctx, settings) {
+export function updateDescStorageHint(ctx) {
     byId('thrive_desc_bind')?.classList.add('displayNone');
 
-    if (!isWorldbookDesc(settings)) {
+    if (!isWorldbookDesc(ctx)) {
         paintHint('thrive_desc_storage_hint', '');
         return;
     }
@@ -112,8 +118,7 @@ export function updateDescStorageHint(ctx, settings) {
 }
 
 async function paintDescHint(ctx, token) {
-    const settings = ensureSettings(ctx);
-    if (!isWorldbookDesc(settings)) {
+    if (!isWorldbookDesc(ctx)) {
         return;
     }
 
@@ -169,7 +174,7 @@ async function paintDescHint(ctx, token) {
  * 切到统一模式。
  * @returns {Promise<boolean>} 是否切换成功（false 时调用方把下拉拨回去）
  */
-async function switchToWorldbook(ctx, settings) {
+async function switchToWorldbook(ctx) {
     if (!getActiveCharacter(ctx)) {
         toast('请先选一个角色');
         return false;
@@ -189,8 +194,8 @@ async function switchToWorldbook(ctx, settings) {
         return false;
     }
 
-    settings.descStorage = 'worldbook';
-    ctx.saveSettingsDebounced?.();
+    // 只切这一场对话（ADR-044）
+    setDescStorageMode(ctx, 'worldbook');
 
     if (isBookScanned(ctx, ensured.book) === false) {
         toast(`已切到世界书条目，但「${ensured.book}」没有被扫描到：到「世界书」面板勾选它，描述才会进上下文`);
@@ -207,15 +212,15 @@ async function switchToWorldbook(ctx, settings) {
  * 条目停用但内容不动：这样切回来的时候东西还在，只是不再和角色卡抢上下文。
  * 停用失败不该拦住切换（书可能已经被删了），所以结果只进控制台。
  */
-async function switchToCard(ctx, settings) {
+async function switchToCard(ctx) {
     try {
         await setDescEntryEnabled(ctx, false);
     } catch (err) {
         console.debug(`${LOG} 停用描述条目失败`, err);
     }
 
-    settings.descStorage = 'card';
-    ctx.saveSettingsDebounced?.();
+    // 只切这一场对话（ADR-044）
+    setDescStorageMode(ctx, 'card');
     toast('已切回角色卡存储；世界书里的【角色描述】条目已停用，内容保留');
     return true;
 }

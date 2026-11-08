@@ -235,6 +235,23 @@
     opacity: 0.55;
 }
 
+/*
+ * 「对话」小标签：贴在设置项名称后面，说明这一项按对话生效（ADR-044）。
+ *
+ * 用描边而不是实心底：它是一句提示，不是一个可点的按钮，太重会和旁边的「?」抢注意力。
+ * nowrap 是必须的——窄屏下折成两行会比不写还难认。
+ */
+.thrive-settings .thrive-scope {
+    padding: 0 5px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 28%, transparent);
+    border-radius: 4px;
+    font-size: 0.8em;
+    line-height: 1.6;
+    opacity: 0.65;
+    white-space: nowrap;
+    cursor: help;
+}
+
 /* -------------------------------------------------------------- 说明按钮 */
 
 /*

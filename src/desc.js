@@ -21,9 +21,14 @@
  * 读取登记都在 tools.js）。
  */
 
-import { DESC_ENTRY_TITLE } from './desc-entry.js';
+import { DESC_ENTRY_TITLE, DESC_STORAGE, descBookName } from './desc-entry.js';
 import { descriptionView } from './patch.js';
-import { ensureSettings, rememberLoreBackup } from './store.js';
+import {
+    descStorageMode,
+    ensureSettings,
+    isWorldbookDesc,
+    rememberLoreBackup,
+} from './store.js';
 import {
     cardDescription,
     clampEntryPosition,
@@ -36,48 +41,14 @@ import {
 } from './targets.js';
 import { normalizeEol } from './util.js';
 
-/** 存储模式：'card'（角色卡，默认）/ 'worldbook'（世界书条目） */
-export const DESC_STORAGE = Object.freeze({
-    CARD: 'card',
-    WORLDBOOK: 'worldbook',
-});
-
-/**
- * 当前设置用的是哪种存储。
- * @param {object} settings extension_settings.thrive
- * @returns {'card'|'worldbook'}
+/*
+ * 存储模式与书名推导住在 desc-entry.js、模式判定住在 store.js（它们要读对话状态），
+ * 这里只做转发，让界面与工具继续从"描述域"拿这两样东西。
+ *
+ *   DESC_STORAGE / descBookName   desc-entry.js（零依赖，targets.js 也用它）
+ *   descStorageMode / isWorldbookDesc   store.js（按对话，见 ADR-044）
  */
-export function descStorageMode(settings) {
-    return settings?.descStorage === DESC_STORAGE.WORLDBOOK
-        ? DESC_STORAGE.WORLDBOOK
-        : DESC_STORAGE.CARD;
-}
-
-/** 是否统一模式（世界书条目）。调用点很多，给它一个短名字 */
-export function isWorldbookDesc(settings) {
-    return descStorageMode(settings) === DESC_STORAGE.WORLDBOOK;
-}
-
-/**
- * 角色对应的世界书名。
- *
- * 直接用角色名：用户的心智模型是"这本书就是这个角色"，而且改名之后书还在那儿。
- *
- * 净化口径要跟服务端一致：`/api/worldinfo/edit` 用 sanitize-filename 落盘，它把非法字符
- * **直接删掉**（不是替换成下划线）。所以这里也删，否则"算出来的名字"和"落盘的名字"
- * 会对不上，创建完还要靠差集去猜——万一撞上同名的旧书，那份空模板会把旧书覆盖掉。
- *
- * @param {object|null} character
- * @returns {string} 空串 = 角色没有名字，不能拿来当书名
- */
-export function descBookName(character) {
-    return String(character?.name ?? '')
-        // 控制字符与 Windows 不允许出现在文件名里的字符
-        .replace(/[\u0000-\u001F\\/:*?"<>|]/g, '')
-        .replace(/\s+/g, ' ')
-        .replace(/^[.\s]+|[.\s]+$/g, '')
-        .trim();
-}
+export { DESC_STORAGE, descBookName, descStorageMode, isWorldbookDesc };
 
 /** 角色卡上绑定的主世界书（`character.data.extensions.world`），空串 = 没绑 */
 export function boundBookName(character) {
@@ -375,7 +346,7 @@ export async function readDesc(ctx) {
  *          | { ok: false, error: string, hint?: string, text: string }>}
  */
 export async function readDescription(ctx) {
-    if (!isWorldbookDesc(ensureSettings(ctx))) {
+    if (!isWorldbookDesc(ctx)) {
         const view = descriptionView(ctx);
         return { ok: true, book: '', text: view.text, staged: view.staged, missing: false };
     }
@@ -526,11 +497,10 @@ export async function setDescEntryEnabled(ctx, enabled) {
  *             boundBook: string, cardChars: number }}
  */
 export function getDescTargetSnapshot(ctx) {
-    const settings = ensureSettings(ctx);
     const character = getActiveCharacter(ctx);
 
     return {
-        mode: descStorageMode(settings),
+        mode: descStorageMode(ctx),
         book: cachedBook(character) || descBookName(character),
         title: DESC_ENTRY_TITLE,
         active: (cachedBook(character) || descBookName(character))

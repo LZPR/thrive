@@ -10,7 +10,7 @@ import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
 import { describePending, intervalProgress, parseKeywords } from '../passive.js';
 import { getPatch, isUnresolved } from '../patch.js';
-import { ensureSettings, getPending, isChatAvailable, isEnabled } from '../store.js';
+import { ensureSettings, getPending, isChatAvailable, isEnabled, isPassiveEnabled } from '../store.js';
 import { getWritableBook, isBookScanned } from '../targets.js';
 
 /**
@@ -26,13 +26,13 @@ export function describeStatus(ctx = getContext()) {
     const modules = [];
 
     if (settings.moduleWorldbook !== false) {
-        modules.push(getWritableBook(settings) ? '世界书' : '世界书（未选书）');
+        modules.push(getWritableBook(ctx) ? '世界书' : '世界书（未选书）');
     }
     if (settings.moduleDescription !== false) {
         modules.push('角色描述');
     }
 
-    const book = getWritableBook(settings);
+    const book = getWritableBook(ctx);
     const bookText = !book
         ? '未选择'
         : isBookScanned(ctx, book) === false
@@ -72,7 +72,7 @@ export function describeStatus(ctx = getContext()) {
 
 /** 被动学习的一行摘要：开没开、用什么判据、还差几条 */
 function describePassiveState(ctx, settings) {
-    if (settings.passiveEnabled !== true) {
+    if (!isPassiveEnabled(ctx)) {
         return '已关闭';
     }
 
