@@ -2137,16 +2137,75 @@ body.thrive-panel-dragging {
     cursor: grabbing;
 }
 
-.thrive-prompts__toggle {
+/*
+ * 行尾的启用开关。
+ *
+ * 用滑块而不是复选框：复选框一排下来视觉重心全在左边，而"这条会不会注入"
+ * 恰恰是扫一眼就要看到的东西，所以放到行尾、用位置表态。停用那一侧还有
+ * 整行虚线边框兜底，两处对得上。
+ */
+.thrive-prompts__switch {
+    position: relative;
     display: flex;
     flex: 0 0 auto;
     align-items: center;
     margin: 0;
+    cursor: pointer;
 }
 
-.thrive-prompts__toggle input {
+/* 原生 checkbox 留着管状态与无障碍，视觉交给 track；不是 display:none，
+   否则键盘 Tab 与空格键都会失效 */
+.thrive-prompts__switch input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
     margin: 0;
-    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.thrive-prompts__switch-track {
+    position: relative;
+    display: block;
+    width: 30px;
+    height: 16px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+    transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.thrive-prompts__switch-track::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--SmartThemeBodyColor);
+    opacity: 0.6;
+    transition: transform 0.16s ease, opacity 0.16s ease, background-color 0.16s ease;
+}
+
+.thrive-prompts__switch input:checked + .thrive-prompts__switch-track {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 60%, var(--SmartThemeBorderColor));
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 32%, transparent);
+}
+
+.thrive-prompts__switch input:checked + .thrive-prompts__switch-track::after {
+    background-color: var(--SmartThemeQuoteColor);
+    opacity: 1;
+    transform: translateX(14px);
+}
+
+.thrive-prompts__switch input:focus-visible + .thrive-prompts__switch-track {
+    outline: 2px solid var(--SmartThemeQuoteColor);
+    outline-offset: 2px;
+}
+
+.thrive-prompts__switch:hover .thrive-prompts__switch-track {
+    border-color: var(--SmartThemeQuoteColor);
 }
 
 .thrive-prompts__main {
@@ -2204,28 +2263,12 @@ body.thrive-panel-dragging {
     opacity: 0.55;
 }
 
-.thrive-prompts__preview {
-    overflow: hidden;
-    font-size: calc(var(--mainFontSize, 15px) * 0.72);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    opacity: 0.42;
-}
-
 /*
- * 角色下拉与按钮打包成一块，整块不换行。
+ * 角色下拉只出现在编辑区里。
  *
- * 分开摆的时候，一行放不下会逐个折行，出现"编辑"在上一行、"删除"在下一行
- * 的错位——正文再长也不该让按钮自己拆开。
+ * 以前它摆在行上，每行右边就有"下拉 + 编辑 + 删除"三件东西，长名字一挤就
+ * 各占一行，整列看起来参差不齐。现在行上只剩"编辑 + 开关"，两样都是固定宽度。
  */
-.thrive-prompts__tools {
-    display: flex;
-    flex: 0 0 auto;
-    align-items: center;
-    flex-wrap: nowrap;
-    gap: 6px;
-}
-
 .thrive-prompts__role {
     flex: 0 0 auto;
     width: auto;
@@ -2245,8 +2288,14 @@ body.thrive-panel-dragging {
 .thrive-prompts__act {
     flex: 0 0 auto;
     width: auto;
-    padding: 1px 7px;
+    padding: 1px 8px;
     font-size: calc(var(--mainFontSize, 15px) * 0.76);
+}
+
+/* 展开中：按钮本身变成"收起"，底色点一下，免得以为点了没反应 */
+.thrive-prompts__act--open {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    color: var(--SmartThemeQuoteColor);
 }
 
 .thrive-prompts__act--danger:hover {
@@ -2297,6 +2346,11 @@ body.thrive-panel-dragging {
     white-space: nowrap;
 }
 
+/* 角色这一格不参与拉伸：下拉本来就只有几个字宽 */
+.thrive-prompts__field--role {
+    flex: 0 0 auto;
+}
+
 .thrive-prompts__count {
     flex: 0 0 auto;
     font-size: calc(var(--mainFontSize, 15px) * 0.74);
@@ -2311,6 +2365,53 @@ body.thrive-panel-dragging {
     font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
     font-size: calc(var(--mainFontSize, 15px) * 0.85);
     line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+/* 正文框与它右上角那颗「全屏」按钮 */
+.thrive-prompts__area {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+}
+
+.thrive-prompts__fullscreen {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 4px;
+    background-color: var(--SmartThemeBlurTintColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.7);
+    opacity: 0.55;
+}
+
+.thrive-prompts__fullscreen:hover {
+    opacity: 1;
+}
+
+/* 全屏编辑弹窗里的正文框：弹窗自己给宽高，这里只管撑满与字号 */
+.thrive-prompts__fullscreen-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+}
+
+.thrive-prompts__fullscreen-body textarea {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 60vh;
+    resize: none;
+    font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
+    font-size: calc(var(--mainFontSize, 15px) * 0.95);
+    line-height: 1.55;
     white-space: pre-wrap;
 }
 
@@ -2382,8 +2483,8 @@ body.thrive-panel-dragging {
         padding: 6px 8px;
     }
 
-    /* 窄屏先牺牲预览：名称与开关必须看得见 */
-    .thrive-prompts__preview {
+    /* 窄屏先牺牲次要信息：名称、角色、开关必须看得见 */
+    .thrive-prompts__note {
         display: none;
     }
 
@@ -2395,4 +2496,75 @@ body.thrive-panel-dragging {
         order: 10;
         flex-basis: 100%;
     }
+}
+
+/*
+ * 「导入预设」的来源菜单。
+ *
+ * 挂在 body 上、用 fixed 定位在按钮下方：窗口自己会滚动，挂在里面会被裁掉；
+ * 它只是一次性选择，不需要跟着窗口走。层级比窗口高一档，否则会被压住。
+ */
+.thrive-prompts__menu {
+    position: fixed;
+    z-index: 4360;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 60vh;
+    padding: 4px;
+    overflow-y: auto;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+}
+
+.thrive-prompts__menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.thrive-prompts__menu-item > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.thrive-prompts__menu-item i {
+    flex: 0 0 auto;
+    width: 14px;
+    opacity: 0.6;
+}
+
+.thrive-prompts__menu-item:hover {
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 16%, transparent);
+}
+
+.thrive-prompts__menu-sep {
+    height: 1px;
+    margin: 3px 4px;
+    background-color: var(--SmartThemeBorderColor);
+    opacity: 0.7;
+}
+
+.thrive-prompts__menu-title {
+    padding: 2px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.7);
+    opacity: 0.5;
+}
+
+.thrive-prompts__menu-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.thrive-prompts__menu-list:empty {
+    display: none;
 }

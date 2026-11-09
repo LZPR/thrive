@@ -6,6 +6,7 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../../../../../popup.js';
 
 export const LOG = '[Thrive]';
 export const BADGE_ID = 'thrive_badge';
@@ -27,18 +28,32 @@ export function toast(message) {
 }
 
 /**
- * 确认弹窗。拿不到 callPopup 时按"确认"处理——
+ * 确认弹窗。
+ *
+ * 用 ST 新的 `callGenericPopup`（POPUP_TYPE.CONFIRM）而不是旧的 `callPopup`：
+ * 旧接口那套 `#dialogue_popup` 在现在的主题下按钮会被压成"一个字一行"，
+ * 中文尤其明显（是 / 取消 竖着排）。新弹窗的按钮宽度跟着文字走。
+ *
+ * 按钮文案默认「确定 / 取消」，删除这类破坏性动作用 `okButton: '删除'`
+ * 把动作写进按钮里，别让人只看正文猜。
+ *
+ * 新接口拿不到（版本不同）时退回旧接口；两个都没有就按"确认"处理——
  * 按钮本身就是一次明确动作，卡在弹窗里反而像没反应。
  *
- * 面板与设置页都要用（拒绝改动 / 换书），所以放在共用件里。
- *
  * @param {string} message
+ * @param {{ okButton?: string, cancelButton?: string }} [options]
  * @returns {Promise<boolean>}
  */
-export async function askConfirm(message) {
-    const ctx = getContext();
+export async function askConfirm(message, { okButton = '确定', cancelButton = '取消' } = {}) {
+    try {
+        const result = await callGenericPopup(message, POPUP_TYPE.CONFIRM, '', { okButton, cancelButton });
+        return result === POPUP_RESULT.AFFIRMATIVE;
+    } catch (err) {
+        console.warn(`${LOG} 通用确认弹窗失败，退回旧接口`, err);
+    }
 
     try {
+        const ctx = getContext();
         if (typeof ctx.callPopup === 'function') {
             const choice = await ctx.callPopup(message, 'confirm');
             return choice === true || choice === 1;
