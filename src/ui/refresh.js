@@ -38,6 +38,8 @@ const SURFACES = {
     compressPanel: () => {},
     /** 聊天区：虚拟世界书窗口 */
     draftWindow: () => {},
+    /** 聊天区：提示词编辑器窗口 */
+    promptWindow: () => {},
     /** 浮动面板标题栏上那颗压缩按钮（条数角标与高亮） */
     compressEntry: () => {},
 };
@@ -110,6 +112,9 @@ export function refreshUI(ctx = getContext()) {
      * 否则窗口里还是上一场那本书的 diff。关着时它的刷新函数直接返回。
      */
     paint('draftWindow', view);
+
+    // 提示词是跨对话的，但"这一轮有没有生效"随模式与对话状态变，开着才重画
+    paint('promptWindow', view);
 
     /*
      * 顺手排一次"哪些内容超长"的检查。扫描要读世界书，所以去抖；

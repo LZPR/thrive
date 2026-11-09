@@ -20,7 +20,7 @@
  *   basics.js         新对话默认开启（主动 / 被动）、显示徽章
  *   passive-criteria.js 被动判据：每 N 条、关键词
  *   limit-fields.js   14 个数值上限
- *   prompt-cards.js   提示词卡片、拖动、编辑弹窗
+ *   prompt-cards.js   提示词入口（编辑器在独立窗口里）与两个开关
  *   tool-catalog.js   只读工具清单与复制
  *   appearance.js     旧日志清理、浮动面板外观、压缩面板入口
  *
@@ -104,7 +104,7 @@ function refreshSettingsControls(ctx, settings) {
     syncLimitControls(settings);
     syncAppearanceControls(settings);
 
-    updatePromptCards(ctx, settings);
+    updatePromptCards(settings);
     updatePromptStats(ctx, settings);
     renderToolCatalog(ctx);
 }

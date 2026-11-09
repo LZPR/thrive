@@ -12,7 +12,7 @@
 import { DESC_STORAGE } from './desc-entry.js';
 import { notifyPanel } from './events.js';
 import { LIMIT_DEFAULTS, readLimit } from './limits.js';
-import { HEAD_PROMPT_ORDER } from './prompt-order.js';
+import { CARD_ID, HEAD_PROMPT_ORDER } from './prompt-order.js';
 import { fnv1a } from './util.js';
 
 export const MODULE_NAME = 'thrive';
@@ -52,12 +52,28 @@ export const DEFAULT_SETTINGS = Object.freeze({
      */
     toolPrompt: '',
     /**
-     * 提示词卡片的顺序（prompt-order.js 里的 id 数组）。
+     * 提示词卡片的顺序（prompt-order.js 里的 id 数组，以及自建提示词的 id）。
      * 空数组 = 默认顺序；顺序里带一张分界线卡片，上方进系统提示词区、下方进尾部。
      */
     promptOrder: [],
     /** 是否自动注入这些提示词。关掉 = 用户自己把它们放进预设，插件不再往提示词里塞东西 */
     promptInject: true,
+    /**
+     * 用户自建的提示词。
+     *
+     * 每条形如 `{ id, name, content, role, enabled }`：
+     *   role     ST 的扩展提示词角色，0 系统 / 1 用户 / 2 助手
+     *   enabled  停用之后内容还留着，只是不参与注入
+     *
+     * 内置卡（学习块、工具指令、压缩指令）不在这里，它们的正文仍存在下面那几个
+     * 老设置键里；停用状态见 `disabledCards`，角色覆盖见 `promptRoles`。
+     */
+    customPrompts: [],
+    /** 被停用的内置卡片 id。停用 = 不注入，正文一个字不动 */
+    disabledCards: [],
+    /** 内置卡片的角色覆盖：`{ [cardId]: 0|1|2 }`。没写 = 系统 */
+    promptRoles: {},
+
     /**
      * 学习块三段的正文。注入时按 promptOrder 拼成两段（见 prompt.js 的 buildInjection）。
      * 空串 = 使用 prompt.js 里对应那段的 DEFAULT_BLOCK_*。存空串而不是存整段默认文本，
@@ -220,6 +236,97 @@ function normalizeDraft(raw) {
 }
 
 /**
+ * 规范自建提示词表。
+ *
+ * 老版本没有这些键，手改过 settings.json 的可能只有半个对象——一律补成
+ * `{ id, name, content, role, enabled }`，认不出的条目直接丢。
+ * 只返回内容真的变了才替换原数组，免得每次 ensureSettings 都换一个新引用，
+ * 界面手里那个"正在编辑的这条"变成孤儿。
+ *
+ * @param {unknown} raw
+ * @returns {object[]}
+ */
+function normalizeCustomPrompts(raw) {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+
+    const source = raw;
+    const out = [];
+    const seen = new Set();
+
+    for (const item of source) {
+        if (!isPlainObject(item)) {
+            continue;
+        }
+
+        const id = typeof item.id === 'string' ? item.id.trim() : '';
+        if (!id || seen.has(id)) {
+            continue;
+        }
+        seen.add(id);
+
+        out.push({
+            id,
+            name: typeof item.name === 'string' && item.name.trim() ? item.name : '未命名提示词',
+            content: typeof item.content === 'string' ? item.content : '',
+            role: item.role === 1 || item.role === 2 ? item.role : 0,
+            enabled: item.enabled !== false,
+        });
+    }
+
+    const same = out.length === source.length && out.every((item, index) => {
+        const before = source[index];
+        return isPlainObject(before)
+            && before.id === item.id
+            && before.name === item.name
+            && before.content === item.content
+            && before.role === item.role
+            && before.enabled === item.enabled;
+    });
+
+    return same ? raw : out;
+}
+
+/** 停用的内置卡：只认认识的 id，去重 */
+function normalizeDisabledCards(raw) {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+
+    const known = new Set(Object.values(CARD_ID));
+    const source = raw;
+    const out = [];
+
+    for (const id of source) {
+        if (typeof id === 'string' && known.has(id) && !out.includes(id)) {
+            out.push(id);
+        }
+    }
+
+    return out.length === source.length && out.every((id, index) => id === source[index]) ? raw : out;
+}
+
+/** 内置卡的角色覆盖：只留 1/2（0 是默认值，存不存一样），非法值当没写 */
+function normalizePromptRoles(raw) {
+    if (!isPlainObject(raw)) {
+        return {};
+    }
+
+    const out = {};
+    for (const [id, role] of Object.entries(raw)) {
+        if (role === 1 || role === 2) {
+            out[id] = role;
+        }
+    }
+
+    const before = Object.keys(raw).filter(id => raw[id] === 1 || raw[id] === 2);
+    const after = Object.keys(out);
+    const same = before.length === after.length && after.every(id => raw[id] === out[id]);
+    return same ? raw : out;
+}
+
+/**
  * 补齐 extension_settings.thrive，返回该对象本身（可安全地直接改）。
  * @param {object} ctx getContext() 的返回值
  */
@@ -300,6 +407,22 @@ export function ensureSettings(ctx) {
         // 用类型比对而不是 undefined 判断：手改过 settings.json 存进去的 "false" 也能被纠正
         if (typeof settings[key] !== typeof fallback) {
             settings[key] = fallback;
+            dirty = true;
+        }
+    }
+
+    /*
+     * 三张表按内容规范一遍。它们可能是老版本没有的键、也可能是手改过的半个对象；
+     * 返回同一个引用说明没变，不重复落盘。
+     */
+    for (const [key, normalize] of Object.entries({
+        customPrompts: normalizeCustomPrompts,
+        disabledCards: normalizeDisabledCards,
+        promptRoles: normalizePromptRoles,
+    })) {
+        const next = normalize(settings[key]);
+        if (next !== settings[key]) {
+            settings[key] = next;
             dirty = true;
         }
     }

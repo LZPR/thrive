@@ -14,6 +14,8 @@ export const PANEL_ID = 'thrive_panel';
 export const COMPRESS_ID = 'thrive_compress';
 /** 虚拟世界书：第三个独立窗口，入口在浮动面板标题栏 */
 export const DRAFT_ID = 'thrive_draft';
+/** 提示词编辑器：第四个独立窗口，入口在设置页「提示词」折叠块 */
+export const PROMPT_WINDOW_ID = 'thrive_prompts';
 
 /** 统一提示。没有 toastr 时退到 console，node 里跑也不会炸 */
 export function toast(message) {

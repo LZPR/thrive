@@ -50,6 +50,21 @@ export function isBlank(text) {
 }
 
 /**
+ * 生成一个短 id：前缀 + 时间戳 + 随机后缀。
+ *
+ * 只用于自建提示词。不用 crypto.randomUUID 是因为它要安全上下文，
+ * 而这里只需要"同一份设置里不重复"，不需要抗碰撞。
+ *
+ * @param {string} prefix
+ * @returns {string}
+ */
+export function createId(prefix = 'id') {
+    const stamp = Date.now().toString(36);
+    const noise = Math.random().toString(36).slice(2, 7);
+    return `${prefix}_${stamp}${noise}`;
+}
+
+/**
  * HTML 转义。只用于把"模型写出来的文本"塞进面板——它可能带尖括号，
  * 直接拼进 innerHTML 会被当成标签。
  * @param {string} text

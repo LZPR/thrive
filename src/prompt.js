@@ -6,30 +6,35 @@
  *   卡片 ──> 分界线（其它提示词）上方 = 系统提示词区（IN_PROMPT）
  *                       下方 = 对话尾部（IN_CHAT depth 0）
  *
- * 四张提示词卡参与注入：
- *   · 学习块[通用]      两种模式都带
- *   · 学习块[主动模式]  主动那一轮
- *   · 学习块[被动模式]  被动借来的那一轮（末尾自动追加"只此一轮"的说明）
- *   · 工具指令          工具常驻时，用宏列出此刻不可用的工具
- * 压缩指令不注入（只在工具返回里追加），「其它提示词」只是分界线，两者都留在顺序表里
- * 是为了让用户在一处编辑、一处看状态。
+ * 参与注入的卡片有三类：
+ *   内置卡  学习块[通用] / 学习块[主动模式] / 学习块[被动模式] / 工具指令
+ *   自建卡  settings.customPrompts 里的任意条，各自带 Role（系统 / 用户 / 助手）
+ *   条件卡  压缩指令不注入；工具指令"全都可用"时整段消失
  *
- * 三个反直觉点：
+ * 五个反直觉点：
  *   1. ST 不会替尾部注入（IN_CHAT）做宏替换，头部（IN_PROMPT）路径又不一样，
- *      所以两段统一由这里先 substituteParams，保证表现一致。
+ *      所以两段统一由这里先 substituteParams，保证表现一致。自建卡里常见的
+ *      `{{setvar::x::…}}` / `{{getvar::x}}` 也就靠这一步生效——按列表顺序逐条展开，
+ *      前一条 set 的变量后一条读得到。
  *   2. 关闭时不是"不设置"，而是显式写入空串：getExtensionPrompt 会过滤掉空 value，
  *      这样条目彻底不出现，请求体与没装插件时一致。
  *   3. 工具宏全部展开为空时整段不注入。默认的工具指令是"列出不可用的工具"，
  *      全都可用时它只剩一句没头没尾的引导语；与其让模型读一段废话，不如整段消失。
+ *   4. 角色不同的提示词不能拼成同一段：ST 的一条扩展提示词只有一个 role。
+ *      这里把**相邻且同角色**的卡合成一次注入（一"段"），角色一变就另起一段。
+ *      段号补零写进 key（`thrive_head_000`…），ST 按 key 排序时顺序才不会乱。
+ *   5. 同一组里空卡片（停用、不属于当前模式）直接跳过，不会把一段切成两段——
+ *      "中间停用了一条"不该让前后两段分开成两条消息。
  *
- * 同一组里的卡片按顺序用空行拼起来（`\n\n`）。顺序是用户拖出来的，这里不再替它排序——
- * 通用段与模式段谁在后、谁更强势，交给用户按效果决定。
+ * 同一"段"里的卡片按顺序用空行拼起来（`\n\n`）。顺序是用户拖出来的，这里不再替它
+ * 排序——通用段与模式段谁在后、谁更强势，交给用户按效果决定。
  */
 
 import { getCompactPrompt, normalizeCompactPrompt } from './compact.js';
 import {
     CARD_ID,
     DEFAULT_PROMPT_ORDER,
+    isBuiltinCard,
     normalizeOrder,
     splitByAnchor,
 } from './prompt-order.js';
@@ -41,11 +46,12 @@ import {
 } from './store.js';
 import { isThriveTool } from './tool-names.js';
 import { isToolAvailable, isToolExposed, listUnavailableTools } from './tool-state.js';
+import { createId } from './util.js';
 
-/** 系统提示词区那一段的扩展提示词键名 */
+/** 系统提示词区那一段的键名前缀；实际键名带段号：`thrive_head_000` */
 export const HEAD_KEY = 'thrive_head';
 
-/** 对话尾部那一段的扩展提示词键名 */
+/** 对话尾部那一段的键名前缀；实际键名带段号：`thrive_tail_000` */
 export const TAIL_KEY = 'thrive_tail';
 
 /** v0.19 及以前的单块键名；现在只用于清理旧条目 */
@@ -54,10 +60,25 @@ export const LEGACY_BLOCK_KEY = 'thrive_block';
 /** 与 ST 的 extension_prompt_types 对应，避免为了三个常量去 import script.js */
 const IN_PROMPT = 0;
 const IN_CHAT = 1;
-const NONE = -1;
 
-/** 与 extension_prompt_roles.SYSTEM 对应 */
-const ROLE_SYSTEM = 0;
+/** 与 ST 的 extension_prompt_roles 对应 */
+export const PROMPT_ROLE = Object.freeze({
+    SYSTEM: 0,
+    USER: 1,
+    ASSISTANT: 2,
+});
+
+/** 段号位数：补零之后 key 的字典序才和列表顺序一致（ST 会按 key 排序） */
+const RUN_DIGITS = 3;
+
+/** 段号 key：`thrive_head_000` / `thrive_tail_012` */
+function runKey(side, index) {
+    const prefix = side === 'head' ? HEAD_KEY : TAIL_KEY;
+    return `${prefix}_${String(index).padStart(RUN_DIGITS, '0')}`;
+}
+
+/** 上一个版本留下的段号 key（包括改过段数的旧清单），同步时统一清掉 */
+const RUN_KEY_RE = /^thrive_(?:head|tail)_\d+$/;
 
 /* ------------------------------------------------------------------ 默认文本 */
 
@@ -184,6 +205,251 @@ const CARD_SETTING_KEY = Object.freeze({
     [CARD_ID.COMPACT]: 'compactPrompt',
 });
 
+/* ------------------------------------------------------------------ 自建提示词 */
+
+/**
+ * 当前的自建提示词表。只做形状过滤，不拷贝——界面拿到的就是设置里那个对象，
+ * 改完直接落进设置，不需要再找一次下标。
+ *
+ * @param {object} settings
+ * @returns {object[]}
+ */
+export function getCustomPrompts(settings) {
+    const list = settings?.customPrompts;
+    if (!Array.isArray(list)) {
+        return [];
+    }
+
+    return list.filter(item => item && typeof item === 'object' && typeof item.id === 'string' && item.id);
+}
+
+/**
+ * 按 id 找一条自建提示词。
+ * @param {object} settings
+ * @param {string} id
+ * @returns {object|null}
+ */
+export function findCustomPrompt(settings, id) {
+    return getCustomPrompts(settings).find(item => item.id === id) ?? null;
+}
+
+/** 这个 id 是不是自建提示词 */
+export function isCustomPrompt(settings, id) {
+    return Boolean(findCustomPrompt(settings, id));
+}
+
+/**
+ * 卡片显示名。自建卡用用户起的名字；内置卡用固定的中文标签。
+ * @param {object} settings
+ * @param {string} id
+ */
+export function getPromptName(settings, id) {
+    const custom = findCustomPrompt(settings, id);
+    if (custom) {
+        return String(custom.name ?? '').trim() || '未命名提示词';
+    }
+    return PROMPT_CARD_META[id]?.label ?? id;
+}
+
+/**
+ * 这条提示词注入时用的角色（ST 的 extension_prompt_roles）。
+ *
+ * 自建卡存在自己身上；内置卡存在 `promptRoles` 里，没写过就是系统。
+ * @param {object} settings
+ * @param {string} id
+ * @returns {number} 0 系统 / 1 用户 / 2 助手
+ */
+export function getPromptRole(settings, id) {
+    const custom = findCustomPrompt(settings, id);
+    if (custom) {
+        return custom.role === PROMPT_ROLE.USER || custom.role === PROMPT_ROLE.ASSISTANT
+            ? custom.role
+            : PROMPT_ROLE.SYSTEM;
+    }
+
+    const role = Number(settings?.promptRoles?.[id]);
+    return role === PROMPT_ROLE.USER || role === PROMPT_ROLE.ASSISTANT ? role : PROMPT_ROLE.SYSTEM;
+}
+
+/**
+ * 改一条提示词的角色。
+ * @param {object} settings
+ * @param {string} id
+ * @param {number} role 0 / 1 / 2
+ * @returns {boolean} 有没有这条提示词
+ */
+export function setPromptRole(settings, id, role) {
+    const value = role === PROMPT_ROLE.USER || role === PROMPT_ROLE.ASSISTANT
+        ? role
+        : PROMPT_ROLE.SYSTEM;
+
+    const custom = findCustomPrompt(settings, id);
+    if (custom) {
+        custom.role = value;
+        return true;
+    }
+
+    if (!isBuiltinCard(id) || id === CARD_ID.ANCHOR) {
+        return false;
+    }
+
+    const map = { ...(settings.promptRoles ?? {}) };
+    if (value === PROMPT_ROLE.SYSTEM) {
+        delete map[id];
+    } else {
+        map[id] = value;
+    }
+    settings.promptRoles = map;
+    return true;
+}
+
+/**
+ * 这条提示词现在启用没有。
+ *
+ * 停用只影响注入，正文一个字都不动——用户把它关掉通常是因为"这一场不需要"，
+ * 而不是"想把写的东西删了"。
+ *
+ * @param {object} settings
+ * @param {string} id
+ */
+export function isPromptEnabled(settings, id) {
+    const custom = findCustomPrompt(settings, id);
+    if (custom) {
+        return custom.enabled !== false;
+    }
+
+    const disabled = Array.isArray(settings?.disabledCards) ? settings.disabledCards : [];
+    return !disabled.includes(id);
+}
+
+/**
+ * 启用 / 停用一条提示词。
+ * @param {object} settings
+ * @param {string} id
+ * @param {boolean} enabled
+ * @returns {boolean} 有没有这条提示词
+ */
+export function setPromptEnabled(settings, id, enabled) {
+    const custom = findCustomPrompt(settings, id);
+    if (custom) {
+        custom.enabled = Boolean(enabled);
+        return true;
+    }
+
+    if (!isBuiltinCard(id) || id === CARD_ID.ANCHOR) {
+        return false;
+    }
+
+    const current = Array.isArray(settings.disabledCards) ? settings.disabledCards : [];
+    const next = new Set(current);
+    if (enabled) {
+        next.delete(id);
+    } else {
+        next.add(id);
+    }
+    settings.disabledCards = [...next];
+    return true;
+}
+
+/**
+ * 改一条提示词的正文。
+ *
+ * 自建卡原样存（空白也算内容，用户可以先把框空着）；内置卡走 normalizeCardText，
+ * 等于默认文本或全空白时存空串，这样版本更新后默认文案还能跟上。
+ *
+ * @param {object} settings
+ * @param {string} id
+ * @param {string} text
+ * @returns {boolean} 有没有这条提示词
+ */
+export function setPromptText(settings, id, text) {
+    const custom = findCustomPrompt(settings, id);
+    if (custom) {
+        custom.content = String(text ?? '');
+        return true;
+    }
+
+    const key = CARD_SETTING_KEY[id];
+    if (!key) {
+        return false;
+    }
+
+    settings[key] = normalizeCardText(text, id);
+    return true;
+}
+
+/** 内置卡恢复默认：存空串，读取时自然回落到 DEFAULT_* */
+export function resetPromptText(settings, id) {
+    const key = CARD_SETTING_KEY[id];
+    if (!key) {
+        return false;
+    }
+
+    settings[key] = '';
+    return true;
+}
+
+/**
+ * 新建一条自建提示词，插在压缩指令之前（也就是列表末尾）。
+ *
+ * @param {object} settings
+ * @param {{ name?: string, content?: string, role?: number }} [init]
+ * @returns {object} 新建的那条
+ */
+export function addCustomPrompt(settings, init = {}) {
+    const custom = {
+        id: createId('cp'),
+        name: String(init.name ?? '').trim() || nextPromptName(settings),
+        content: typeof init.content === 'string' ? init.content : '',
+        role: init.role === PROMPT_ROLE.USER || init.role === PROMPT_ROLE.ASSISTANT
+            ? init.role
+            : PROMPT_ROLE.SYSTEM,
+        enabled: true,
+    };
+
+    const order = getPromptOrder(settings);
+    settings.customPrompts = [...getCustomPrompts(settings), custom];
+
+    const compact = order.indexOf(CARD_ID.COMPACT);
+    order.splice(compact >= 0 ? compact : order.length, 0, custom.id);
+    settings.promptOrder = order;
+
+    return custom;
+}
+
+/** 新提示词的默认名字：取第一个没被占用的序号 */
+function nextPromptName(settings) {
+    const names = new Set(getCustomPrompts(settings).map(item => String(item.name ?? '')));
+    for (let i = 1; i < 1000; i++) {
+        const name = `新提示词 ${i}`;
+        if (!names.has(name)) {
+            return name;
+        }
+    }
+    return '新提示词';
+}
+
+/**
+ * 删掉一条自建提示词。内置卡不能删（它们对应插件功能），只能停用。
+ * @param {object} settings
+ * @param {string} id
+ * @returns {boolean} 真的删掉了没有
+ */
+export function deleteCustomPrompt(settings, id) {
+    if (!findCustomPrompt(settings, id)) {
+        return false;
+    }
+
+    settings.customPrompts = getCustomPrompts(settings).filter(item => item.id !== id);
+    settings.promptOrder = getPromptOrder(settings).filter(item => item !== id);
+    return true;
+}
+
+/** 自建提示词实际生效的文本（停用也返回，编辑器要用） */
+function getCustomText(settings, id) {
+    return findCustomPrompt(settings, id)?.content ?? '';
+}
+
 /* ------------------------------------------------------------------ 文本取值 */
 
 /**
@@ -205,10 +471,15 @@ export function getToolPrompt(settings) {
 
 /**
  * 某张卡实际生效的文本。分界线没有正文，返回空串。
+ * 自建提示词不看启用状态——编辑器里要能看见停用的那条写了什么。
  * @param {object} settings
- * @param {string} id CARD_ID 里的值
+ * @param {string} id CARD_ID 里的值，或自建提示词的 id
  */
 export function getCardText(settings, id) {
+    if (isCustomPrompt(settings, id)) {
+        return getCustomText(settings, id);
+    }
+
     switch (id) {
         case CARD_ID.TOOL:
             return getToolPrompt(settings);
@@ -258,12 +529,14 @@ export function getCardSettingKey(id) {
 
 /**
  * 当前顺序表。空表 = 默认顺序（老用户升级后的情况）。
+ * 自建提示词的 id 一起传进去，删掉的那条才不会永远留在顺序表里。
  * @param {object} settings
  * @returns {string[]}
  */
 export function getPromptOrder(settings) {
+    const extra = getCustomPrompts(settings).map(item => item.id);
     const stored = Array.isArray(settings?.promptOrder) ? settings.promptOrder : [];
-    return stored.length ? normalizeOrder(stored) : DEFAULT_PROMPT_ORDER.slice();
+    return stored.length ? normalizeOrder(stored, extra) : normalizeOrder(DEFAULT_PROMPT_ORDER, extra);
 }
 
 /* ------------------------------------------------------------------ 工具宏 */
@@ -325,7 +598,7 @@ export function expandToolMacros(ctx, text) {
  * 卡片此刻的状态，只服务界面。
  *
  *   on      这一轮会注入
- *   idle    这一轮不注入（功能没开、或者不属于当前模式）
+ *   idle    这一轮不注入（停用、功能没开、或者不属于当前模式）
  *   cond    条件触发：满足条件时才起作用（压缩指令）；工具指令"全都可用"也归这一类
  *   anchor  分界线
  *
@@ -342,9 +615,27 @@ export function getCardState(ctx, settings, id) {
         return { state: 'anchor', note: '分界线' };
     }
 
+    // 停用压过一切：这一轮它一定不注入，不管模式与条件
+    if (!isPromptEnabled(settings, id)) {
+        return { state: 'idle', note: '已停用' };
+    }
+
+    if (isCustomPrompt(settings, id)) {
+        if (!injecting) {
+            return { state: 'idle', note: '自动注入已关闭' };
+        }
+        // 学习模式关着 = 插件整体不出声（ADR-001）；自建提示词也守这条线
+        if (!mode) {
+            return { state: 'idle', note: '学习模式未开启' };
+        }
+        // 落点与角色已经各占一行里的位置，这里只说"什么时候会注入"，
+        // 否则界面上会出现"尾部 · 尾部 · 系统"这种重复
+        return { state: 'on', note: '随学习模式注入' };
+    }
+
     if (id === CARD_ID.COMPACT) {
         /*
-         * 压缩指令不参与注入，只在压缩面板的「智能压缩」里用（还没接线）。
+         * 压缩指令不参与注入，只在压缩面板里用。
          * 仍然单列一张卡，是因为它确实是一段可编辑的提示词——用户要能看见
          * 它长什么样、能改，而不是埋进某个设置项里。
          */
@@ -389,6 +680,17 @@ export function getCardState(ctx, settings, id) {
     }
 }
 
+/** 角色名，界面与状态小字共用 */
+export function roleLabel(role) {
+    if (role === PROMPT_ROLE.USER) {
+        return '用户';
+    }
+    if (role === PROMPT_ROLE.ASSISTANT) {
+        return '助手';
+    }
+    return '系统';
+}
+
 /* ------------------------------------------------------------------ 拼装 */
 
 /**
@@ -399,6 +701,16 @@ export function getCardState(ctx, settings, id) {
  * @param {'active'|'passive'|null} mode
  */
 function getCardBody(ctx, settings, id, mode) {
+    // 停用的卡一律不注入；锚点没有正文
+    if (id !== CARD_ID.ANCHOR && !isPromptEnabled(settings, id)) {
+        return '';
+    }
+
+    if (isCustomPrompt(settings, id)) {
+        // 学习模式关着 = 插件整体不出声，自建提示词也不例外
+        return mode ? String(findCustomPrompt(settings, id)?.content ?? '') : '';
+    }
+
     switch (id) {
         case CARD_ID.COMMON:
             return mode ? getPartText(settings, 'common') : '';
@@ -435,40 +747,85 @@ function getCardBody(ctx, settings, id, mode) {
 }
 
 /**
- * 把一组卡片按顺序拼成一段。空段丢掉，段之间空一行。
+ * 把一组卡片按顺序切成若干"段"：**相邻且同角色**的卡拼成一段。
+ *
+ * 为什么按角色切：ST 的一条扩展提示词只带一个 role，系统 / 用户 / 助手混在
+ * 同一个 value 里就只能全按系统发。切段之后每条提示词的角色才真的生效，
+ * 而段内仍然是原来的"空行拼接"，不会把一张卡拆成好几条消息。
+ *
+ * 空卡（停用、不属于当前模式）直接跳过，不算断点：中间停用一条，
+ * 前后两段同角色的卡仍然合成一段。
+ *
  * @param {object} ctx
  * @param {object} settings
  * @param {string[]} ids
  * @param {'active'|'passive'|null} mode
+ * @returns {{ role: number, text: string, ids: string[] }[]}
  */
-function composeGroup(ctx, settings, ids, mode) {
-    return ids
-        .map(id => String(getCardBody(ctx, settings, id, mode) ?? '').trim())
-        .filter(Boolean)
-        .join('\n\n');
+function composeRuns(ctx, settings, ids, mode) {
+    const runs = [];
+
+    for (const id of ids) {
+        const text = String(getCardBody(ctx, settings, id, mode) ?? '').trim();
+        if (!text) {
+            continue;
+        }
+
+        const role = getPromptRole(settings, id);
+        const last = runs[runs.length - 1];
+
+        if (last && last.role === role) {
+            last.text = `${last.text}\n\n${text}`;
+            last.ids.push(id);
+        } else {
+            runs.push({ role, text, ids: [id] });
+        }
+    }
+
+    return runs;
+}
+
+/** 段拼回一整段：只用于统计字数与兼容旧的调用方 */
+function joinRuns(runs) {
+    return runs.map(run => run.text.trim()).filter(Boolean).join('\n\n');
 }
 
 /**
  * 这一轮实际要注入的两段文本。
  *
+ * `head` / `tail` 是拼好的一整段（统计界面用）；`headRuns` / `tailRuns` 是注入时
+ * 真正写进 ST 的单位——每段带自己的角色。
+ *
  * @param {object} ctx
  * @param {object} settings
- * @returns {{ mode: string|null, order: string[], head: string, tail: string }}
+ * @returns {{
+ *   mode: string|null,
+ *   order: string[],
+ *   head: string,
+ *   tail: string,
+ *   headRuns: { role: number, text: string, ids: string[] }[],
+ *   tailRuns: { role: number, text: string, ids: string[] }[],
+ * }}
  */
 export function buildInjection(ctx, settings) {
     const order = getPromptOrder(settings ?? {});
     const mode = getLearningMode(ctx);
 
     if (settings?.promptInject === false) {
-        return { mode, order, head: '', tail: '' };
+        return { mode, order, head: '', tail: '', headRuns: [], tailRuns: [] };
     }
 
     const { head, tail } = splitByAnchor(order);
+    const headRuns = composeRuns(ctx, settings, head, mode);
+    const tailRuns = composeRuns(ctx, settings, tail, mode);
+
     return {
         mode,
         order,
-        head: composeGroup(ctx, settings, head, mode),
-        tail: composeGroup(ctx, settings, tail, mode),
+        head: joinRuns(headRuns),
+        tail: joinRuns(tailRuns),
+        headRuns,
+        tailRuns,
     };
 }
 
@@ -476,6 +833,10 @@ export function buildInjection(ctx, settings) {
 
 /**
  * 把当前状态同步进 ST 的扩展提示词表。幂等，可以随便多次调用。
+ *
+ * 每段一个 key，段号补零；上一次同步留下、这一次不再需要的 key 直接删掉，
+ * 否则停用 / 删除一条提示词之后，旧内容会一直挂在提示词表里。
+ *
  * @param {object} ctx getContext() 的返回值，需在使用时现取
  * @param {object} settings extension_settings.thrive
  */
@@ -484,31 +845,43 @@ export function syncInjection(ctx, settings) {
         return;
     }
 
-    const clear = key => ctx.setExtensionPrompt(key, '', NONE, 0);
+    const table = ctx.extensionPrompts;
+    const keep = new Set();
 
-    // v0.19 的条目：升级后清掉，避免旧块和新块同时在请求里。
-    // 直接删键而不是写空串，省得这个已废弃的名字永远挂在提示词表上。
-    if (ctx.extensionPrompts && LEGACY_BLOCK_KEY in ctx.extensionPrompts) {
-        delete ctx.extensionPrompts[LEGACY_BLOCK_KEY];
+    // v0.19 的单块键名与 v0.20–v0.29 的单段键名：升级后清掉，避免旧内容和新内容并存
+    for (const legacy of [LEGACY_BLOCK_KEY, HEAD_KEY, TAIL_KEY]) {
+        if (table && legacy in table) {
+            delete table[legacy];
+        }
     }
 
-    const { head, tail } = buildInjection(ctx, settings ?? {});
+    const { headRuns, tailRuns } = buildInjection(ctx, settings ?? {});
 
-    const headText = head ? substitute(ctx, head) : '';
-    const tailText = tail ? substitute(ctx, tail) : '';
-
-    if (headText.trim()) {
+    /*
+     * 按段顺序逐段替换宏：`{{setvar::x::…}}` 的副作用会留在 ST 的变量表里，
+     * 后面段里的 `{{getvar::x}}` 才读得到。跨区也按"系统区 → 尾部"的顺序走。
+     */
+    headRuns.forEach((run, index) => {
+        const key = runKey('head', index);
+        keep.add(key);
         // 头部：进 system 区，锚定在 main 之后（BEFORE_PROMPT 才是 main 之前）
-        ctx.setExtensionPrompt(HEAD_KEY, headText, IN_PROMPT, 0, false, ROLE_SYSTEM);
-    } else {
-        clear(HEAD_KEY);
-    }
+        ctx.setExtensionPrompt(key, substitute(ctx, run.text), IN_PROMPT, 0, false, run.role);
+    });
 
-    if (tailText.trim()) {
-        // depth 0 = 消息数组最末位；role SYSTEM；scan false（这些提示词不参与世界书关键词扫描）
-        ctx.setExtensionPrompt(TAIL_KEY, tailText, IN_CHAT, 0, false, ROLE_SYSTEM);
-    } else {
-        clear(TAIL_KEY);
+    tailRuns.forEach((run, index) => {
+        const key = runKey('tail', index);
+        keep.add(key);
+        // depth 0 = 消息数组最末位；scan false（这些提示词不参与世界书关键词扫描）
+        ctx.setExtensionPrompt(key, substitute(ctx, run.text), IN_CHAT, 0, false, run.role);
+    });
+
+    // 清掉这次没再用到的段号键（原来的第 3 段被删了 / 停用了）
+    if (table) {
+        for (const key of Object.keys(table)) {
+            if (RUN_KEY_RE.test(key) && !keep.has(key)) {
+                delete table[key];
+            }
+        }
     }
 }
 

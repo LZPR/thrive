@@ -255,7 +255,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>提示词</b>
-                        <small class="thrive-group__hint">卡片顺序 · 内容</small>
+                        <small class="thrive-group__hint">编辑器 · 注入开关</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -274,31 +274,6 @@
                     </div>
                     <small id="thrive_tools_resident_hint" class="thrive-hint"></small>
 
-                    <span class="thrive-field-title">
-                        提示词卡片
-                        <button type="button" class="thrive-help" data-help="thrive_help_cards"
-                            aria-expanded="false" aria-controls="thrive_help_cards" title="说明">?</button>
-                    </span>
-                    <div id="thrive_help_cards" class="thrive-help__body">
-                        拖动卡片调整顺序与落点：分界线「其它提示词」上方进系统提示词区，下方进对话尾部。
-                        点卡片右侧的铅笔编辑内容，编辑弹窗右上角还能全屏。
-                        不参与当前模式、或还等着触发条件的卡片，用虚线与角标标出。
-                    </div>
-
-                    <div id="thrive_prompt_list" class="thrive-prompt-list"></div>
-
-                    <div class="thrive-prompt-stats">
-                        <span id="thrive_prompt_stats" class="thrive-count">—</span>
-                        <div id="thrive_prompt_order_reset" class="menu_button thrive-reset">
-                            <i class="fa-solid fa-rotate-left"></i>
-                            <span>默认顺序</span>
-                        </div>
-                    </div>
-
-                    <small id="thrive_prompt_macro_hint" class="thrive-hint">
-                        工具指令里的宏见「工具清单」。
-                    </small>
-
                     <div class="thrive-check">
                         <label class="checkbox_label" for="thrive_prompt_inject">
                             <input id="thrive_prompt_inject" type="checkbox">
@@ -310,6 +285,38 @@
                     <div id="thrive_help_inject" class="thrive-help__body">
                         关掉 = 由你在预设里手动放置，插件不再往提示词里塞任何东西（压缩指令本来就不参与注入）。
                     </div>
+
+                    <span class="thrive-field-title thrive-prompt-entry-title">
+                        提示词编辑器
+                        <button type="button" class="thrive-help" data-help="thrive_help_cards"
+                            aria-expanded="false" aria-controls="thrive_help_cards" title="说明">?</button>
+                    </span>
+                    <div id="thrive_help_cards" class="thrive-help__body">
+                        独立窗口里编辑：新增 / 删除 / 改名、逐条启用与角色、拖动排序，
+                        也可以导入 SillyTavern 预设（有损：保留正文、角色、启用状态与顺序，
+                        忽略触发器与位置 / 深度，丢弃世界书、角色卡这类无法注入的标记块）。
+                        分界线「其它提示词」上方进系统提示词区，下方进对话尾部。
+                        自建提示词与学习块一样，只在学习模式开启的那一轮注入。
+                        支持 &#123;&#123;char&#125;&#125; / &#123;&#123;user&#125;&#125; /
+                        &#123;&#123;setvar::名::值&#125;&#125; / &#123;&#123;getvar::名&#125;&#125; 等 ST 宏。
+                    </div>
+
+                    <div class="thrive-prompt-entry">
+                        <div id="thrive_prompt_open" class="menu_button thrive-prompt-entry__open"
+                            title="打开独立窗口：增删改、启用 / 停用、角色、排序、导入预设">
+                            <i class="fa-solid fa-table-list"></i>
+                            <span>打开提示词编辑器</span>
+                        </div>
+                        <small id="thrive_prompt_entry_meta" class="thrive-hint">—</small>
+                    </div>
+
+                    <div class="thrive-prompt-stats">
+                        <span id="thrive_prompt_stats" class="thrive-count">—</span>
+                    </div>
+
+                    <small id="thrive_prompt_macro_hint" class="thrive-hint">
+                        工具指令里的工具宏见「工具清单」；其它宏按列表顺序在注入前展开。
+                    </small>
                 </div>
             </div>
 

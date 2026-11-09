@@ -8,8 +8,12 @@
  * 而是一道分界线——排在它前面的卡片进系统提示词区（IN_PROMPT，落在 main 之后），
  * 排在它后面的卡片进对话尾部（IN_CHAT depth 0）。拖动它等于整体换边。
  *
- * `compact` 卡也不参与注入：压缩指令只在工具返回里追加，列在这里只是为了
+ * `compact` 卡也不参与注入：压缩指令只在压缩面板里用，列在这里只是为了
  * 和其它提示词放在同一处编辑、同一处看状态。
+ *
+ * 除了这六张内置卡，顺序表里还可以有用户自建的提示词 id（`customPrompts` 里那些）。
+ * 它们对这里来说是"不认识的 id"，所以 normalizeOrder 需要调用方把当前存在的自建 id
+ * 一起传进来——自建提示词被删掉之后，留在顺序表里的那个 id 要能自动消失。
  */
 
 export const CARD_ID = Object.freeze({
@@ -23,7 +27,7 @@ export const CARD_ID = Object.freeze({
     PASSIVE: 'passive',
     /** 分界线：插件以外原本的提示词（主提示词 / 世界书 / 角色卡 / 聊天记录） */
     ANCHOR: 'anchor',
-    /** 超限时的压缩指令：不注入，只附在工具返回里 */
+    /** 压缩面板用的压缩指令：不注入 */
     COMPACT: 'compact',
 });
 
@@ -53,7 +57,16 @@ export const HEAD_PROMPT_ORDER = Object.freeze([
 ]);
 
 const ALL_IDS = Object.freeze(Object.values(CARD_ID));
-const KNOWN = new Set(ALL_IDS);
+
+/** 补齐顺序表时用：缺哪张卡就按默认顺序插到压缩指令之前 */
+const FILL_ORDER = Object.freeze(DEFAULT_PROMPT_ORDER.filter(id => id !== CARD_ID.ANCHOR));
+
+const BUILTIN = new Set(ALL_IDS);
+
+/** 这张 id 是不是内置卡（内置卡不能删，只能停用） */
+export function isBuiltinCard(id) {
+    return BUILTIN.has(id);
+}
 
 /**
  * 规范顺序表：去重、丢掉不认识的 id、补齐缺的卡。
@@ -62,14 +75,18 @@ const KNOWN = new Set(ALL_IDS);
  * 缺了分界线就没法判断头部/尾部分界，按"全部尾部"处理最安全。
  *
  * @param {unknown} raw
+ * @param {string[]} [extraIds] 当前存在的自建提示词 id；缺了会被补到压缩指令之前
  * @returns {string[]} 一定是完整、合法的顺序表
  */
-export function normalizeOrder(raw) {
+export function normalizeOrder(raw, extraIds = []) {
     const input = Array.isArray(raw) ? raw : [];
+    const extras = (Array.isArray(extraIds) ? extraIds : [])
+        .filter(id => typeof id === 'string' && id && !BUILTIN.has(id));
+    const known = new Set([...ALL_IDS, ...extras]);
     const order = [];
 
     for (const id of input) {
-        if (KNOWN.has(id) && !order.includes(id)) {
+        if (known.has(id) && !order.includes(id)) {
             order.push(id);
         }
     }
@@ -78,13 +95,20 @@ export function normalizeOrder(raw) {
         order.unshift(CARD_ID.ANCHOR);
     }
 
-    const compactIndex = order.indexOf(CARD_ID.COMPACT);
-    const insertAt = compactIndex >= 0 ? compactIndex : order.length;
+    // 内置卡按默认顺序整块补进去，而不是一张一张 splice 到同一个下标（那样会反过来）
+    const missingBuiltin = FILL_ORDER.filter(id => !order.includes(id));
+    if (missingBuiltin.length) {
+        const compactIndex = order.indexOf(CARD_ID.COMPACT);
+        const insertAt = compactIndex >= 0 ? compactIndex : order.length;
+        order.splice(insertAt, 0, ...missingBuiltin);
+    }
 
-    for (const id of ALL_IDS) {
-        if (!order.includes(id)) {
-            order.splice(insertAt, 0, id);
-        }
+    // 自建提示词排在内置卡之后、压缩指令之前：新加的一条默认落在列表末尾
+    const missingExtra = extras.filter(id => !order.includes(id));
+    if (missingExtra.length) {
+        const compactIndex = order.indexOf(CARD_ID.COMPACT);
+        const insertAt = compactIndex >= 0 ? compactIndex : order.length;
+        order.splice(insertAt, 0, ...missingExtra);
     }
 
     return order;
@@ -92,12 +116,19 @@ export function normalizeOrder(raw) {
 
 /**
  * 按分界线切成头部 / 尾部两组。顺序在组内保留。
- * @param {string[]} order 已经过 normalizeOrder 的顺序表
+ * 传进来的顺序表应当已经过 normalizeOrder；缺分界线时按"全部尾部"处理。
+ *
+ * @param {string[]} order
  * @returns {{ head: string[], tail: string[] }}
  */
 export function splitByAnchor(order) {
-    const list = normalizeOrder(order);
+    const list = Array.isArray(order) ? order : [];
     const index = list.indexOf(CARD_ID.ANCHOR);
+
+    if (index < 0) {
+        return { head: [], tail: list.slice() };
+    }
+
     return {
         head: list.slice(0, index),
         tail: list.slice(index + 1),

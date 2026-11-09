@@ -31,6 +31,8 @@
  *      「被动学习」组；设置页从此不随对话变化，也不再靠「对话」标签说明作用域（ADR-045）
  *  21. 虚拟世界书：工具的每一笔世界书改动先落缓冲区，用户在独立窗口里看完 diff 才决定
  *      保存还是丢弃；真实世界书的文件与编辑器在这之前一个字都不动（src/draft.js，ADR-047）
+ *  22. 提示词编辑器独立成窗口（src/ui/prompt-window.js）：增删改、逐条启用与角色、
+ *      有损导入 ST 预设；注入改成按角色分段（src/prompt.js、src/prompt-import.js，ADR-048）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -59,15 +61,17 @@ import {
     initCompressPanel,
     initDraftWindow,
     initPanel,
+    initPromptWindow,
     initSettingsPanel,
     openCompressPanel,
     openPanel,
+    openPromptWindow,
     refreshBadgeOnly,
     refreshUI,
 } from './src/ui.js';
 
 const LOG = '[Thrive]';
-const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'compress', 'passive', 'once'];
+const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'compress', 'passive', 'once', 'prompt'];
 
 /**
  * 现取 context。
@@ -82,7 +86,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.29.0 · 世界书改动先进虚拟世界书`);
+    console.log(`${LOG} 启动 v0.30.0 · 提示词编辑器独立成窗口`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -95,6 +99,7 @@ async function init() {
     initPanel();
     initCompressPanel();
     initDraftWindow();
+    initPromptWindow();
     bindCompressRefresh();
     await initSlashCommand();
     bindEvents();
@@ -141,6 +146,7 @@ async function initSlashCommand() {
             helpString: '学习模式：`/thrive on` 开启、`off` 关闭（都只作用于当前对话）、'
                 + '`passive` 切换被动学习、`once` 让下一轮临时学一次、'
                 + '`compress` 打开压缩面板（超长条目与角色描述）、'
+                + '`prompt` 打开提示词编辑器（增删改、启用、角色、导入预设）、'
                 + '`status` 看主动/被动/模块/可写书/待确认、`panel` 打开浮动面板（模式开关 + 记录）。不写动作等于 `status`。',
             returns: '一行状态说明',
             unnamedArgumentList: [
@@ -216,6 +222,18 @@ function runThriveCommand(raw) {
             }
             // 不在这里报条数：打开时刚排了一次重扫，此刻读到的是上一份快照
             return report('压缩面板已打开：超长条目与角色描述都在里面');
+        }
+
+        /*
+         * 提示词编辑器也是独立窗口。它不需要对话：提示词是一份跨对话的设置，
+         * 在没有对话的分支里也能打开。打开后按当前模式算一遍"哪几条生效"，
+         * 所以这里不预判状态。
+         */
+        case 'prompt': {
+            if (!openPromptWindow(ctx)) {
+                return report('提示词窗口还没挂载，刷新页面再试');
+            }
+            return report('提示词编辑器已打开：增删改 / 启用 / 角色 / 导入预设');
         }
 
         /*
