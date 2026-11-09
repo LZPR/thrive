@@ -119,6 +119,7 @@ ST 左侧「AI 响应配置」里必须勾上 **启用函数调用**（Enable fu
 | [`docs/spec.md`](docs/spec.md) | 功能规格：范围与不做的事、读写一致性、权限边界、用户看到什么 |
 | [`docs/adr.md`](docs/adr.md) | 架构决策记录：只留方向性决策与被否决的路线 |
 | [`docs/user_stories.md`](docs/user_stories.md) | 用户故事：作为…我想…以便… |
+| [`docs/research_oneoff_session.md`](docs/research_oneoff_session.md) | 调研记录：一次性内部会话（预设 + 工具调用）在 ST 1.19.0 里的能力边界、可复用件与坑，带行号；不含设计 |
 
 **代码即文档**：默认提示词、设置项与默认值、工具参数与返回字段、错误码、写入上限、条目模板字段——这些只在源码里存在一份，文档不抄第二遍（抄了必漂）。各模块职责写在文件头注释里，从 `index.js` 进，或直接看 `src/`：
 
