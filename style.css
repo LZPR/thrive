@@ -1979,18 +1979,18 @@ body.thrive-panel-dragging {
     z-index: 4350;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     box-sizing: border-box;
     width: min(780px, 96vw);
     max-height: 84vh;
-    padding: 8px 12px;
+    padding: 10px 14px;
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 10px;
     background-color: var(--SmartThemeBlurTintColor);
     color: var(--SmartThemeBodyColor);
     backdrop-filter: blur(8px);
     box-shadow: 0 12px 40px rgb(0 0 0 / 32%);
-    font-size: calc(var(--mainFontSize, 15px) * 0.88);
+    font-size: calc(var(--mainFontSize, 15px) * 0.92);
     line-height: 1.4;
     transform: translateX(-50%);
     animation: thrive-prompts-in 0.14s ease-out;
@@ -2031,7 +2031,7 @@ body.thrive-panel-dragging {
 .thrive-prompts__bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: grab;
     touch-action: none;
 }
@@ -2050,7 +2050,7 @@ body.thrive-panel-dragging {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
-    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
     font-variant-numeric: tabular-nums;
     opacity: 0.65;
     text-overflow: ellipsis;
@@ -2065,9 +2065,10 @@ body.thrive-panel-dragging {
 .thrive-prompts__bar .menu_button {
     flex: 0 0 auto;
     width: auto;
-    padding: 1px 8px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    padding: 4px 11px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.84);
     white-space: nowrap;
+    min-height: 30px;
 }
 
 .thrive-prompts__body {
@@ -2086,33 +2087,39 @@ body.thrive-panel-dragging {
 }
 
 /*
- * 一条提示词。左边那道竖线就是状态：生效中用强调色，停用压暗并改虚线。
+ * 一条提示词。整行亮度就是状态：启用 = 正常亮度 + 强调色竖线，
+ * 停用 = 整行压暗 + 虚线边框。
+ *
+ * 这里刻意不看"这一轮会不会真的注入"：那个判断跟着学习模式走，没开学习时
+ * 整屏都是「未生效」，等于什么也没说，还占掉一个角标的位置。真正会变的那句
+ * 解释挪到了 `.thrive-prompts__note` 的 title 上，悬停才出现。
+ *
  * 不做成厚重的卡片（大边框 + 底色），一屏十几条时会变成一排盒子。
  */
 .thrive-prompts__item {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 5px 8px;
+    gap: 10px;
+    padding: 8px 10px;
     border: 1px solid var(--SmartThemeBorderColor);
     border-left-width: 3px;
     border-radius: 6px;
     background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
 }
 
-.thrive-prompts__item[data-state="on"] {
+.thrive-prompts__item[data-enabled="true"] {
     border-left-color: var(--SmartThemeQuoteColor);
 }
 
-.thrive-prompts__item[data-state="idle"] {
+.thrive-prompts__item[data-enabled="false"] {
     border-style: dashed;
     border-left-style: solid;
+    background-color: transparent;
 }
 
-.thrive-prompts__item[data-state="idle"] .thrive-prompts__main,
-.thrive-prompts__item[data-state="idle"] .thrive-prompts__role {
-    opacity: 0.55;
+.thrive-prompts__item[data-enabled="false"] .thrive-prompts__main {
+    opacity: 0.5;
 }
 
 /* 分界线：底色略深、整条虚线，读起来像"这里不是一条提示词" */
@@ -2128,7 +2135,7 @@ body.thrive-panel-dragging {
 
 .thrive-prompts__grip {
     flex: 0 0 auto;
-    padding: 2px 1px;
+    padding: 8px 4px;
     opacity: 0.4;
     cursor: grab;
 }
@@ -2167,8 +2174,8 @@ body.thrive-panel-dragging {
 .thrive-prompts__switch-track {
     position: relative;
     display: block;
-    width: 30px;
-    height: 16px;
+    width: 38px;
+    height: 22px;
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 999px;
     background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
@@ -2180,8 +2187,8 @@ body.thrive-panel-dragging {
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 10px;
-    height: 10px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     background-color: var(--SmartThemeBodyColor);
     opacity: 0.6;
@@ -2196,7 +2203,7 @@ body.thrive-panel-dragging {
 .thrive-prompts__switch input:checked + .thrive-prompts__switch-track::after {
     background-color: var(--SmartThemeQuoteColor);
     opacity: 1;
-    transform: translateX(14px);
+    transform: translateX(16px);
 }
 
 .thrive-prompts__switch input:focus-visible + .thrive-prompts__switch-track {
@@ -2227,37 +2234,32 @@ body.thrive-panel-dragging {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
-    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+    font-size: calc(var(--mainFontSize, 15px) * 0.98);
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.thrive-prompts__chip,
-.thrive-prompts__badge {
+.thrive-prompts__chip {
     flex: 0 0 auto;
-    padding: 0 5px;
+    padding: 1px 7px;
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 999px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.66);
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
     font-weight: 400;
     line-height: 1.5;
     opacity: 0.7;
 }
 
-.thrive-prompts__badge--on {
-    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
-    color: var(--SmartThemeQuoteColor);
-    opacity: 1;
-}
-
-.thrive-prompts__badge--cond {
-    border-style: dotted;
+/* 分界线那行的一句话标签：不用强调色，它不参与任何开关 */
+.thrive-prompts__chip--muted {
+    border-style: dashed;
+    opacity: 0.55;
 }
 
 .thrive-prompts__note {
     overflow: hidden;
-    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
     text-overflow: ellipsis;
     white-space: nowrap;
     opacity: 0.55;
@@ -2273,12 +2275,12 @@ body.thrive-panel-dragging {
     flex: 0 0 auto;
     width: auto;
     min-width: 4.5em;
-    padding: 1px 4px;
+    padding: 4px 6px;
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 4px;
     background-color: transparent;
     color: var(--SmartThemeBodyColor);
-    font-size: calc(var(--mainFontSize, 15px) * 0.76);
+    font-size: calc(var(--mainFontSize, 15px) * 0.84);
 }
 
 .thrive-prompts__role:disabled {
@@ -2288,8 +2290,9 @@ body.thrive-panel-dragging {
 .thrive-prompts__act {
     flex: 0 0 auto;
     width: auto;
-    padding: 1px 8px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.76);
+    padding: 4px 12px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.84);
+    min-height: 30px;
 }
 
 /* 展开中：按钮本身变成"收起"，底色点一下，免得以为点了没反应 */
@@ -2307,15 +2310,15 @@ body.thrive-panel-dragging {
     display: flex;
     flex: 1 1 100%;
     flex-direction: column;
-    gap: 6px;
-    padding-top: 6px;
+    gap: 8px;
+    padding-top: 8px;
     border-top: 1px dashed var(--SmartThemeBorderColor);
 }
 
 .thrive-prompts__editor-head {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
 }
 
 .thrive-prompts__field {
@@ -2324,7 +2327,7 @@ body.thrive-panel-dragging {
     align-items: center;
     gap: 6px;
     min-width: 0;
-    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    font-size: calc(var(--mainFontSize, 15px) * 0.84);
     opacity: 0.9;
 }
 
@@ -2336,8 +2339,9 @@ body.thrive-panel-dragging {
 .thrive-prompts__field input {
     flex: 1 1 auto;
     min-width: 0;
-    padding: 2px 6px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.82);
+    padding: 4px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+    min-height: 30px;
 }
 
 .thrive-prompts__field--static b {
@@ -2353,7 +2357,7 @@ body.thrive-panel-dragging {
 
 .thrive-prompts__count {
     flex: 0 0 auto;
-    font-size: calc(var(--mainFontSize, 15px) * 0.74);
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
     font-variant-numeric: tabular-nums;
     opacity: 0.55;
 }
@@ -2363,8 +2367,8 @@ body.thrive-panel-dragging {
     min-height: 10em;
     resize: vertical;
     font-family: var(--monoFontFamily, ui-monospace, Consolas, monospace);
-    font-size: calc(var(--mainFontSize, 15px) * 0.85);
-    line-height: 1.5;
+    font-size: calc(var(--mainFontSize, 15px) * 0.92);
+    line-height: 1.55;
     white-space: pre-wrap;
 }
 
@@ -2382,13 +2386,13 @@ body.thrive-panel-dragging {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 4px;
     background-color: var(--SmartThemeBlurTintColor);
-    font-size: calc(var(--mainFontSize, 15px) * 0.7);
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
     opacity: 0.55;
 }
 
@@ -2432,8 +2436,9 @@ body.thrive-panel-dragging {
 .thrive-prompts__editor-foot .menu_button {
     flex: 0 0 auto;
     width: auto;
-    padding: 1px 10px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+    padding: 5px 14px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.86);
+    min-height: 32px;
 }
 
 .thrive-prompts__save {
@@ -2488,6 +2493,15 @@ body.thrive-panel-dragging {
         display: none;
     }
 
+    /*
+     * 桌面给 main 留 260px 是为了让名称不至于一进来就被截断；手机上这条
+     * 恰恰会让「编辑 + 滑块」被挤到第二行、行高翻倍。窄屏把底线下调，
+     * 名称该省略就省略，一行放得下比多显示几个字重要。
+     */
+    .thrive-prompts__main {
+        flex-basis: 120px;
+    }
+
     .thrive-prompts__bar {
         flex-wrap: wrap;
     }
@@ -2524,11 +2538,12 @@ body.thrive-panel-dragging {
 .thrive-prompts__menu-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 8px;
+    gap: 10px;
+    padding: 7px 12px;
     border-radius: 5px;
     cursor: pointer;
     white-space: nowrap;
+    min-height: 34px;
 }
 
 .thrive-prompts__menu-item > span {

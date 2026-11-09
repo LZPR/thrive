@@ -55,13 +55,6 @@ import { escapeHtml, fnv1a } from '../util.js';
 import { refreshUI, registerSurfaces } from './refresh.js';
 import { LOG, PROMPT_WINDOW_ID, askConfirm, toast } from './shared.js';
 
-/** 状态角标文案 */
-const STATE_LABEL = Object.freeze({
-    on: '生效中',
-    idle: '未生效',
-    cond: '条件触发',
-});
-
 /** 当前展开编辑的那条：`{ id, name, text, role, isNew, dirty }`；null = 没在编辑 */
 let editing = null;
 
@@ -294,8 +287,11 @@ function buildView(ctx, settings) {
             hint: custom
                 ? '自建提示词 · 按列表顺序注入'
                 : (meta?.hint ?? ''),
-            state: status.state,
-            note: status.note,
+            // 行上只说"这是张什么卡"，不说"这一轮会不会进请求"：那个判断跟着
+            // 学习模式变，一屏全是「未生效」时反而看不出谁被谁关掉了。
+            // 它仍然留着，只是改成悬停才出现的一句解释（见 renderItem 的 title）。
+            note: id === CARD_ID.COMPACT ? '不参与注入' : '',
+            status: status.note,
             role: getPromptRole(settings, id),
             enabled: isPromptEnabled(settings, id),
             editable: anchor ? false : (custom || Boolean(meta?.editable)),
@@ -330,7 +326,7 @@ function signatureOf(view) {
         view.footHint,
         view.editingId,
         view.items.map(item => [
-            item.id, item.state, item.role, item.enabled, item.chars, item.digest, item.name, item.side,
+            item.id, item.role, item.enabled, item.chars, item.digest, item.name, item.side,
         ]),
     ]);
 }
@@ -384,15 +380,12 @@ function renderItem(item) {
             <div class="thrive-prompts__main">
                 <div class="thrive-prompts__head">
                     <span class="thrive-prompts__name">其它提示词</span>
-                    <span class="thrive-prompts__badge">分界线</span>
+                    <span class="thrive-prompts__chip thrive-prompts__chip--muted">分界线</span>
                 </div>
                 <div class="thrive-prompts__note">上方 → 系统提示词区 · 下方 → 对话尾部（这张本身不注入）</div>
             </div>
         </article>`;
     }
-
-    const badge = `<span class="thrive-prompts__badge thrive-prompts__badge--${item.state}">`
-        + `${escapeHtml(STATE_LABEL[item.state] ?? '')}</span>`;
 
     const open = editing?.id === item.id;
     const editButton = item.editable
@@ -402,18 +395,17 @@ function renderItem(item) {
         : '';
 
     const sideLabel = item.side === 'head' ? '系统区' : '尾部';
-    const note = `${sideLabel} · ${escapeHtml(item.note)} · ${item.chars} 字`;
+    const note = [sideLabel, item.note, `${item.chars} 字`].filter(Boolean).join(' · ');
 
     return `<article class="thrive-prompts__item" data-prompt="${item.id}"
-        data-kind="${item.kind}" data-state="${item.state}">
+        data-kind="${item.kind}" data-enabled="${item.enabled}">
         <span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序与落点"></span>
         <div class="thrive-prompts__main">
             <div class="thrive-prompts__head">
                 <span class="thrive-prompts__name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
                 <span class="thrive-prompts__chip">${escapeHtml(roleLabel(item.role))}</span>
-                ${badge}
             </div>
-            <div class="thrive-prompts__note">${note}</div>
+            <div class="thrive-prompts__note" title="${escapeHtml(item.status)}">${note}</div>
         </div>
         ${editButton}
         ${renderSwitch(item)}
@@ -424,9 +416,9 @@ function renderItem(item) {
 /**
  * 行尾的启用开关。
  *
- * 用滑块而不是复选框：复选框只有勾上/没勾两种视觉，一列排下来左边缘参差不齐，
- * 而"这一条现在到底会不会注入"恰恰是最该一眼扫过去看到的。滑块靠位置表态，
- * 停用时整行同时压暗（见 [data-state] 的边框样式），两处对得上。
+ * 用滑块而不是复选框：复选框一排下来视觉重心全在左边，而"这一条我到底关了没有"
+ * 恰恰是扫一眼就要看到的东西，所以放到行尾、用位置表态。停用时整行同时压暗并
+ * 换成虚线边框（见 `[data-enabled="false"]` 的样式），两处对得上。
  */
 function renderSwitch(item) {
     return `<label class="thrive-prompts__switch" title="${item.enabled ? '已启用，点击停用（正文保留）' : '已停用，点击启用'}">
@@ -509,7 +501,7 @@ function countText(text) {
 }
 
 /**
- * 只刷这一行的外观（状态色、角标、角色 chip、落点与字数）。
+ * 只刷这一行的外观（亮/暗、角色 chip、落点与字数）。
  *
  * 展开着编辑框时不能整块重绘——光标、选区、滚动位置都会没。但开关与角色又是
  * 随时能改的，所以这两处改完就地补一下这一行，别让界面和状态对不上。
@@ -524,14 +516,7 @@ function refreshRowChrome(ctx, settings, id) {
         return;
     }
 
-    const status = getCardState(ctx, settings, id);
-    row.dataset.state = status.state;
-
-    const badge = row.querySelector('.thrive-prompts__badge');
-    if (badge) {
-        badge.className = `thrive-prompts__badge thrive-prompts__badge--${status.state}`;
-        badge.textContent = STATE_LABEL[status.state] ?? '';
-    }
+    row.dataset.enabled = String(isPromptEnabled(settings, id));
 
     const chip = row.querySelector('.thrive-prompts__chip');
     if (chip) {
@@ -541,7 +526,9 @@ function refreshRowChrome(ctx, settings, id) {
     const note = row.querySelector('.thrive-prompts__note');
     if (note) {
         const side = isHeadCard(getPromptOrder(settings), id) ? '系统区' : '尾部';
-        note.textContent = `${side} · ${status.note} · ${countChars(getCardText(settings, id))} 字`;
+        const extra = id === CARD_ID.COMPACT ? '不参与注入' : '';
+        note.textContent = [side, extra, `${countChars(getCardText(settings, id))} 字`].filter(Boolean).join(' · ');
+        note.title = getCardState(ctx, settings, id).note;
     }
 }
 
@@ -608,9 +595,17 @@ function onInput(event) {
     if (field === 'text') {
         editing.text = event.target.value;
         editing.dirty = true;
-        const label = event.target.closest('.thrive-prompts__editor')?.querySelector('.thrive-prompts__count');
+        const row = event.target.closest('[data-prompt]');
+        const label = row?.querySelector('.thrive-prompts__count');
         if (label) {
             label.textContent = countText(editing.text);
+        }
+        // 行上那截字数也一起跟上：打字时它停在旧值会显得像没保存
+        const note = row?.querySelector('.thrive-prompts__note');
+        if (note) {
+            const parts = note.textContent.split(' · ');
+            parts[parts.length - 1] = `${countChars(editing.text)} 字`;
+            note.textContent = parts.join(' · ');
         }
         return;
     }
