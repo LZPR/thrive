@@ -86,8 +86,15 @@ ST 左侧「AI 响应配置」里必须勾上 **启用函数调用**（Enable fu
 | `/thrive panel` | 打开浮动面板（与点徽章同一个） |
 | `/thrive compress` | 打开压缩面板（超长条目与角色描述） |
 | `/thrive prompt` | 打开提示词编辑器 |
+| `/thrive session` | 起一场内部会话（自检用：stub 预设 + stub 工具） |
+| `/thrive session stop` | 中止正在跑的那一场 |
+| `/thrive session log` | 打出最后一场的完整消息与工具往来 |
 
 不写动作等于 `status`。
+
+**内部会话**是插件在自己内部起的一场"对话"，与当前聊天无关（ADR-049、spec §18）。它存在的理由只有一条：学习不该挂在聊天轮次上——不占你的等待、不受消息编辑与后处理影响、不与对话共用提示词。
+这一版还只是**框架**：预设、用户消息、工具全是 stub，用来把「开始 → 填预设 → 发消息 → 多轮工具调用 → 结束」这五步串起来并验证隔离。跑完聊天区不会有任何新消息，刷新也不会留下痕迹（工具表、`extension_prompts`、`chat_metadata` 三处都不动）。
+注意它**只认 OpenAI 形状的回复**：Claude / Gemini 原生连接下会直接说"不支持"，不会猜着解析。会话不落盘、没有界面，能看到的只有结束那一行摘要和 `/thrive session log`。
 
 **设置页**分五组：基本设置 / 被动学习 / 数值与上限 / 提示词 / 日志与面板，后面还有一个只读的**工具清单**分块。
 这一页只放**跨对话一致**的设置，所以切对话时它一个控件都不会变（ADR-045）。
@@ -149,6 +156,12 @@ src/prompt.js        提示词注入、宏与切段      src/prompt-order.js 卡
 src/prompt-import.js 有损导入 ST 预设         src/trace.js     工具日志压缩
 src/diagnostics.js   环境诊断与错误文案
 src/desc.js          统一模式：描述条目读写   src/desc-entry.js 保留条目标识
+src/session.js       内部会话门面（五步 + 组合体）
+src/session-messages.js  会话自己的消息栈（工厂 / 序列化 / 估算 / 协议自检）
+src/session-preset.js    预设 → 带角色的段
+src/session-tools.js     会话私有工具表（stub）
+src/session-provider.js  回复形状识别与解析
+src/session-transport.js 唯一 ST 耦合层：造 payload、发请求、超时
 src/ui/*.js          浮动面板、压缩面板、虚拟世界书窗口、提示词窗口、徽章、刷新编排
 src/ui/settings/*.js 设置页（一组设置一个文件，入口 index.js）
 ```

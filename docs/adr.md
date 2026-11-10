@@ -423,3 +423,67 @@
 9. **整体尺寸放大一档**（行高 48→58、滑块 30×16→38×22、按钮最小 30px 高）。这个窗口在手机上也会被点到，而行上最窄的点击目标是滑块与「编辑」——它们原本只有 16px 高。宁可一屏少放两条。
 
 代价：行上的信息变少，判断"这条写了什么"必须展开一次；补全浮层是 ST 的 DOM，重绘 / 关窗时要主动失焦并兜底清理，否则会悬在窗口上。撤掉角标之后，"为什么这条没进请求"需要悬停才看得到——手机上（没有 hover）只能靠模式开关与启用状态自己推。
+
+---
+
+## ADR-049 · 一次性内部会话：自建消息栈 + 直连传输 + 会话私有工具
+
+**背景**：学习和对话现在共用同一个上下文。后果有三条，都不是"体验问题"而是结构问题：
+
+1. **对话要等学习跑完**。学习挂在 ST 的工具递归里——它出现在回复链中间，用户看到的是"先想很久、然后才回话"，而这两件事本来没有先后关系。
+2. **工具调用与对话轮次绑死**。工具消息落在 `mes` 里，于是受后处理模式、消息编辑、回退、`getChat` 的过滤条件、递归上限影响；用户删一条消息就等于动了学习的输入。
+3. **提示词互相污染**。学习块进的是这场对话的 system 区，学习用的指令伪装成一条用户发言留在历史里，之后的每一轮都要背着它。
+
+要做到"学习在一个独立会话里跑"，得先有这样的东西：能拿一份自己的预设和消息、发一次带工具的请求、解析回来、执行工具、再发——而且**不碰当前聊天**。ST 没有"会话"这个概念：`ChatCompletion` 是绑定在 `chat` 数组和 `chat_metadata` 上的，`generateQuietPrompt` / `generateRawData` 都把结果往当前 chat 写。
+
+**决策**：会话是插件内部的**内存对象**，五步一条链，每一层都能单独替换、单独验证。
+
+| 步骤 | 函数 | 这一版做什么（stub） |
+|---|---|---|
+| 开始 | `openSession` | 体检传输、建对象、分配 `id` / scratch / abort 控制器；不计数、不发请求 |
+| 填预设 | `applyPreset` | 两段固定文本（system 规则 + assistant 示例）编译成 runs |
+| 发消息 | `sendUserMessage` | 追加一句固定指令 |
+| 跑循环 | `runLoop` | 请求 → 解析 → 执行工具 → 再请求，直到某个终止条件 |
+| 结束 | `closeSession` | 收尾 + 留最后一场供 `/thrive session log` 读；幂等 |
+
+`runSession` 是给斜杠命令用的组合体：五步串起来 + 互斥（`SESSION_BUSY`）+ 唯一一个兜底 `catch`。
+
+**四层边界，各自一条线**：
+
+- **`session-messages.js` 自建消息栈**。四个冻结工厂（`systemText` / `userText` / `assistantReply` / `toolResult`）+ `toChat()` 复刻 ST `getChat()` 的序列化 + `estimateTokens()` + `assertProtocol()`。不复用 `Message` / `MessageCollection`。
+- **`session-provider.js` 只认 OpenAI 形状**。`detectShape()` 分流，`readReply()` 出 `{content, toolCalls, finishReason}`；Claude / Gemini / Cohere 直接给 `SESSION_PROVIDER_UNSUPPORTED`，不猜。
+- **`session-tools.js` 会话私有工具表**。三个 stub，绕开 `ToolManager`，`executeTool()` 永不抛、返回文本永不为空。
+- **`session-transport.js` 是唯一 ST 耦合层**。`createGenerationParameters(settings, model, 'quiet', messages)` 造 payload → 自己 `fetch`；`runLoop` 只认 `deps.request`，不知道 ST 存在。
+
+**复用判据**：**优先复用相对安全、无副作用的，否则自建。** 落到这一版就是——
+
+| 复用 ST | 自建 |
+|---|---|
+| 设置、模型、连接配置、请求头（`getRequestHeaders`） | 消息数组与其序列化 |
+| `createGenerationParameters`（payload 形状） | 请求的发送与超时 |
+| `canPerformToolCalls`（能力体检） | 工具表与工具执行 |
+| 上下文长度（作预算上限） | 消息预算估算 |
+
+**理由**：
+
+- **为什么自建消息栈，而不是复用 `Message` / `MessageCollection`**：`Message.createAsync` 会走 tokenizer——`countTokensOpenAIAsync` 即使一次给一整个数组也是逐条 POST；还会落 IndexedDB；构造函数标着 `@private`，等于借用别人的内部实现。而 `runLoop` 需要的东西少得多：一个能序列化成 OpenAI 数组的列表，加一个估算。自建的代价是协议正确性变成我们的责任，所以配了 `assertProtocol()` 六条不变式（role 合法 / tool 消息必须有 `tool_call_id` 且能对上一条 assistant 的调用 / assistant 有 `tool_calls` 时 `content` 为 `null` / `arguments` 必须是字符串 / id 不重复 / 内容非空）和一份离线断言脚本。**先写测试再写实现**在这里不是流程洁癖：`assertProtocol` 第一版把 `system` 漏在合法 role 之外，一跑就红了——这种错在真机上表现为"模型莫名其妙不听话"，最难查。
+- **为什么不 `sendOpenAIRequest('quiet')`**：那条路会 emit `CHAT_COMPLETION_PROMPT_READY`，而监听者是**所有**扩展，谁都能在我们注入之后改 payload（`messages = messages.filter(...)` 造的是新数组，元素引用原样保留，原地改我们的消息对象是可能的）；它还带 ST 的错误弹窗、发送锁和 `quiet` 分支的全部假设。我们要的是"这段字节只有我能决定"。
+- **为什么不挂事件钩子再改 payload**：同一件事的另一种写法。挂上去就得保证每次摘干净、得处理"另一个扩展也挂了且顺序在后"，还得依赖"钩子里改 `messages` 一定会被用上"。直连之后这三件事一起消失：没有钩子、没有摘除、没有顺序。
+- **为什么不 `generateQuietPrompt`**：它包的是 ST 的完整生成流程（宏、swipe、清理、写入当前 chat）。我们要的只是"那次 JSON"，不要它的副作用。
+- **为什么不 `generateRawData`**：它的形状是"单轮、无工具、结果直接给人看"。要塞工具调用就得改它的返回结构，改完它就不再是"raw data"。
+- **为什么不 `ChatCompletionService.processRequest`**：它假设 `messages` 是 `MessageCollection`，并且按 `canPerformToolCalls` 决定写不写 `tools`——而 `quiet` 被明确排除在工具调用之外（`tool-calling.js`），也就是说这条路径**永远不会**替我们写 `tools`。既然工具得自己写，就没有理由再绕它。
+- **为什么不 `prepareOpenAIMessages`**：它干的正是"把当前 chat 转成请求消息"，而我们的消息不是 chat。
+- **为什么直连还要断言 `payload.type === 'quiet'` 和 `stream === false`**：跳过 ST 的判断之后，光看自己传的参数不够，得看它**造出来的东西**。这是本 ADR 里唯一"依赖 ST 行为"的地方，所以显式断言（失败给 `SESSION_DRIFT`），不假设。
+- **为什么工具私有**：`ToolManager` 是全局的，注册即对**所有**请求可见。而"学习的工具不该出现在正常对话里"正是这件事的前提结论——不能一边说解耦、一边把工具塞进全局表。
+- **为什么采样只覆盖 payload 里已存在的键**：o1 / gpt-5 那条分支会删掉 `temperature`、把 `max_tokens` 改名。无脑覆盖等于给它们塞一个不认识的字段。只改存在的键，就没有这个分支要维护。
+- **为什么超时自己做**：直连之后没有 ST 的队列替我们兜底，一个不回来的请求会把会话永远挂在 `running`。`withTimeout()` 直接 abort fetch，`SESSION_TIMEOUT` 与 `SESSION_ABORTED` 分开，因为一个是"环境不对"、一个是"我叫停的"。
+- **为什么用 `sawTools` 单独记一笔**：`stopped: 'no_tool_calls'` 既是"模型干完了"也是"模型根本没理工具"。不区分的话，一场从头到尾没调过工具的会话会被当成成功——这类"沉默的失败"比报错更难发现。
+- **为什么撞轮数上限算没跑完**：`SESSION_ROUND_LIMIT` 的文案写的是"结果可能不完整"。终止条件有四种（`no_tool_calls` / `rounds` / `aborted` / `fatal`），只有第一种是正常结束。
+
+**代价**：
+
+- **消息协议的正确性归我们**。`toChat()` 一旦和 ST 的 `getChat()` 漂开，表现是模型收到一份"看起来对但语义不对"的请求。所以留了三样东西：一次性形状比对（`.workbuddy/session-isolation-check.py`，在真实页面里同一份输入走两边、逐字段比）、从真实抓包冻下来的 fixture（`.workbuddy/session-fixtures/payload.json`：请求类型、工具定义、第一条请求的消息、两边的序列化结果），以及离线断言（`.workbuddy/session-check.mjs`，38 条里 5 条是回放 fixture）。**工具定义被无意改动**同样会在这里被拦下——它一改，请求体里最大的一块就变了，前缀缓存跟着作废。ST 升级后这两个脚本都要重跑，fixture 也要重抓。
+- **只认 OpenAI 形状的响应**。Claude、Gemini 原生连接下会直接报 `SESSION_PROVIDER_UNSUPPORTED`——服务端做的是请求侧转换，响应形状跟着后端走，ST 自己的解析链也分开写。做四种形状等于猜。
+- **直连绕过了 ST 的发送锁**。用户可以同时发消息，两个请求同时在飞；我们只做会话**内部**的互斥（一场跑着就不许再开一场），跨 ST 主请求的互斥没有做。
+- **不落盘、没有界面**。会话只活在内存里，刷新即丢；能看到的只有结束那一行摘要和 `/thrive session log` 的全文。
+- **工具是 stub**。`stub_read` 发一张票、`stub_write` 认票——这是故意的：让"必须两轮"成为结构事实（不认票就没法写），而不是"希望模型先读后写"这种靠行为押注的东西。接真实学习时换成真的工具表即可，`runLoop` 不用动。

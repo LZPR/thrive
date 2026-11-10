@@ -33,6 +33,8 @@
  *      保存还是丢弃；真实世界书的文件与编辑器在这之前一个字都不动（src/draft.js，ADR-047）
  *  22. 提示词编辑器独立成窗口（src/ui/prompt-window.js）：增删改、逐条启用与角色、
  *      有损导入 ST 预设；注入改成按角色分段（src/prompt.js、src/prompt-import.js，ADR-048）
+ *  23. 一次性内部会话框架（src/session*.js）：独立消息栈 + 直连传输 + 会话私有工具，
+ *      预设 / 用户消息 / 工具先用 stub；`/thrive session` 跑一场自检（ADR-049）
  */
 
 import { getContext } from '../../../extensions.js';
@@ -55,6 +57,13 @@ import { registerTools } from './src/tools.js';
 import { compressToolTrace, pruneToolTraces } from './src/trace.js';
 import { diagnoseEnvironment, formatDiagnosis } from './src/diagnostics.js';
 import {
+    abortActiveSession,
+    describeResult,
+    isSessionRunning,
+    logTranscript,
+    runSession,
+} from './src/session.js';
+import {
     bindCompressRefresh,
     describeStatus,
     initBadge,
@@ -71,7 +80,8 @@ import {
 } from './src/ui.js';
 
 const LOG = '[Thrive]';
-const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'compress', 'passive', 'once', 'prompt'];
+const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'compress', 'passive', 'once', 'prompt', 'session'];
+const SESSION_SUBCOMMANDS = ['stop', 'log'];
 
 /**
  * 现取 context。
@@ -86,7 +96,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.30.0 · 提示词编辑器独立成窗口`);
+    console.log(`${LOG} 启动 v0.32.0 · 一次性会话框架`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -147,6 +157,7 @@ async function initSlashCommand() {
                 + '`passive` 切换被动学习、`once` 让下一轮临时学一次、'
                 + '`compress` 打开压缩面板（超长条目与角色描述）、'
                 + '`prompt` 打开提示词编辑器（增删改、启用、角色、导入预设）、'
+                + '`session` 跑一场内部自检会话（`session stop` 中止、`session log` 看全文）、'
                 + '`status` 看主动/被动/模块/可写书/待确认、`panel` 打开浮动面板（模式开关 + 记录）。不写动作等于 `status`。',
             returns: '一行状态说明',
             unnamedArgumentList: [
@@ -155,8 +166,13 @@ async function initSlashCommand() {
                     typeList: [ARGUMENT_TYPE.STRING],
                     enumList: COMMAND_ACTIONS,
                 }),
+                SlashCommandArgument.fromProps({
+                    description: '子命令（仅 session 用）',
+                    typeList: [ARGUMENT_TYPE.STRING],
+                    enumList: SESSION_SUBCOMMANDS,
+                }),
             ],
-            callback: (_named, action) => runThriveCommand(action),
+            callback: (_named, action, sub) => runThriveCommand(action, sub),
         }));
     } catch (err) {
         console.warn(`${LOG} 斜杠命令注册失败`, err);
@@ -170,9 +186,10 @@ async function initSlashCommand() {
  * 直接在输入框里敲命令时 ST 不展示返回值，只返回给 STscript 调用方（`/thrive status |`）。
  *
  * @param {string} [raw]
+ * @param {string} [sub]
  * @returns {string}
  */
-function runThriveCommand(raw) {
+function runThriveCommand(raw, sub) {
     const action = String(raw ?? '').trim().toLowerCase() || 'status';
     const ctx = context();
     const settings = ensureSettings(ctx);
@@ -283,6 +300,49 @@ function runThriveCommand(raw) {
             syncFromContext(ctx);
             refreshUI(ctx);
             return report('已挂上：下一条消息会临时开启学习模式，回复结束后自动关闭');
+        }
+
+        /*
+         * 内部自检会话。
+         *
+         * 刻意不 await：这一整套东西存在的意义就是"对话不必等学习跑完"，
+         * 命令自己也该是这个形态。跑完另弹一条摘要，全文进控制台。
+         *
+         * 这里不预判"学习模式有没有开"：会话是独立的一次性上下文，
+         * 与当前对话的学习块、工具注册都无关（ADR-049）。只查工具调用能力，
+         * 因为那决定了模型能不能用会话里的工具。
+         */
+        case 'session': {
+            const mode = String(sub ?? '').trim().toLowerCase();
+
+            if (mode === 'stop') {
+                return report(abortActiveSession()
+                    ? '已发出中止：这一场不会向聊天写入任何东西'
+                    : '现在没有在跑的内部会话');
+            }
+
+            if (mode === 'log') {
+                logTranscript(undefined, { full: true });
+                return report('最近一场内部会话的全文已打到控制台');
+            }
+
+            if (isSessionRunning()) {
+                return report('已经有一场内部会话在跑，等它结束或 `/thrive session stop`');
+            }
+
+            const diag = diagnoseEnvironment(ctx);
+            if (!diag.ok) {
+                return report(`工具调用不可用，内部会话跑不起来：${formatDiagnosis(diag)}`);
+            }
+
+            runSession({ ctx })
+                .then(result => report(describeResult(result)))
+                .catch(err => {
+                    console.error(`${LOG} 内部会话异常`, err);
+                    report('内部会话异常，已停下（控制台里有堆栈）');
+                });
+
+            return report('内部会话已开始：全部用 stub，跑完会另弹一条摘要');
         }
 
         case 'status':
