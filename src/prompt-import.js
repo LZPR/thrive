@@ -18,9 +18,9 @@
  *   · 注入位置与深度：新架构里预设就是一列消息，没有系统区 / 尾部之分
  *   · 采样参数、正则、脚本、世界书绑定等预设里的其它所有东西
  *
- * 顺序怎么排：**描述行在最前、注入位在最后**，导入的条目按 ST 的顺序夹在中间。
- * 描述行是"下面是这次要看的东西"的引子，得先读到；导入的条目是规则，排在材料
- * 前面；注入位是待处理的材料，放在最后紧挨着开场白，模型的注意力才对得准。
+ * 顺序怎么排：**通用提示词在最前、目标内容在最后**，导入的条目按 ST 的顺序夹在中间。
+ * 通用提示词（你是谁）要先读到；导入的条目是规则，排在材料前面；描述行与注入位是
+ * 待处理的材料，放在最后紧挨着开场白，模型的注意力才对得准。
  */
 
 import { CARD_ID } from './prompt-order.js';
@@ -36,9 +36,9 @@ const ROLE_BY_NAME = Object.freeze({
 /** 全局顺序表用的 character_id（ST 的 PromptManager.configuration.promptOrder.dummyId） */
 const GLOBAL_ORDER_ID = 100000;
 
-/** 导入后两头必须留着的内置卡：描述行在最前，注入位在最后 */
-const REQUIRED_HEAD = CARD_ID.TARGET_DESC;
-const REQUIRED_TAIL = CARD_ID.TARGET;
+/** 导入后必须留着的内置卡：通用提示词在最前，目标内容（描述行 + 注入位）在最后 */
+const REQUIRED_HEAD = CARD_ID.RULES;
+const TARGET_CARDS = Object.freeze([CARD_ID.TARGET_DESC, CARD_ID.TARGET]);
 
 /**
  * 挑一份顺序表。
@@ -202,7 +202,7 @@ export function parseStPreset(raw) {
 /**
  * 把解析结果写进设置。
  *
- * 顺序表：`[描述行] [导入的条目…] [注入位]`
+ * 顺序表：`[通用提示词] [导入的条目…] [描述行] [注入位]`
  * 内置卡一律恢复启用、角色回到系统：它们是"必须的部分"，导入不该把它们带走。
  * 原有的自建提示词会被整批替换——只保留一份预设，不做多份管理。
  *
@@ -228,7 +228,7 @@ export function applyPresetImport(settings, parsed) {
     settings.promptOrder = [
         REQUIRED_HEAD,
         ...custom.map(prompt => prompt.id),
-        REQUIRED_TAIL,
+        ...TARGET_CARDS,
     ];
 
     // 内置卡是必须的部分：导入之后一律启用、回到系统角色

@@ -3,11 +3,11 @@
  *
  * 入口只有一处：设置页「提示词」折叠块里的按钮。标题栏也能拖，Esc 关闭。
  *
- * 这里编辑的是**一场学习会话的预设**（ADR-050、ADR-053）：
+ * 这里编辑的是**一场学习会话的预设**（ADR-050、ADR-053、ADR-054）：
  *   · 卡片 = 预设里的一条消息，按列表顺序发出（没有系统区 / 尾部之分）
+ *   · 卡片是**通用提示词**：通用提示词卡（你是谁）+ 目标内容的描述行与注入位 + 自建卡
  *   · 目标内容拆成两条：可改可删的**描述行**，和没有正文、只在运行时被填内容的**注入位**
- *   · 自建提示词：新增 / 删除 / 改名、逐条启用与角色、拖动排序
- *   · 折叠块「会话开场白」：通用规则一段（学习 / 压缩共用）+ 各场自己的指令
+ *   · 折叠块「会话开场白」是**特化提示词**：学习 / 压缩各一段，讲这一场具体怎么干
  *   · 折叠块「工具列表」：这一版带出去的全部工具，名字、用途与激活状态
  *   · 导入 SillyTavern 预设：可以从文件选，也可以直接从 ST 已装的预设里挑
  *
@@ -348,7 +348,6 @@ function buildView(ctx, settings) {
             kind,
             label: meta?.label ?? kind,
             hint: meta?.hint ?? '',
-            shared: meta?.shared === true,
             open,
             chars: countChars(text),
             digest: fnv1a(text),
@@ -509,12 +508,12 @@ function renderItem(item) {
 }
 
 /**
- * 会话开场白：规则一段 + 每种任务一段，放在列表下面的折叠块里。
+ * 会话开场白：**特化提示词**，每种任务一段，放在列表下面的折叠块里。
  *
- * 它们不是"预设里的一段"，所以不参与拖动排序。发出的顺序是：整份预设 → 开场白，
- * 而开场白自己又是"规则在上、本场指令在下"——和用户读到的顺序一致。
+ * 它们不是"预设里的一段"，所以不参与拖动排序。发出的顺序是：整份预设 → 开场白。
+ * 分工写在块首那行小字里：列表里的是通用（每场都带），这里是特化（只在这一场发）。
  *
- * 收进折叠块是因为它平时不用改：改一次规则能用很久，却和每张卡一样占一屏。
+ * 收进折叠块是因为它平时不用改：改一次能用很久，却和每张卡一样占一屏。
  *
  * @param {Array<object>} messages
  */
@@ -523,8 +522,14 @@ function renderMessages(messages) {
         return '';
     }
 
-    const note = '规则共用 · 每场指令各一段 · 收起来不影响发送';
-    return renderFold('msgs', '会话开场白', note, messages.map(renderMessage).join(''));
+    const note = '特化提示词 · 每场一段 · 收起来不影响发送';
+    const head = '<small class="thrive-prompts__fold-hint">'
+        + '上面列表里的卡片是通用提示词：每一场都带，讲的是这一场里你是谁。'
+        + '这里两段是特化提示词：只在那一种任务里发出，讲的是这一场具体怎么干——'
+        + '产出走哪、写到哪、怎么写、这一次要它做什么。'
+        + '</small>';
+
+    return renderFold('msgs', '会话开场白', note, head + messages.map(renderMessage).join(''));
 }
 
 function renderMessage(item) {
@@ -532,19 +537,14 @@ function renderMessage(item) {
     // 空 = 用默认文本（存空串，读取时回落到默认），所以不能说成"不会发送"
     const note = [`${item.chars} 字`, item.custom ? '已改过默认' : '默认'].join(' · ');
     const draftLabel = msgCountText(msgDraft);
-    // 规则那一行叫「通用规则」，任务那几行叫「学习时发送」——它们回答的问题不同
-    const title = item.shared ? item.label : `${item.label}时发送`;
-    const chip = item.shared ? '共用' : 'User';
-    const chipClass = item.shared
-        ? 'thrive-prompts__chip thrive-prompts__chip--shared'
-        : 'thrive-prompts__chip thrive-prompts__chip--muted';
+    const title = `${item.label}时发送`;
 
     if (!open) {
-        return `<article class="thrive-prompts__msg" data-msg="${item.kind}" data-shared="${item.shared}">
+        return `<article class="thrive-prompts__msg" data-msg="${item.kind}">
             <div class="thrive-prompts__main">
                 <div class="thrive-prompts__head">
                     <span class="thrive-prompts__name">${escapeHtml(title)}</span>
-                    <span class="${chipClass}">${chip}</span>
+                    <span class="thrive-prompts__chip thrive-prompts__chip--muted">User</span>
                 </div>
                 <div class="thrive-prompts__note">${escapeHtml(note)}</div>
             </div>
@@ -553,11 +553,11 @@ function renderMessage(item) {
         </article>`;
     }
 
-    return `<article class="thrive-prompts__msg thrive-prompts__msg--open" data-msg="${item.kind}" data-shared="${item.shared}">
+    return `<article class="thrive-prompts__msg thrive-prompts__msg--open" data-msg="${item.kind}">
         <div class="thrive-prompts__main">
             <div class="thrive-prompts__head">
                 <span class="thrive-prompts__name">${escapeHtml(title)}</span>
-                <span class="${chipClass}">${chip}</span>
+                <span class="thrive-prompts__chip thrive-prompts__chip--muted">User</span>
             </div>
             <div class="thrive-prompts__note">${escapeHtml(note)}</div>
         </div>
@@ -565,16 +565,14 @@ function renderMessage(item) {
             <div class="thrive-prompts__editor-head">
                 <span class="thrive-prompts__field thrive-prompts__field--static">
                     <span>内容</span>
-                    <b>${item.shared ? '所有任务共用' : '接在规则后面发出'}</b>
+                    <b>这一场的第一条 User 消息</b>
                 </span>
                 <span class="thrive-prompts__count">${draftLabel}</span>
             </div>
             <div class="thrive-prompts__area">
                 <textarea class="text_pole thrive-block-text" data-field="msg" rows="8" spellcheck="false"
                     data-macros="true" data-macros-autocomplete="always" data-macros-autocomplete-style="small"
-                    placeholder="${item.shared
-                        ? '学习与压缩都从这段开始：这一场是什么、产出走哪里、写到哪、怎么写。支持 {{char}}、{{user}} 等 ST 宏。'
-                        : '接在上面那段规则后面，写这一次要它做什么。支持 {{char}}、{{user}} 等 ST 宏。'}"
+                    placeholder="这一场具体怎么干：产出方式、写到哪、怎么写、这一次要它做什么。支持 {{char}}、{{user}} 等 ST 宏。"
                 >${escapeHtml(msgDraft)}</textarea>
             </div>
             <div class="thrive-prompts__editor-foot">
@@ -1136,9 +1134,7 @@ function saveMsg() {
     refreshUI(ctx);
 
     const meta = getSessionMessageMeta(kind);
-    toast(meta?.shared
-        ? `「${meta.label}」已保存：学习和压缩都会用这一段`
-        : `「${meta?.label ?? kind}时发送」已保存`);
+    toast(`「${meta?.label ?? kind}时发送」已保存`);
 }
 
 function cancelMsg() {

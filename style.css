@@ -2270,12 +2270,6 @@ body.thrive-panel-dragging {
     opacity: 0.55;
 }
 
-/* 「共用」：说明这一段被所有任务引用，改它等于改全部的规则 */
-.thrive-prompts__chip--shared {
-    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
-    opacity: 0.85;
-}
-
 /* 「激活」：工具卡片上的状态。现在全都带，所以只是把事实标出来 */
 .thrive-prompts__chip--on {
     border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));

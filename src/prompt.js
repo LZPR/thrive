@@ -9,6 +9,11 @@
  * 所以这里没有 extension prompt、没有头部/尾部分界、没有"这一轮生不生效"，
  * 只有"这份预设长什么样"。
  *
+ * 分层（ADR-054）：**列表里的卡片是通用提示词，开场白是特化提示词**。
+ *   通用 = 这场会话里你是谁、擅长什么、按什么标准判断——每一场都带，与任务无关。
+ *   特化 = 这一次具体怎么干（产出方式、写到哪、怎么写、这一场的要求）——只属于那一种任务。
+ * 所以通用规则是一张卡（排在目标内容上面），而"只有工具会留下结果"这类话写在开场白里。
+ *
  * 五条约定：
  *   1. 每张卡 = 一条消息。不合并相邻同角色的卡：卡片是用户自己排的，
  *      合并之后"我把它放在这一条之后"就不再是它字面上的意思了。唯一的例外是
@@ -16,7 +21,7 @@
  *   2. 目标内容拆成两行：描述行是用户能改能删的一句话，注入位没有正文，由运行时
  *      填真实内容（学习 = 当前对话记录）。没有内容时注入位不出现。
  *   3. 停用 = 不进预设，正文一个字不动。描述行还可以从列表里移除（正文留着，
- *      「默认顺序」能拿回来）；注入位两样都不行——它必须存在。
+ *      「默认顺序」能拿回来）；通用提示词只能停用；注入位连停用都不行——它必须存在。
  *   4. 空串 = 用默认文本。默认文本随版本更新，老用户也能拿到新版。
  *   5. 宏不在这里展开：这里产出的是"用户写的样子"，session-preset.js 发请求前
  *      按顺序展开 `{{char}}` / `{{user}}` / `{{setvar::…}}`。
@@ -35,42 +40,58 @@ export const PROMPT_ROLE = Object.freeze({
 /* ------------------------------------------------------------------ 默认文本 */
 
 /**
- * 通用规则：学习、压缩、将来别的任务都按这一套走。
+ * 通用提示词：这场会话里模型是谁、擅长什么、按什么标准判断。
  *
- * 它不再是列表里的一张卡，也不再是两段开场白里各抄一遍的正文（ADR-053）。
- * 它是「开场白」这一组的第一段，学什么、压什么都在它后面接本场指令——这样改一次
- * 规则，所有任务一起变。
+ * 它是列表里的第一张卡（排在目标内容上面），学习、压缩、以后别的任务都用同一份。
+ * 刻意**不含任何流程**——产出方式、写到哪、怎么写都属于"这一场怎么干"，写在
+ * 开场白里（ADR-054）。也刻意不提 {{char}} / {{user}} 的指代问题：新会话里模型的
+ * 身份是第三方整理者，不是聊天里的角色，没必要向它解释"谁是谁"。
  *
- * 写的是"这一场是什么、产出走哪里、写到哪、怎么写"，刻意不含任何动态内容
- * （条数、进度、触发原因），所以同一段文字在哪一种任务里都能用。
+ * 语气是"你是一名……专家，你的专长是……"——给它一个站得住的位置，比一串禁令好使。
  */
-export const DEFAULT_SESSION_RULES = `【独立会话】
+export const DEFAULT_RULES_PROMPT = `你是一名长期记忆整理专家。
 
-你在一场独立的会话里工作。这里的内容不会出现在聊天里，{{user}} 也看不到你在做什么。
+你的专长是从零散的材料里看出哪些东西值得长期保留，再把它写成以后还用得上的文字：客观的写成客观的，具体的写成具体的，不留空话，不重复材料里已经说清楚的部分，也不替材料做推论。
+
+你的产出会被当成设定长期留用，所以宁可少写一句，也不要写错一句。`;
+
+/**
+ * 学习这一场的特化提示词：怎么产出、写到哪、怎么写、这一次要它做什么。
+ *
+ * 每一条都只在"这一场"里成立（独立会话、只有工具留下结果、这一场写去哪），
+ * 所以放在开场白里而不是通用提示词里。三种任务各一份默认文本，互不影响。
+ */
+export const DEFAULT_LEARNING_TASK = `【任务】
+
+请从上面这些内容里找出值得长期保留的设定，写进它该去的地方。
 
 产出方式：
-· 只有工具会留下结果。把要记的东西用工具写进去，会话里的正文输出没人会看，可以完全不写。
+· 你在一场独立会话里工作，这里的文字不会出现在聊天里，也没有人会读你的回复。
+· 只有工具会留下结果。要记的东西用工具写进去，会话里的正文可以完全不写。
 · 没有值得长期保留的内容时，一个工具都不调用也没关系——这不算失败，也不必解释。
 · 写之前先读：要改哪条就先把它读出来，工具会拒绝没读过就覆盖的写入。
 
 写到哪里：
 · 世界书 —— 客观的、大而重的：某个东西是什么样的，某件事该怎么做。
-· 角色描述 —— 主观的、小而轻：{{char}} 喜欢什么、性格如何、怎么看 {{user}}。
+· 角色描述 —— 主观的、小而轻：这个角色喜欢什么、性格如何、怎么看对方。
 
 怎么写：
 · 角色描述要像原有人设文字一样自然，不要用列表、小标题或笔记痕迹。
-· 用 {{char}} 和 {{user}} 指代角色，避免“你”“我”等代词。
-· 拿不准的不要写。不要把目标内容里没有的东西补全成设定，也不要替它做推论。`;
+· 拿不准的不要写。不要把材料里没有的东西补全成设定，也不要替它做推论。`;
 
-/**
- * 学习这一场的指令：接在通用规则后面，回答"这一次要你做什么"。
- *
- * 单独留一份是为了设置迁移与界面：规则上面一段、本场指令下面一段，两段各改各的。
- */
-export const DEFAULT_LEARNING_TASK = '请按上面的规则处理这些内容。有值得长期保留的就调用工具写进去；没有就什么也不用做。';
+/** 压缩这一场的特化提示词。压缩还没接线，这段先留着给同一条链路用 */
+export const DEFAULT_COMPACT_TASK = `【任务】
 
-/** 压缩这一场的指令。压缩还没接线，这段先留着给同一条链路用 */
-export const DEFAULT_COMPACT_TASK = '请把这些内容压短：去掉重复和已经无关的细节，保留仍然需要记住的部分，然后用工具写回原来那一条。';
+请把上面这条内容压短，然后用工具写回原来那一条。
+
+产出方式：
+· 你在一场独立会话里工作，这里的文字不会出现在聊天里。
+· 只有工具会留下结果，会话里的正文可以完全不写。
+
+怎么写：
+· 去掉重复和已经无关的细节，留下仍然需要记住的部分。
+· 不要改成提纲或摘要：它以后还要被当成设定来读。
+· 拿不准的一律保留，不要替材料做推论。`;
 
 /** 目标内容描述行的默认文本。内容会追加在它下面 */
 export const DEFAULT_TARGET_PROMPT = '以下是目标内容：';
@@ -82,6 +103,13 @@ export const DEFAULT_TARGET_PROMPT = '以下是目标内容：';
  * ——它没有正文，也不能不存在。
  */
 export const PROMPT_CARD_META = Object.freeze({
+    [CARD_ID.RULES]: {
+        label: '通用提示词',
+        hint: '这场会话里你是谁、擅长什么、按什么标准判断。每一场都带，与学什么、压什么无关；'
+            + '具体怎么干活写在下方的「会话开场白」里',
+        editable: true,
+        removable: false,
+    },
     [CARD_ID.TARGET_DESC]: {
         label: '目标内容 · 描述',
         hint: '只决定注入内容前面那一句。可以改、可以停用，也可以整个删掉——删了注入的内容照样发送',
@@ -98,11 +126,18 @@ export const PROMPT_CARD_META = Object.freeze({
 
 /** 卡片 id → 设置键。自建卡不在表里（正文存在自己身上） */
 const CARD_SETTING_KEY = Object.freeze({
+    /*
+     * 通用提示词沿用 `sessionRules` 这个键：v0.36 它指的是"开场白里那段共用规则"，
+     * v0.37 起同一段文字换了位置——变成列表里的一张卡（ADR-054）。老值由 store.js
+     * 搬回 learningTask，所以这个键从空开始，含义只有"这张卡的正文"。
+     */
+    [CARD_ID.RULES]: 'sessionRules',
     [CARD_ID.TARGET_DESC]: 'targetPrompt',
 });
 
 /** 卡片 id → 默认正文 */
 const CARD_DEFAULT = Object.freeze({
+    [CARD_ID.RULES]: DEFAULT_RULES_PROMPT,
     [CARD_ID.TARGET_DESC]: DEFAULT_TARGET_PROMPT,
 });
 
@@ -410,9 +445,9 @@ function readText(settings, key, fallback) {
     return text.trim() ? text : fallback;
 }
 
-/** 会话规则实际生效的文本 */
-export function getSessionRules(settings) {
-    return readText(settings, 'sessionRules', DEFAULT_SESSION_RULES);
+/** 通用提示词（列表里第一张卡）实际生效的文本 */
+export function getRulesPrompt(settings) {
+    return readText(settings, 'sessionRules', DEFAULT_RULES_PROMPT);
 }
 
 /** 目标内容描述行实际生效的文本 */
@@ -421,52 +456,43 @@ export function getTargetPrompt(settings) {
 }
 
 /**
- * 会话开场白。一段共用的规则 + 每种任务一段自己的指令，读法与卡片一致：
- * 空 = 用默认，这样默认文案随版本更新时老用户也能拿到新版。
+ * 会话开场白：**特化提示词**，每种任务一段，讲这一场具体怎么干。
+ *
+ * 通用提示词（你是谁）在列表里当卡片发，不在这里——两处的分工见 ADR-054。
+ * 读法与卡片一致：空 = 用默认，这样默认文案随版本更新时老用户也能拿到新版。
  *
  * `kind` 是任务名，不是卡片 id——它不出现在 promptOrder 里，因为它不是"预设里的
  * 一段"，而是"这一场会话的第一条 User 消息"（见 learning.js 的 runSession 调用）。
  */
 const SESSION_MESSAGE = Object.freeze({
-    rules: {
-        key: 'sessionRules',
-        fallback: DEFAULT_SESSION_RULES,
-        label: '通用规则',
-        hint: '学习、压缩以及以后别的任务都从这一段开始：这一场是什么、产出走哪里、写到哪、怎么写。'
-            + '它是共用的一份，改一次所有任务一起变',
-        shared: true,
-    },
     learn: {
         key: 'learningTask',
         fallback: DEFAULT_LEARNING_TASK,
         label: '学习',
-        hint: '接在上面那段规则后面，一起作为那一场学习会话的第一条 User 消息发出。'
-            + '这里只写"这一次要它做什么"，规则不必重复',
+        hint: '触发后作为那一场学习会话的第一条 User 消息发出：这一次要它做什么，'
+            + '以及产出方式 / 写到哪 / 怎么写。通用提示词里不必重复这些',
     },
     compact: {
         key: 'compactTask',
         fallback: DEFAULT_COMPACT_TASK,
         label: '压缩',
-        hint: '压缩还没接线。将来它用同一套框架，这就是压缩会话那条 User 消息的后半段',
+        hint: '压缩还没接线。将来它用同一套框架，这段就是压缩会话那条 User 消息',
     },
 });
 
-/** 有哪几段开场白，界面的渲染顺序就用这个：规则在最前，任务在后 */
-export const SESSION_MESSAGE_KINDS = Object.freeze(['rules', 'learn', 'compact']);
-
-/** 真正会发出去的那几段（规则是前缀，不单独发） */
-export const SESSION_TASK_KINDS = Object.freeze(['learn', 'compact']);
+/** 有哪几段开场白，界面的渲染顺序就用这个 */
+export const SESSION_MESSAGE_KINDS = Object.freeze(['learn', 'compact']);
 
 /**
  * 某种开场白的元信息（标签、说明）。不认识的任务返回 null。
- * @param {string} kind rules / learn / compact
+ * @param {string} kind learn / compact
  */
 export function getSessionMessageMeta(kind) {
     return SESSION_MESSAGE[kind] ?? null;
 }
 
 /**
- * 某一段实际生效的文本——只这一段，不含前面共用的规则。
+ * 某一段实际生效的文本。
  * @param {object} settings
  * @param {string} kind
  */
@@ -499,58 +525,14 @@ export function setSessionMessage(settings, kind, text) {
     return true;
 }
 
-/**
- * 拼出真正要发的那条消息：共用规则 + 本场指令。
- *
- * 规则就是规则，不因为这一场是学习还是压缩而变，所以拼接放在这里而不是让用户
- * 在每段里各抄一遍。两段都空掉时返回空串——那说明用户真的清空了开场白，
- * 由调用方决定要不要发。
- *
- * @param {object} settings
- * @param {string} kind learn / compact
- */
-export function composeSessionMessage(settings, kind) {
-    if (!SESSION_TASK_KINDS.includes(kind)) {
-        return getSessionMessage(settings, kind);
-    }
-
-    const rules = getSessionRules(settings);
-    const task = getSessionMessage(settings, kind);
-    return [rules, task].map(part => String(part ?? '').trim()).filter(Boolean).join('\n\n');
-}
-
-/** 学习用的 User 消息 */
+/** 学习用的 User 消息（特化提示词，整条都是） */
 export function getLearningMessage(settings) {
-    return composeSessionMessage(settings, 'learn');
+    return getSessionMessage(settings, 'learn');
 }
 
 /** 压缩用的 User 消息 */
 export function getCompactMessage(settings) {
-    return composeSessionMessage(settings, 'compact');
-}
-
-/**
- * 把 v0.35 及更早那句"规则 + 指令写在一起"的开场白拆成两半（设置迁移用）。
- *
- * 老文本开头就是当时的通用规则原文，剥掉它就是这一场的指令；认不出开头说明
- * 用户整段改写过，那就整段当指令——规则那边仍是默认，两段接起来仍是完整的一段话。
- *
- * @param {string} text
- * @returns {{ rules: string, task: string }} rules 为空 = 没认出旧规则
- */
-export function splitLegacySessionMessage(text) {
-    const value = String(text ?? '').trim();
-    const rules = DEFAULT_SESSION_RULES.trim();
-
-    if (!value) {
-        return { rules: '', task: '' };
-    }
-
-    if (value.startsWith(rules)) {
-        return { rules: DEFAULT_SESSION_RULES, task: value.slice(rules.length).trim() };
-    }
-
-    return { rules: '', task: value };
+    return getSessionMessage(settings, 'compact');
 }
 
 /**
@@ -567,6 +549,8 @@ export function getCardText(settings, id) {
     }
 
     switch (id) {
+        case CARD_ID.RULES:
+            return getRulesPrompt(settings);
         case CARD_ID.TARGET_DESC:
             return getTargetPrompt(settings);
         default:
@@ -622,6 +606,10 @@ export function getCardState(settings, id) {
 
     if (!isPromptEnabled(settings, id)) {
         return { state: 'idle', note: '已停用：预设里没有这一段' };
+    }
+
+    if (id === CARD_ID.RULES) {
+        return { state: 'on', note: '通用提示词：学习与压缩都带上，讲的是这一场里你是谁' };
     }
 
     if (id === CARD_ID.TARGET_DESC) {

@@ -12,8 +12,7 @@
 import { DESC_STORAGE } from './desc-entry.js';
 import { notifyPanel } from './events.js';
 import { LIMIT_DEFAULTS, readLimit } from './limits.js';
-import { CARD_ID, isPinnedCard } from './prompt-order.js';
-import { splitLegacySessionMessage } from './prompt.js';
+import { CARD_ID, DEFAULT_PROMPT_ORDER, isPinnedCard } from './prompt-order.js';
 import { fnv1a } from './util.js';
 
 export const MODULE_NAME = 'thrive';
@@ -64,13 +63,18 @@ export const DEFAULT_SETTINGS = Object.freeze({
     promptRoles: {},
 
     /**
-     * 学习会话用到的几段文字。`targetPrompt` 是目标内容描述行（默认
-     * 「以下是目标内容：」），真正的内容由 learning.js 在发请求前追加在后面。
-     * 空串 = 使用 prompt.js 里对应的 DEFAULT_*（默认文本随版本更新时老用户也能拿到新版）。
+     * 学习会话用到的四段文字（ADR-054 把它们分成两层）。
      *
-     * 另外三段是「会话开场白」那一组（ADR-053）：`sessionRules` 是学习、压缩以及
-     * 以后别的任务共用的一套规则，`learningTask` / `compactTask` 才是各场自己的指令。
-     * 拆开是因为规则改一次就该全体生效，不该在两段开场白里各抄一份。
+     * 通用层（列表里的卡片，每一场都带）：
+     *   sessionRules  通用提示词的正文——这场会话里你是谁、擅长什么。默认空串。
+     *   targetPrompt  目标内容描述行（默认「以下是目标内容：」），真正的内容由
+     *                 learning.js 在发请求前追加在后面。
+     *
+     * 特化层（开场白，只属于那一种任务）：
+     *   learningTask  学习这一场怎么干：产出方式、写到哪、怎么写、这一次的要求。
+     *   compactTask   压缩那一场同样的一份。
+     *
+     * 空串 = 使用 prompt.js 里对应的 DEFAULT_*（默认文本随版本更新时老用户也能拿到新版）。
      */
     targetPrompt: '',
     sessionRules: '',
@@ -337,13 +341,15 @@ export function ensureSettings(ctx) {
      * 学习一律发生在独立会话里，聊天请求里不再出现任何插件提示词与工具。
      * 因此这一版要搬的东西比较多，全部只搬一次：
      *
-     *   blockText / blockCommon / blockActive / blockPassive → sessionRules
+     *   blockText / blockCommon / blockActive / blockPassive → learningTask
      *   passiveInterval / passiveKeywords                  → learnInterval / learnKeywords
      *   passiveByDefault                                   → enabledByDefault（取或）
      *   compactPrompt                                      → compactTask
      *   blockPosition / promptInject / toolsResident / toolPrompt → 丢掉
      *
      * 主动段与被动段不再存在，只保留通用段：它原本写的就是"和这一轮学多少无关"的规则。
+     * 那段规则讲的是产出方式 / 写到哪 / 怎么写，按 ADR-054 属于特化内容，所以落到
+     * learningTask（v0.37 之前它先落在 sessionRules，由下面那段再搬一次）。
      */
     if (Object.hasOwn(settings, 'blockText')) {
         const legacy = typeof settings.blockText === 'string' ? settings.blockText : '';
@@ -356,8 +362,8 @@ export function ensureSettings(ctx) {
 
     if (Object.hasOwn(settings, 'blockCommon')) {
         const legacy = typeof settings.blockCommon === 'string' ? settings.blockCommon : '';
-        if (!String(settings.sessionRules ?? '').trim() && legacy.trim()) {
-            settings.sessionRules = legacy;
+        if (!String(settings.learningTask ?? '').trim() && legacy.trim()) {
+            settings.learningTask = legacy;
         }
         delete settings.blockCommon;
         dirty = true;
@@ -428,23 +434,21 @@ export function ensureSettings(ctx) {
     }
 
     /*
-     * v0.36：预设换成"描述行 + 注入位"，开场白换成"通用规则 + 本场指令"（ADR-053）。
+     * v0.36 / v0.37：提示词分成"通用 / 特化"两层（ADR-054）。
      *
-     *   learnPrompt                               → sessionRules
-     *   learningUserMessage / compactUserMessage  → 拆成 sessionRules + learningTask / compactTask
+     *   learningUserMessage         → learningTask
+     *   learnPrompt                 → learningTask 前面（旧的"学习规则"卡排在开场白之前）
+     *   compactUserMessage          → compactTask
+     *   sessionRules（v0.36 的老值） → learningTask 前面，然后清空这个键
      *
-     * 老的两段开场白里本来就抄着当时的规则原文，`splitLegacySessionMessage` 把开头
-     * 那段剥出来还给规则、剩下的留给本场指令——拼起来和用户当初看到的一字不差。
-     * 认不出开头（用户整段改写过）就整段当指令，规则仍是默认文本。
+     * 为什么老值一律并进 task 而不是留在通用提示词里：旧版的"规则"写的是产出方式、
+     * 写到哪、怎么写，按新分工属于**特化**内容。通用提示词讲的是"你是谁"，
+     * 是 v0.37 才有的新东西，所以它从空串（= 默认文本）开始。
+     *
+     * v0.36 的 `sessionRules` 也要搬，判据是**顺序表里没有 rules 这张卡**——它不可删，
+     * 顺序表里出现它就说明已经迁过一遍了。搬完顺便把这张卡插到最前面。
      */
-    if (Object.hasOwn(settings, 'learnPrompt')) {
-        const legacy = typeof settings.learnPrompt === 'string' ? settings.learnPrompt : '';
-        if (!String(settings.sessionRules ?? '').trim() && legacy.trim()) {
-            settings.sessionRules = legacy;
-        }
-        delete settings.learnPrompt;
-        dirty = true;
-    }
+    let promptMoved = false;
 
     for (const [legacyKey, taskKey] of [
         ['learningUserMessage', 'learningTask'],
@@ -454,16 +458,43 @@ export function ensureSettings(ctx) {
             continue;
         }
 
-        const legacy = typeof settings[legacyKey] === 'string' ? settings[legacyKey] : '';
-        const split = splitLegacySessionMessage(legacy);
-        if (split.rules && !String(settings.sessionRules ?? '').trim()) {
-            settings.sessionRules = split.rules;
-        }
-        if (split.task && !String(settings[taskKey] ?? '').trim()) {
-            settings[taskKey] = split.task;
+        const legacy = typeof settings[legacyKey] === 'string' ? settings[legacyKey].trim() : '';
+        if (legacy && !String(settings[taskKey] ?? '').trim()) {
+            settings[taskKey] = legacy;
+            promptMoved = true;
         }
         delete settings[legacyKey];
         dirty = true;
+    }
+
+    if (Object.hasOwn(settings, 'learnPrompt')) {
+        const legacy = typeof settings.learnPrompt === 'string' ? settings.learnPrompt.trim() : '';
+        if (legacy) {
+            settings.learningTask = [legacy, String(settings.learningTask ?? '').trim()]
+                .filter(Boolean).join('\n\n');
+            promptMoved = true;
+        }
+        delete settings.learnPrompt;
+        dirty = true;
+    }
+
+    {
+        const order = Array.isArray(settings.promptOrder) ? settings.promptOrder.filter(id => typeof id === 'string') : [];
+        const hasRulesCard = order.includes(CARD_ID.RULES);
+        const staleRules = typeof settings.sessionRules === 'string' ? settings.sessionRules.trim() : '';
+
+        if (!hasRulesCard && (order.length || staleRules || promptMoved)) {
+            if (staleRules) {
+                settings.learningTask = [staleRules, String(settings.learningTask ?? '').trim()]
+                    .filter(Boolean).join('\n\n');
+                settings.sessionRules = '';
+            }
+            // 通用提示词排在目标内容上面：先知道自己是谁，再读到要干什么。
+            // 顺序表本来是空的话，这里写出的是默认顺序（空 = 默认，等价）
+            const base = order.length ? order : DEFAULT_PROMPT_ORDER;
+            settings.promptOrder = [CARD_ID.RULES, ...base.filter(id => id !== CARD_ID.RULES)];
+            dirty = true;
+        }
     }
 
     if (Object.hasOwn(settings, 'dropTraces')) {

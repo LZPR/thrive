@@ -65,7 +65,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.36.0 · 目标内容拆描述/注入 · 规则共用 · 工具列表`);
+    console.log(`${LOG} 启动 v0.37.0 · 通用提示词卡 · 特化开场白 · 工具列表`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
