@@ -3,20 +3,11 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.34.0</span>
+                <span class="thrive-version">v0.35.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
-            <!-- 环境诊断：为什么工具没生效、去哪改。结论来自 ctx.isToolCallingSupported() -->
-            <div id="thrive_diag" class="thrive-diag" role="status">
-                <span class="thrive-diag__dot" aria-hidden="true"></span>
-                <div class="thrive-diag__body">
-                    <span id="thrive_diag_reason" class="thrive-diag__reason">正在检查工具调用是否可用…</span>
-                    <small id="thrive_diag_fix" class="thrive-hint"></small>
-                </div>
-            </div>
-
             <!-- 基本设置：这一页只放"跨对话都一样"的设置；按对话生效的都在浮动面板里 -->
             <div class="inline-drawer thrive-group">
                 <div class="inline-drawer-toggle inline-drawer-header">
@@ -56,9 +47,38 @@
                     <div id="thrive_help_badge" class="thrive-help__body">
                         徽章是输入框旁那颗图标：点一下开 / 关浮动面板，学习开关与落点都在面板里。
                         强调色 = 学习模式开着，图标在呼吸 = 正在学（一场学习会话在跑），
-                        置灰 = 现在切了也没用（没对话 / 工具调用不可用），
+                        置灰 = 现在切了也没用（没打开对话），
                         右上角数字 = 待确认的描述改动。
                     </div>
+                </div>
+            </div>
+
+            <!-- API 连接：会话走哪个后端。只影响之后新开的会话，已经跑着的那一场不变 -->
+            <div class="inline-drawer thrive-group" id="thrive_connection_group">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <div class="thrive-group__title">
+                        <b>API 连接</b>
+                        <small class="thrive-group__hint">会话走后端 · 全局</small>
+                    </div>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+                    <div class="thrive-row">
+                        <label for="thrive_connection_profile">学习会话使用
+                            <button type="button" class="thrive-help" data-help="thrive_help_connection"
+                                aria-expanded="false" aria-controls="thrive_help_connection" title="说明">?</button>
+                        </label>
+                        <select id="thrive_connection_profile" class="text_pole thrive-select"></select>
+                    </div>
+                    <div id="thrive_help_connection" class="thrive-help__body">
+                        学习与压缩在独立会话里跑，和聊天一样要发请求。这里决定它们用哪一份配置：
+                        「跟随当前设置」就是聊天此刻用的那个 API；选了具体一份，就改用 ST
+                        「连接配置」里那一份的 api / 模型 / 密钥。那一份的预设不随行——
+                        会话的提示词由插件自己编译。
+                        只有聊天补全（Chat Completion）的配置会出现在这里——文本补全带不了工具。
+                        改动只影响之后新开的会话，正在跑的那一场不会中途换路。
+                    </div>
+                    <small id="thrive_connection_hint" class="thrive-hint displayNone"></small>
                 </div>
             </div>
 

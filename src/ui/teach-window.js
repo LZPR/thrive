@@ -63,6 +63,7 @@ export function initTeachWindow() {
     win.addEventListener('input', onInput);
     win.addEventListener('change', onChange);
     win.addEventListener('keydown', onKeyDown);
+    win.addEventListener('paste', onPaste);
 
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && isTeachWindowOpen()) {
@@ -146,7 +147,7 @@ const BODY = `
             <i class="fa-regular fa-image" aria-hidden="true"></i> 图片
         </div>
         <input type="file" accept="image/*" multiple class="displayNone" data-role="teach-file">
-        <span class="thrive-teach__hint">这次的材料就是上面这些，产出照样走工具写进世界书 / 角色描述。</span>
+        <span class="thrive-teach__hint">正文和图片都能直接粘贴。这次的材料就是上面这些，产出照样走工具写进世界书 / 角色描述。</span>
         <div class="menu_button thrive-teach__go" data-act="teach-start" title="在独立会话里教一次">开始教授</div>
     </div>`;
 
@@ -227,6 +228,30 @@ function onKeyDown(event) {
     }
 }
 
+/**
+ * 粘贴：图片进草稿，纯文字走 textarea 的默认行为。
+ *
+ * 剪贴板里同时有图和字的时候（从网页复制的图文、截图工具附带的说明），只接图片并
+ * 拦掉默认插入——那段说明往往是一串无关的文件名或网址，塞进正文还得自己删。
+ * 只有文字时一律不拦：光标在哪插在哪，那是输入框本来的行为，不该由我们重写。
+ *
+ * @param {ClipboardEvent} event
+ */
+function onPaste(event) {
+    const items = Array.from(event.clipboardData?.items ?? []);
+    const files = items
+        .filter(item => item.kind === 'file' && String(item.type ?? '').startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+
+    if (files.length === 0) {
+        return;
+    }
+
+    event.preventDefault();
+    void addFiles(files);
+}
+
 /* ------------------------------------------------------------------ 图片 */
 
 /**
@@ -292,7 +317,7 @@ async function readImageFile(file) {
         return { ok: false, hint: `「${file.name}」读不进来` };
     }
 
-    const meta = { name: String(file.name ?? '图'), kb: Math.round(file.size / 1024) };
+    const meta = { name: String(file.name || '图'), kb: Math.round(file.size / 1024) };
 
     // 小图原样发：重编码会掉画质，也省一次 canvas
     if (file.size <= KEEP_BYTES) {
@@ -406,7 +431,11 @@ async function startTeach() {
             return;
         }
 
-        started.promise.catch(err => console.error(`${LOG} 教授会话异常`, err));
+        /*
+         * 排上队时没有 promise（那一场要等前面的跑完），此时 progress 走的是
+         * LEARNING_EVENT 广播，不是这里的返回值。
+         */
+        started.promise?.catch(err => console.error(`${LOG} 教授会话异常`, err));
 
         // 成功了才清空：失败时草稿必须留着
         draft = { text: '', images: [] };
@@ -419,7 +448,9 @@ async function startTeach() {
         renderImages();
         syncCount();
 
-        toast('开始教授：在独立会话里跑，不影响当前聊天；结束后另弹一条摘要');
+        toast(started.queued > 0
+            ? `已排队（第 ${started.queued} 位）：前面那一场跑完接着教`
+            : '开始教授：在独立会话里跑，不影响当前聊天；结束后另弹一条摘要');
     } finally {
         busy = false;
         setBusy(false);

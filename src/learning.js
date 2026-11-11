@@ -21,7 +21,7 @@
  *   - 结果永远以摘要形式落盘（几轮、几次工具、成功与否），不存会话全文
  */
 
-import { diagnoseEnvironment, formatDiagnosis } from './diagnostics.js';
+import { hintFor } from './diagnostics.js';
 import { notifyLearning } from './events.js';
 import { TRIGGER, intervalProgress, lastRound, parseKeywords, countMessages, visibleMessages } from './auto-learn.js';
 import { readLimits } from './limits.js';
@@ -158,40 +158,130 @@ export function buildTeachTarget(teach = null) {
 }
 
 /**
+ * 一次最多排多少场。
+ *
+ * 学习本身有判据兜着，这个上限只防"手动连点"与"关键词连续命中"把队排到天边。
+ * 到了上限就不再收，而不是静默丢掉最新的——用户至少知道刚才那一下没生效。
+ */
+export const MAX_QUEUE = 6;
+
+/**
+ * 等待中的任务，**只活在内存里**（ADR-052）。
+ *
+ * 不落盘：排队是"我马上还要学一次"，进程重启后重放它没有意义，反而可能把旧内容
+ * 当成新任务再写一遍。每个任务带着它所属的 `chatId`，切换对话时整队清掉。
+ *
+ * 项的形状：`{ reason, teach: { text, images }|null, chatId, at, ctx }`
+ */
+const queue = [];
+
+/** 正在从队列里取下一场：防止"自然结束"与"手动停止"同时驱动一次出队 */
+let pumping = false;
+
+/**
+ * 现在排队等着的任务（给面板与 `/thrive status` 看）。
+ * @returns {Array<{ reason: string, teach: object|null, chatId: string, at: number }>}
+ */
+export function getLearningQueue() {
+    return queue.map(({ ctx, ...rest }) => ({ ...rest }));
+}
+
+/**
+ * 清空队列。切换对话时调用：排队的任务写的是"那个对话"的世界书，换场就没意义了。
+ * @returns {number} 丢掉了几场
+ */
+export function clearLearningQueue() {
+    const dropped = queue.length;
+    queue.length = 0;
+    return dropped;
+}
+
+/**
  * 开始一次学习。同步做完所有检查，跑起来之后立刻返回。
  *
  * 两种目标来源共用同一条链路：
  *   · 默认：当前对话记录（`buildChatTarget`），走过判据、记基线
  *   · `teach`：用户自己写的一段话 + 可选图片（`buildTeachTarget`），不记基线
  *
+ * **同时只跑一场，其余排队**（ADR-052）。已经有会话在跑时，这一场进队列并立刻返回
+ * `{ ok: true, queued: N }`——没有 promise，进度靠 `LEARNING_EVENT` 广播。
+ *
  * @param {object} ctx 现取的 context
  * @param {{ reason?: string, teach?: { text?: string, images?: string[] }|null }} [options]
- * @returns {{ ok: true, promise: Promise<object> } | { ok: false, error: string, hint: string }}
+ * @returns {{ ok: true, promise: Promise<object>, queued: 0 }
+ *          | { ok: true, queued: number }
+ *          | { ok: false, error: string, hint: string }}
  */
 export function startLearning(ctx, { reason = 'manual', teach = null } = {}) {
     if (!isChatAvailable(ctx)) {
         return { ok: false, error: 'NO_CHAT', hint: '请先打开一个对话。' };
     }
 
-    if (isSessionRunning()) {
-        return { ok: false, error: 'SESSION_BUSY', hint: '已经有一场学习在跑，等它结束或 `/thrive stop`。' };
-    }
-
-    const diag = diagnoseEnvironment(ctx);
-    if (!diag.ok) {
-        return { ok: false, error: diag.code, hint: `工具调用不可用：${formatDiagnosis(diag)}` };
-    }
-
-    const settings = ensureSettings(ctx);
-    const limits = readLimits(settings);
-
-    // 教授：目标是用户写的那段话，与当前对话无关
+    // 教授的内容在入队时就定型：它就是用户此刻写下的那段话，不该等轮到它再说
     const taught = teach ? buildTeachTarget(teach) : null;
     if (taught && !taught.ok) {
         return taught;
     }
 
-    const target = taught ? taught.text : buildChatTarget(ctx, { limitChars: limits.learnHistoryChars }).text;
+    const task = {
+        reason: taught ? TRIGGER.TEACH : reason,
+        teach: taught ? { text: taught.text, images: taught.images } : null,
+        chatId: readChatId(ctx),
+        at: Date.now(),
+        ctx,
+    };
+
+    if (isSessionRunning()) {
+        if (queue.length >= MAX_QUEUE) {
+            return { ok: false, error: 'SESSION_QUEUE_FULL', hint: hintFor('SESSION_QUEUE_FULL') };
+        }
+
+        queue.push(task);
+        console.info(`${LOG} 已排队（第 ${queue.length} 位，${describeQueueItem(task.reason)}）`);
+        notifyLearning({ running: true, reason: getLearningRunning()?.reason ?? '', queued: queue.length });
+        return { ok: true, queued: queue.length };
+    }
+
+    return launch(ctx, task);
+}
+
+/**
+ * 真正开一场。同步部分（读目标、编预设、记基线）在这里，异步部分交给 `runLearning`。
+ *
+ * 会话结束后**一定要**再调一次 `pump()`：排队的那几场就是靠这一行接着往下走的。
+ *
+ * @param {object} ctx
+ * @param {{ reason: string, teach: { text: string, images: string[] }|null, chatId: string, at: number }} task
+ * @returns {{ ok: true, promise: Promise<object>, queued: 0 } | { ok: false, error: string, hint: string }}
+ */
+function launch(ctx, task) {
+    const plan = prepare(ctx, task);
+    if (!plan.ok) {
+        return plan;
+    }
+
+    // 跑完（不管成没成）都去看一眼队列：排队的那几场就是靠这一行接着往下走的
+    const promise = runLearning(ctx, plan).finally(() => pump());
+
+    return { ok: true, promise, queued: 0 };
+}
+
+/**
+ * 同步准备：目标内容 → 预设 → 基线与运行标记。
+ *
+ * 教授不走 `beginLearn`：它读的不是对话记录，记了基线等于把这一段聊天标记成
+ * "已经学过"，而实际上一句都没看过。
+ *
+ * @param {object} ctx
+ * @param {{ reason: string, teach: { text: string, images: string[] }|null }} task
+ * @returns {object}
+ */
+function prepare(ctx, task) {
+    const settings = ensureSettings(ctx);
+    const limits = readLimits(settings);
+    const target = task.teach
+        ? task.teach.text
+        : buildChatTarget(ctx, { limitChars: limits.learnHistoryChars }).text;
 
     if (!target.trim()) {
         return { ok: false, error: 'NO_TARGET', hint: '这个对话还没有可学的内容（没有可见消息）。' };
@@ -206,14 +296,11 @@ export function startLearning(ctx, { reason = 'manual', teach = null } = {}) {
         };
     }
 
-    /*
-     * 基线与哈希在**开始前**就写：跑到一半又来了新消息时，那几条不算进"已经学过的
-     * 那一段"，下一轮会重新看到它们。落盘在这里做一次，结束后再存一次结果。
-     *
-     * 教授不走这里：它读的不是对话记录，记了基线等于把这一段聊天标记成"已经学过"，
-     * 而实际上一句都没看过。
-     */
-    if (!taught) {
+    if (!task.teach) {
+        /*
+         * 基线与哈希在**开始前**就写：跑到一半又来了新消息时，那几条不算进"已经学过的
+         * 那一段"，下一轮会重新看到它们。落盘在这里做一次，结束后再存一次结果。
+         */
         const round = lastRound(ctx);
         beginLearn(ctx, {
             total: countMessages(ctx),
@@ -224,31 +311,82 @@ export function startLearning(ctx, { reason = 'manual', teach = null } = {}) {
         saveChat(ctx);
     }
 
-    const why = taught ? TRIGGER.TEACH : reason;
-
-    markLearningRunning({ reason: why });
-    notifyLearning({ running: true, reason: why });
+    markLearningRunning({ reason: task.reason });
+    notifyLearning({ running: true, reason: task.reason, queued: queue.length });
 
     return {
         ok: true,
-        promise: runLearning(ctx, {
-            reason: why,
-            settings,
-            limits,
-            preset,
-            images: taught ? taught.images : null,
-        }),
+        reason: task.reason,
+        settings,
+        limits,
+        preset,
+        images: task.teach ? task.teach.images : null,
+        // 连接配置在这时候读一次就定下来：一场会话从头到尾只走一条路
+        profileId: String(settings.connectionProfile ?? ''),
     };
+}
+
+/**
+ * 从队列里取下一场。只有"没有会话在跑"时才会真的动手。
+ *
+ * 属于别的对话的任务直接丢掉：它写的是那个对话的世界书，换场之后跑它等于把内容
+ * 塞到另一个角色身上。
+ */
+function pump() {
+    if (pumping || isSessionRunning()) {
+        return;
+    }
+
+    pumping = true;
+    try {
+        while (queue.length > 0) {
+            const task = queue.shift();
+
+            if (!isChatAvailable(task.ctx) || readChatId(task.ctx) !== task.chatId) {
+                console.info(`${LOG} 排队的任务已不属于当前对话，丢掉（${describeQueueItem(task.reason)}）`);
+                continue;
+            }
+
+            const started = launch(task.ctx, task);
+            if (started.ok) {
+                return;
+            }
+
+            console.warn(`${LOG} 排队的学习没能开始：${started.hint}`);
+            // 排到队又要报一句：用户看不到控制台。摘要形状与跑完一场时一致
+            notifyLearning({
+                running: false,
+                reason: task.reason,
+                result: { ok: false, stopped: 'error', reason: task.reason, error: started.error, hint: started.hint, rounds: 0, toolCalls: 0 },
+            });
+        }
+    } finally {
+        pumping = false;
+    }
+}
+
+/** 队列项的短说明，给控制台与面板用 */
+function describeQueueItem(reason) {
+    return reason === TRIGGER.TEACH ? '教授' : '学这段对话';
+}
+
+/** 当前对话的 id；拿不到时返回空串（比较时自然不相等，任务会被丢掉） */
+function readChatId(ctx) {
+    try {
+        return String(ctx?.getCurrentChatId?.() ?? '');
+    } catch {
+        return '';
+    }
 }
 
 /**
  * 跑完一场，把结果写回状态。**永不 throw**。
  *
  * @param {object} ctx
- * @param {{ reason: string, settings: object, limits: object, preset: object, images?: string[]|null }} plan
+ * @param {{ reason: string, settings: object, limits: object, preset: object, images?: string[]|null, profileId?: string }} plan
  * @returns {Promise<object>} 摘要（同时已经写进对话状态）
  */
-async function runLearning(ctx, { reason, settings, limits, preset, images = null }) {
+async function runLearning(ctx, { reason, settings, limits, preset, images = null, profileId = '' }) {
     const attached = Array.isArray(images) ? images : [];
     let result = null;
 
@@ -260,6 +398,7 @@ async function runLearning(ctx, { reason, settings, limits, preset, images = nul
             images: attached,
             maxRounds: limits.learnRounds,
             tools: createSessionTools(),
+            profileId,
         });
     } catch (err) {
         // runSession 自己会兜住异常；到这里说明是它之外的东西炸了
@@ -290,8 +429,16 @@ async function runLearning(ctx, { reason, settings, limits, preset, images = nul
     return summary;
 }
 
-/** 中止正在跑的那一场（`/thrive stop`、切换对话时用） */
+/**
+ * 中止正在跑的那一场（`/thrive stop`、切换对话时用）。
+ *
+ * **连排队的一起停**：只停当前那一场的话，`pump()` 会立刻开下一场，用户按的
+ * "停止"看起来就像没生效——屏幕上还在"学习中"，只是换了个任务。
+ *
+ * @returns {boolean} 有没有一场在跑（队列单独被清空时也返回 false）
+ */
 export function stopLearning() {
+    clearLearningQueue();
     return abortActiveSession();
 }
 
@@ -312,6 +459,7 @@ export function isLearningRunning() {
  */
 export function getLearningView(ctx, settings) {
     const progress = intervalProgress(ctx, settings);
+    const chatId = readChatId(ctx);
 
     return {
         enabled: isEnabled(ctx),
@@ -321,6 +469,8 @@ export function getLearningView(ctx, settings) {
         since: progress.since,
         remaining: progress.remaining,
         keywordCount: parseKeywords(settings.learnKeywords).length,
+        // 只数属于这个对话的：别的对话的任务出队时会被丢掉，没有理由显示在这儿
+        queued: queue.filter(item => item.chatId === chatId).length,
     };
 }
 

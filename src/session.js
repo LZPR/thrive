@@ -82,12 +82,13 @@ let last = null;
  *   deps?: { probe?: Function, request?: Function, sampling?: object }|null,
  *   preset?: object|null,
  *   maxRounds?: number|null,
+ *   profileId?: string,
  * }} options
  * @returns {Promise<{ ok: true, session: object } | { ok: false, error: string, hint: string, detail?: string }>}
  */
-export async function openSession({ ctx, deps = null, preset = null, maxRounds = null, tools = null } = {}) {
+export async function openSession({ ctx, deps = null, preset = null, maxRounds = null, tools = null, profileId = '' } = {}) {
     const probe = typeof deps?.probe === 'function' ? deps.probe : probeTransport;
-    const probed = await probe(ctx);
+    const probed = await probe(ctx, { profileId });
 
     if (!probed.ok) {
         return { ok: false, error: probed.error, hint: composeHint(probed.error, probed.detail), detail: probed.detail };
@@ -95,17 +96,26 @@ export async function openSession({ ctx, deps = null, preset = null, maxRounds =
 
     const limits = readLimits(ctx, maxRounds);
 
+    /*
+     * 用哪一份连接在这里就定下来：一场会话从头到尾只走一条路，中途改设置
+     * 不该让同一场会话前几轮用 A、后几轮用 B。
+     */
+    const request = typeof deps?.request === 'function'
+        ? deps.request
+        : (innerCtx, req) => requestOnce(innerCtx, { ...req, profileId });
+
     const session = {
         id: createId('sess'),
         state: 'open',
         ctx,
         st: probed.st ?? null,
-        deps: { request: typeof deps?.request === 'function' ? deps.request : requestOnce },
+        deps: { request },
         messages: [],
         tools: Array.isArray(tools) ? tools : createSessionTools(),
         sampling: deps?.sampling ?? DEFAULT_SAMPLING,
         abort: new AbortController(),
         limits,
+        profileId: String(profileId ?? ''),
         stats: { rounds: 0, toolCalls: 0, sawTools: false, startedAt: Date.now(), ms: 0 },
         transcript: [],
         presetId: String(preset?.id ?? ''),
@@ -348,6 +358,7 @@ export function closeSession(session, reason = 'done') {
  *   images?: string[]|null,
  *   maxRounds?: number|null,
  *   deps?: object|null,
+ *   profileId?: string,
  * }} options
  * @returns {Promise<object>}
  */
@@ -359,6 +370,7 @@ export async function runSession({
     maxRounds = null,
     deps = null,
     tools = null,
+    profileId = '',
 } = {}) {
     if (active || starting) {
         return {
@@ -377,7 +389,7 @@ export async function runSession({
     starting = true;
     let opened;
     try {
-        opened = await openSession({ ctx, deps, preset, maxRounds, tools });
+        opened = await openSession({ ctx, deps, preset, maxRounds, tools, profileId });
     } finally {
         starting = false;
     }

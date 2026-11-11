@@ -8,9 +8,8 @@
 import { getContext } from '../../../../../extensions.js';
 import { TRIGGER, intervalProgress, parseKeywords } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
-import { diagnoseEnvironment } from '../diagnostics.js';
 import { summarizeDraft } from '../draft.js';
-import { describeLearnRun } from '../learning.js';
+import { describeLearnRun, getLearningView } from '../learning.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import {
     ensureSettings,
@@ -26,7 +25,7 @@ import { getWritableBook, isBookScanned } from '../targets.js';
  * 一行状态摘要，给 `/thrive status` 用。
  *
  * 一眼要能看出四件事：开关、模块、可写书、待确认份数。
- * 环境不可用时补一句原因——否则用户会以为"都开着，为什么模型不理我"。
+ * 正在排队的那几场也顺带说一句——`/thrive status` 是唯一能一次看全的地方。
  *
  * @param {object} [ctx]
  */
@@ -77,11 +76,6 @@ export function describeStatus(ctx = getContext()) {
         parts.push(`超长：${compress} 条（/thrive compress 打开压缩面板）`);
     }
 
-    const diag = diagnoseEnvironment(ctx);
-    if (!diag.ok) {
-        parts.push(`工具不可用（${diag.reason}）`);
-    }
-
     return parts.join(' · ');
 }
 
@@ -94,13 +88,17 @@ export function describeStatus(ctx = getContext()) {
  * @param {object} settings
  */
 function describeLearnState(ctx, settings) {
+    // 排队的那几场也算"正在学"的一部分：一次只跑一场，剩下的按顺序等
+    const queued = getLearningView(ctx, settings).queued;
+    const tail = queued > 0 ? ` · 排队 ${queued}` : '';
+
     const running = getLearningRunning();
     if (running) {
         // 教授的输入是自己写的一段话，说"自动触发"会误导
         if (running.reason === TRIGGER.TEACH) {
-            return '教授中（你写的那段话，不影响当前聊天）';
+            return `教授中（你写的那段话，不影响当前聊天）${tail}`;
         }
-        return `学习中（${running.reason === TRIGGER.MANUAL ? '手动' : '自动'}触发，不影响当前聊天）`;
+        return `学习中（${running.reason === TRIGGER.MANUAL ? '手动' : '自动'}触发，不影响当前聊天）${tail}`;
     }
 
     if (!isEnabled(ctx)) {
@@ -124,6 +122,6 @@ function describeLearnState(ctx, settings) {
     }
 
     const progress = intervalProgress(ctx, settings);
-    const tail = interval > 0 && isChatAvailable(ctx) ? `，还差 ${progress.remaining} 条` : '';
-    return `已开启（${rules.join(' + ')}${tail}）`;
+    const gap = interval > 0 && isChatAvailable(ctx) ? `，还差 ${progress.remaining} 条` : '';
+    return `已开启（${rules.join(' + ')}${gap}）`;
 }

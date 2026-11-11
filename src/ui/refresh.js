@@ -1,7 +1,7 @@
 /**
  * ui/refresh.js · 刷新编排 + 面板开关
  *
- * 界面有好几块要看同一份状态：设置页的控件、设置页顶部的环境诊断、徽章、浮动面板、
+ * 界面有好几块要看同一份状态：设置页的控件、徽章、浮动面板、
  * 压缩面板、面板标题栏上的压缩角标。它们各自在哪个文件里实现，这里不 import——各自把
  * 刷新函数登记到下面的表里。
  *
@@ -11,7 +11,6 @@
 
 import { getContext } from '../../../../../extensions.js';
 import { getCompressSnapshot, requestCompressScan } from '../compress.js';
-import { diagnoseEnvironment } from '../diagnostics.js';
 import { COMPRESS_EVENT } from '../events.js';
 import { ensureSettings, isChatAvailable } from '../store.js';
 import { COMPRESS_ID, isPanelOpen, markPanelOpen, toast } from './shared.js';
@@ -28,8 +27,6 @@ import { COMPRESS_ID, isPanelOpen, markPanelOpen, toast } from './shared.js';
 const SURFACES = {
     /** 设置页：各控件按现状回填 */
     controls: () => {},
-    /** 设置页：顶部的环境诊断 */
-    diagnostics: () => {},
     /** 聊天区：徽章 */
     badge: () => {},
     /** 聊天区：浮动面板 */
@@ -97,13 +94,9 @@ export function setPanelOpen(open, ctx = getContext()) {
  */
 export function refreshUI(ctx = getContext()) {
     const settings = ensureSettings(ctx);
-
     const available = isChatAvailable(ctx);
-    // 每次都现算：用户可能刚在 ST 面板里改了函数调用开关，缓存下来的结论会撒谎
-    const diag = diagnoseEnvironment(ctx);
 
-    const view = { ctx, settings, available, diag };
-    paint('diagnostics', view);
+    const view = { ctx, settings, available };
     paint('badge', view);
     paint('controls', view);
     paint('panel', view);
@@ -137,9 +130,8 @@ export function refreshUI(ctx = getContext()) {
 export function refreshBadgeOnly(ctx = getContext()) {
     const settings = ensureSettings(ctx);
     const available = isChatAvailable(ctx);
-    const diag = diagnoseEnvironment(ctx);
 
-    const view = { ctx, settings, available, diag };
+    const view = { ctx, settings, available };
     paint('badge', view);
 
     /*

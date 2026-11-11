@@ -23,7 +23,6 @@ import { getContext } from '../../../../../extensions.js';
 import { TRIGGER, describeTrigger } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { getDescTargetSnapshot, isWorldbookDesc } from '../desc.js';
-import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
 import {
     describeLearnRun,
@@ -216,7 +215,7 @@ export function refreshPanel(ctx = getContext()) {
     const signature = JSON.stringify([
         learn.enabled,
         learn.usable,
-        learn.diag.code,
+        learn.queued,
         learn.running ? [learn.running.reason, learn.running.startedAt] : null,
         learn.last ? [learn.last.at, learn.last.ok, learn.last.toolCalls, learn.last.stopped] : null,
         learn.interval,
@@ -331,22 +330,21 @@ function restorePanelFocus(focus) {
  */
 function readLearnView(ctx, settings) {
     const view = getLearningView(ctx, settings);
-    const diag = diagnoseEnvironment(ctx);
     const available = isChatAvailable(ctx);
 
     return {
         ...view,
         available,
-        // 两种"不可用"共用一档：没有对话、环境不支持工具调用
-        usable: available && diag.ok,
-        diag,
+        // 只剩一种"不可用"：没有对话。工具能不能用只有真发一次请求才知道，
+        // 不在这里预先猜（ADR-052）。
+        usable: available,
     };
 }
 
 /* -------------------------------------------------------------- 学习开关 */
 
 /**
- * "现在点了也没用"的两个原因，任一成立就不能切。
+ * "现在点了也没用"的原因只有一个：没有打开的对话。
  *
  * 只判不喊：原因由面板正文里那行 notice 说明（整块压暗 + 一行字），切换本身一律静默——
  * 拨一下开关就弹一条 toast，在窄屏上挡住半块面板，比不给反馈更烦人。
@@ -355,8 +353,7 @@ function readLearnView(ctx, settings) {
  * @returns {boolean} 能不能切
  */
 function canToggleLearn(ctx) {
-    // 没对话 / 环境不支持工具调用时开了也只是"灯亮着"（ADR-020：不替用户改 ST 设置）
-    return isChatAvailable(ctx) && diagnoseEnvironment(ctx).ok;
+    return isChatAvailable(ctx);
 }
 
 /**
@@ -508,12 +505,13 @@ function renderPanel({
  *   立刻学一次  学这段对话
  *   教授        学我写的那段话（与对话无关，会打开教授窗口）
  *
- * 教授只在空闲时出现：同一时刻只允许一场会话，摆一个按不动的按钮不如不摆。
+ * 有任务在跑时还能点这两个按钮：它们会进队列，串行跑完。所以按钮不隐藏，只是
+ * 状态行尾巴上多一句"排队 N"——用户点了没反应比点了要等更让人困惑。
  *
  * @param {ReturnType<typeof readLearnView>} view
  */
 function renderLearnSection(view) {
-    const { enabled, running, last, usable, available, diag, interval, remaining, keywordCount } = view;
+    const { enabled, running, last, usable, available, interval, remaining, keywordCount, queued } = view;
 
     /*
      * 第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
@@ -529,15 +527,8 @@ function renderLearnSection(view) {
                     ? `${keywordCount} 个词`
                     : '未配判据';
 
-    /*
-     * 不可用的原因只能写一条：同时列两条，用户还是不知道该先改哪个。
-     * 先看对话，再看环境。
-     */
-    const blocked = !available
-        ? '请先打开一个对话。'
-        : !diag.ok
-            ? `工具调用不可用：${formatDiagnosis(diag)}`
-            : '';
+    // 现在只剩一个"不可用"的原因：没有打开的对话
+    const blocked = !available ? '请先打开一个对话。' : '';
 
     const status = running
         // 教授与学习是两件事，一行里说清楚现在跑的是哪一种
@@ -545,6 +536,11 @@ function renderLearnSection(view) {
             ? '正在教授 · 不影响当前聊天'
             : `正在学（${describeTrigger({ reason: running.reason })}）· 不影响当前聊天`
         : describeLearnRun(last);
+
+    // 排队只在有活干的时候出现；没有队列时这一行不占地方
+    const queueNote = running && queued > 0
+        ? `<span class="thrive-learn__queue" title="学习一次只跑一场，其余的按顺序接着跑">排队 ${queued}</span>`
+        : '';
 
     return `
         <section class="thrive-panel__section thrive-modes">
@@ -556,14 +552,15 @@ function renderLearnSection(view) {
                 <span class="thrive-learn__status" title="学习在独立会话里跑，结果只写进世界书与角色描述">
                     ${escapeHtml(status)}
                 </span>
+                ${queueNote}
                 <div class="thrive-learn__actions">
-                    ${running ? '' : `<div class="menu_button thrive-panel__button thrive-learn__go"
+                    <div class="menu_button thrive-panel__button thrive-learn__go"
                         data-thrive-action="open-teach"
-                        title="跳过这段对话，直接写一段话（可附图）教模型一件事">教授</div>`}
+                        title="跳过这段对话，直接写一段话（可附图）教模型一件事；有任务在跑时会排队">教授</div>
                     <div class="menu_button thrive-panel__button thrive-learn__go${running ? ' thrive-panel__button--ghost' : ''}"
                         data-thrive-action="${running ? 'stop-learn' : 'learn-now'}"
                         title="${running
-                            ? '中止正在跑的这一场；已经写进去的内容不会撤回'
+                            ? '中止正在跑的这一场，排队的一起取消；已经写进去的内容不会撤回'
                             : '不等判据，立刻在独立会话里学一次'}">${running ? '停止' : '立刻学一次'}</div>
                 </div>
             </div>
@@ -1113,17 +1110,16 @@ async function learnNowAndReport() {
         return;
     }
 
-    const diag = diagnoseEnvironment(ctx);
-    if (!diag.ok) {
-        toast(`工具调用不可用：${formatDiagnosis(diag)}`);
-        return;
-    }
-
     const started = await startLearning(ctx, { reason: 'manual' });
 
     if (!started.ok) {
         toast(started.hint ?? `没能开始学习：${started.error}`);
         return;
+    }
+
+    // 排上队了要明说：否则用户点了按钮，看见的却还是"正在学（上一场）"
+    if (started.queued > 0) {
+        toast(`已排队（第 ${started.queued} 位），上一场跑完接着学`);
     }
 
     // 开始成功不弹 toast：状态行与徽章会立刻变成"学习中"，再弹一条反而挡住面板
@@ -1145,7 +1141,7 @@ function stopLearnAndReport() {
     }
 
     stopLearning();
-    toast('已中止这次学习（已经写进去的内容不会撤回）');
+    toast('已中止这次学习（排队的也一起取消了；已经写进去的内容不会撤回）');
     refreshUI(ctx);
 }
 

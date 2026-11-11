@@ -1,169 +1,18 @@
 /**
- * diagnostics.js · 环境诊断 + 错误文案目录
+ * diagnostics.js · 错误文案目录
  *
- * 诊断只回答一件事：为什么工具没生效、该去哪改。
+ * 只干一件事：错误码 → 一句能照做的 hint。调用点自己的 hint 更具体（带书名、字数），
+ * 优先用调用点的；这里保证的是"任何一条错误回到模型或用户面前时都有下一步动作"，
+ * 不会出现裸的 `{ ok: false, error }`。
  *
- * 结论一律以 `ctx.isToolCallingSupported()` 为准（ADR-020）。只有它返回 false 时
- * 才去读 `oai_settings` 的内部字段细分原因——这是"帮用户定位"的补充信息，
- * 不是第二份可用性判定。任何一步读不到就降级成"判断不了"，不抛错：
- * ST 升级改了字段名时，诊断区不该把整个设置面板带崩。
- */
-
-/** 细分原因的代号。`OK` 之外都表示工具当前不可用。 */
-export const DIAG_CODES = Object.freeze({
-    OK: 'OK',
-    /** 判断不了：ST 没暴露接口，或读内部字段时出错 */
-    UNKNOWN: 'UNKNOWN',
-    /** 不是 chat completion 后端 */
-    TEXT_COMPLETION: 'TEXT_COMPLETION',
-    /** 函数调用开关没开 */
-    FUNCTION_CALLING: 'FUNCTION_CALLING',
-    /** 提示词后处理会移除工具消息 */
-    POST_PROCESSING: 'POST_PROCESSING',
-    /** 设置都对，但模型/来源不支持 tools */
-    MODEL: 'MODEL',
-});
-
-/**
- * ST 1.19 允许的后处理模式白名单（`tool-calling.js` 里 `isToolCallingSupported` 的同名单）。
- * 空串就是 NONE。`merge` / `semi` / `strict` / `single` 会把历史工具调用删掉，工具等于白调。
- */
-const POST_PROCESSING_ALLOWED = new Set(['', 'merge_tools', 'semi_tools', 'strict_tools']);
-
-/** 后端名字是给用户看的，用户只认得面板上那两行字 */
-const MAIN_API_LABELS = Object.freeze({
-    openai: 'Chat Completion',
-    textgenerationwebui: 'Text Completion',
-    kobold: 'KoboldAI',
-    koboldhorde: 'AI Horde',
-    novel: 'NovelAI',
-});
-
-function ok() {
-    return {
-        ok: true,
-        code: DIAG_CODES.OK,
-        reason: '当前连接支持函数调用，工具可以正常发出。',
-        fix: '',
-    };
-}
-
-function fail(code, reason, fix) {
-    return { ok: false, code, reason, fix };
-}
-
-/**
- * 判断不了时的统一答案。
+ * **这里不再做环境诊断**：会话的 `tools` 由我们自己写进 payload，ST 那个
+ * 「启用函数调用」开关管不到它，拿它当门禁只会拦住本来能跑的学习（ADR-052）。
+ * 真正发不出去的时候，错误会以 `SESSION_TRANSPORT` / `SESSION_PROFILE_*` 的形式回来，
+ * 那比"预先猜它不行"准得多。
  *
- * 不猜：猜错会让用户去改一个本来就对的设置，比"我不知道"更糟。
- */
-function unknown(reason) {
-    return fail(
-        DIAG_CODES.UNKNOWN,
-        reason,
-        '按顺序检查三处：Chat Completion 连接 → 「启用函数调用」→ 提示词后处理。',
-    );
-}
-
-/**
- * 问 ST 要结论。
- * @returns {boolean|null} null = 拿不到结论（接口不存在或调用抛错）
- */
-function readSupport(ctx) {
-    if (typeof ctx?.isToolCallingSupported !== 'function') {
-        return null;
-    }
-
-    try {
-        return Boolean(ctx.isToolCallingSupported());
-    } catch (err) {
-        console.debug('[Thrive] isToolCallingSupported 抛错', err);
-        return null;
-    }
-}
-
-/**
- * 环境诊断。
- *
- * @param {object} ctx getContext() 的返回值，调用方现取
- * @returns {{ ok: boolean, code: string, reason: string, fix: string }}
- */
-export function diagnoseEnvironment(ctx) {
-    if (!ctx) {
-        return unknown('拿不到 SillyTavern 的上下文，判断不了工具调用是否可用。');
-    }
-
-    const supported = readSupport(ctx);
-    if (supported === true) {
-        return ok();
-    }
-    if (supported === null) {
-        return unknown('这个 SillyTavern 没有暴露工具可用性接口，判断不了具体状态。');
-    }
-
-    // 到这里结论已经确定：工具不可用。下面只是把"为什么"说细一点。
-    try {
-        // ctx.chatCompletionSettings 就是 oai_settings；ctx.mainApi 是 main_api 的快照
-        const settings = ctx.chatCompletionSettings ?? {};
-        const mainApi = String(ctx.mainApi ?? settings.main_api ?? '');
-
-        if (mainApi !== 'openai') {
-            const label = MAIN_API_LABELS[mainApi] ?? (mainApi || '未知');
-            return fail(
-                DIAG_CODES.TEXT_COMPLETION,
-                '需要 chat completion 连接，当前是文本补全。',
-                `到「AI 响应配置 → 聊天补全来源」把接口换成 Chat Completion（现在是 ${label}）。`,
-            );
-        }
-
-        if (!settings.function_calling) {
-            return fail(
-                DIAG_CODES.FUNCTION_CALLING,
-                '「启用函数调用」没有勾上，ST 不会把工具发给模型。',
-                '到「AI 响应配置」勾选「启用函数调用」（Continue Postfix 折叠块下面）。'
-                + '套用预设会覆盖它，换过预设后要重新确认。',
-            );
-        }
-
-        const post = settings.custom_prompt_post_processing ?? '';
-        if (!POST_PROCESSING_ALLOWED.has(String(post))) {
-            return fail(
-                DIAG_CODES.POST_PROCESSING,
-                '当前后处理模式会移除工具消息，请换成 None 或带 `_tools` 的模式。',
-                `到「AI 响应配置 → 提示词后处理」把「${post}」改成 None / merge_tools / semi_tools / strict_tools。`,
-            );
-        }
-
-        return fail(
-            DIAG_CODES.MODEL,
-            '当前模型不支持工具调用（部分来源会按模型能力判定）。',
-            '换一个支持 tools 的模型或来源；OpenRouter 之类的来源看模型是否声明了 tools 能力。',
-        );
-    } catch (err) {
-        console.warn('[Thrive] 细分诊断失败', err);
-        return unknown('工具调用不可用，但判断不了具体原因。');
-    }
-}
-
-/**
- * 一行结论，给徽章点击提示与 `/thrive status` 用。
- * @param {{ ok: boolean, reason: string, fix: string }} diag
- */
-export function formatDiagnosis(diag) {
-    if (!diag || diag.ok) {
-        return '';
-    }
-    return diag.fix ? `${diag.reason}${diag.fix}` : diag.reason;
-}
-
-/* -------------------------------------------------------------- 错误文案目录 */
-
-/**
- * 每个错误码的兜底 hint。
- *
- * 调用点自己的 hint 更具体（带书名、字数），优先用调用点的；这里保证的是
- * "任何一条错误回到模型面前时都有下一步动作"，不会出现裸的 `{ ok: false, error }`。
- * `tools.js` 的 errorResult 在拿不到 hint 时回落到这张表。
+ * 下面这张表的用法：调用点自己的 hint 更具体（带书名、字数），优先用调用点的；
+ * 拿不到时回落到这张表，保证不会出现裸的 `{ ok: false, error }`。
+ * `tools.js` 的 errorResult 就是这么用的。
  *
  * 文案边界（spec §11.5）：只说模型自己能做的动作，不替它对用户讲话。
  */
@@ -232,12 +81,17 @@ export const ERROR_HINTS = Object.freeze({
     SESSION_DRIFT: 'ST 的这一处行为和预期不一样（请求类型或流式开关），内部会话已停下。'
         + '多半是 ST 升级改了实现，需要按新版本重新核对。',
     SESSION_BUSY: '已经有一场学习会话在跑。等它结束，或用 `/thrive stop` 中止它。',
+    SESSION_QUEUE_FULL: '排队的学习任务已经满了。等几场跑完再触发，或先 `/thrive stop` 清掉正在跑的那场。',
     SESSION_NO_PRESET: '这一场没有可发送的预设：学习规则与目标内容都被停用了，'
         + '或者目标内容为空。到设置页的「提示词」里至少启用一条。',
     SESSION_NO_MESSAGE: '这一场没有开场白：学习用的 User 消息是空的。'
         + '到设置页的「提示词」里填一句，或点「恢复默认」。',
-    SESSION_TOOLS_UNSUPPORTED: '当前连接不支持函数调用，学习会话没有工具可用。'
-        + '先按环境诊断的提示修好连接，再重试。',
+    SESSION_PROFILE_UNAVAILABLE: '选中的连接配置用不了：Connection Manager 扩展不在或被停用了。'
+        + '到设置页把「API 连接」换回「跟随当前设置」，或启用那个扩展。',
+    SESSION_PROFILE_MISSING: '选中的连接配置已经不存在（被删掉，或换了设备没同步过来）。'
+        + '到设置页的「API 连接」重新选一个。',
+    SESSION_PROFILE_UNSUPPORTED: '选中的连接配置不是聊天补全（Chat Completion），带不了工具。'
+        + '到设置页的「API 连接」换一个 Chat Completion 的配置。',
     SESSION_PROVIDER_UNSUPPORTED: '模型返回的工具调用不是 OpenAI 形状，这一版只认这一种。'
         + '换一个 OpenAI 兼容来源，或等这一层补上对应适配。',
     SESSION_PROTOCOL: '会话内部拼出的消息不合协议（这是插件的 bug，不是模型的错）。'

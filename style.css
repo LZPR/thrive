@@ -154,58 +154,7 @@
     opacity: 0.5;
 }
 
-/* ------------------------------------------------------------ 环境诊断 */
-
-/*
- * 设置页顶部的一条状态：能用就用中性色，不能用就转强调色 + 描边。
- * 这里不藏起来：用户找不到"为什么不工作"才会去翻控制台。
- */
-.thrive-settings .thrive-diag {
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    margin-bottom: 8px;
-    padding: 5px 8px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 6px;
-    line-height: 1.45;
-}
-
-.thrive-settings .thrive-diag__dot {
-    flex: 0 0 auto;
-    width: 7px;
-    height: 7px;
-    margin-top: 0.55em;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.5;
-}
-
-.thrive-settings .thrive-diag--warn {
-    border-color: var(--SmartThemeQuoteColor);
-    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 10%, transparent);
-    color: var(--SmartThemeQuoteColor);
-}
-
-.thrive-settings .thrive-diag--warn .thrive-diag__dot {
-    opacity: 1;
-    box-shadow: 0 0 5px currentColor;
-}
-
-.thrive-settings .thrive-diag__body {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.thrive-settings .thrive-diag__reason {
-    font-size: calc(var(--mainFontSize, 15px) * 0.9);
-}
-
-.thrive-settings .thrive-diag .thrive-hint {
-    margin-bottom: 0;
-}
+/* -------------------------------------------------------- 状态小字与下拉 */
 
 .thrive-settings .thrive-hint {
     display: block;
@@ -378,6 +327,16 @@
     width: 110px;
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 连接配置下拉：选项名可能很长（「预设名 · 模型名」），所以让它吃掉标签右边的
+ * 剩余宽度，溢出交给 select 自己截。写死宽度会把长名字截到看不出区别。
+ */
+.thrive-settings .thrive-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 66%;
 }
 
 .thrive-settings .thrive-block-text {
@@ -751,6 +710,21 @@ body.thrive-panel-dragging {
 .thrive-learn.is-running .thrive-learn__status {
     opacity: 0.95;
     color: var(--SmartThemeQuoteColor);
+}
+
+/*
+ * 「排队 N」那一颗：只在真有任务在等时出现。做成描边小标签而不是按钮——
+ * 它不是一个能点的东西，长得像按钮会让人去点。
+ */
+.thrive-learn__queue {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 45%, transparent);
+    border-radius: 999px;
+    color: var(--SmartThemeQuoteColor);
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    line-height: 1.65;
+    white-space: nowrap;
 }
 
 .thrive-learn__go {

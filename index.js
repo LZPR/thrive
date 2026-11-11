@@ -22,8 +22,7 @@
 import { getContext } from '../../../extensions.js';
 import { evaluateAuto, describeTrigger } from './src/auto-learn.js';
 import { requestCompressScan } from './src/compress.js';
-import { diagnoseEnvironment, formatDiagnosis } from './src/diagnostics.js';
-import { startLearning, stopLearning } from './src/learning.js';
+import { clearLearningQueue, startLearning, stopLearning } from './src/learning.js';
 import {
     ensureSettings,
     isChatAvailable,
@@ -66,7 +65,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.34.0 · 对话与学习分离（含教授）`);
+    console.log(`${LOG} 启动 v0.35.0 · 连接配置 · 串行排队 · 撤掉环境诊断`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
@@ -156,10 +155,6 @@ function runThriveCommand(raw) {
 
     switch (action) {
         case 'on': {
-            const diag = diagnoseEnvironment(ctx);
-            if (!diag.ok) {
-                return report(`工具调用不可用，开了也学不了：${formatDiagnosis(diag)}`);
-            }
             if (!isChatAvailable(ctx)) {
                 return report('请先打开一个对话');
             }
@@ -189,13 +184,16 @@ function runThriveCommand(raw) {
                 return report(`没能开始学习：${started.hint}`);
             }
 
-            started.promise.catch(err => console.error(`${LOG} 学习异常`, err));
-            return report('学习已开始：在独立会话里跑，不会影响当前聊天；结束后另弹一条摘要');
+            // 排上队时没有 promise：那一场要等前面跑完，进度走事件广播
+            started.promise?.catch(err => console.error(`${LOG} 学习异常`, err));
+            return report(started.queued > 0
+                ? `已排队（第 ${started.queued} 位）：前面那一场跑完接着学`
+                : '学习已开始：在独立会话里跑，不会影响当前聊天；结束后另弹一条摘要');
         }
 
         case 'stop': {
             return report(stopLearning()
-                ? '已发出中止：这一场不会向世界书或角色卡写入任何东西'
+                ? '已发出中止：这一场与排队的那几场都停了；已经写进去的内容不会撤回'
                 : '现在没有在跑的学习');
         }
 
@@ -275,6 +273,16 @@ function bindEvents() {
      * chat_metadata 上），跑到一半换场就可能把这一场的内容写进另一个角色。
      */
     events.on(types.CHAT_CHANGED, () => {
+        /*
+         * 排队的那几场写的是上一个对话的世界书，换场之后跑它等于把内容塞到另一个
+         * 角色身上。出队时本来也会按 chatId 丢掉，这里直接清空是为了让面板立刻
+         * 不显示旧对话的"排队 N"。
+         */
+        const dropped = clearLearningQueue();
+        if (dropped > 0) {
+            console.info(`${LOG} 切换对话，丢掉 ${dropped} 场排队的任务`);
+        }
+
         if (isLearningActive()) {
             console.info(`${LOG} 切换对话，正在跑的学习已中止`);
             stopLearning();
@@ -318,8 +326,10 @@ function bindEvents() {
                 const started = startLearning(next, { reason: evaluation.reason });
 
                 if (started.ok) {
-                    console.info(`${LOG} 自动学习已触发（${describeTrigger(evaluation)}）`);
-                    started.promise.catch(err => console.error(`${LOG} 学习异常`, err));
+                    console.info(started.queued > 0
+                        ? `${LOG} 自动学习已排队（第 ${started.queued} 位，${describeTrigger(evaluation)}）`
+                        : `${LOG} 自动学习已触发（${describeTrigger(evaluation)}）`);
+                    started.promise?.catch(err => console.error(`${LOG} 学习异常`, err));
                 } else {
                     console.warn(`${LOG} 没能开始自动学习：${started.hint}`);
                 }

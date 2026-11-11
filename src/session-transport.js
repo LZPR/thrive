@@ -1,8 +1,17 @@
 /**
  * session-transport.js · 会话唯一的 ST 耦合点
  *
- * 全部六个 session 模块里，只有这一个碰 ST 的内部实现。它的上游（`session.js`）
+ * 全部 session 模块里只有这一个碰 ST 的内部实现。它的上游（`session.js`）
  * 只认 `{ ok, data } | { ok: false, error, detail }`，不认 SillyTavern。
+ *
+ * 两条路，二选一，由设置项 `connectionProfile` 决定：
+ *
+ *   · 空（默认）—— 跟着**当前聊天设置**走：`createGenerationParameters` 造 payload，
+ *     直接 POST 到 `/api/backends/chat-completions/generate`。
+ *   · 指定了连接配置 —— 跟着**那一份连接**走：交给 ST 的
+ *     `ConnectionManagerRequestService`，它负责把 profile 的 api / 模型 / 密钥 /
+ *     代理 / 端点映射成请求。预设**不随行**（`includePreset: false`）：那是聊天那边
+ *     的提示词，我们的会话有自己编译的一份。这条路只在会话开始时读一次设置。
  *
  * 为什么直连而不是 `sendOpenAIRequest` + 事件钩子：
  *
@@ -86,16 +95,21 @@ async function doLoad() {
 /**
  * 出发前体检。
  *
- * 工具能不能用一律问 ST（ADR-020）。这里传 `'normal'` 而不是 `'quiet'`：
- * `canPerformToolCalls` 把 quiet 列进了黑名单，用 quiet 问必然得到 false，
- * 那是 ST 对"主对话静默生成"的限制，与我们的会话无关。
+ * **不再问"工具调用可不可用"**：会话的 `tools` 由我们自己写进 payload，
+ * ST 那个「启用函数调用」开关只管它自己的聊天请求。用户把开关关掉照样能学，
+ * 所以这里只确认"这条路真的能发出去"。
  *
  * @param {object} ctx getContext() 的返回值，调用时现取
- * @returns {Promise<{ ok: true, st: object } | { ok: false, error: string, detail?: string }>}
+ * @param {{ profileId?: string }} [options] 指定连接配置时走 profile 那条路
+ * @returns {Promise<{ ok: true, st: object|null } | { ok: false, error: string, detail?: string }>}
  */
-export async function probeTransport(ctx) {
+export async function probeTransport(ctx, { profileId = '' } = {}) {
     if (!ctx) {
         return { ok: false, error: 'SESSION_NOT_CONFIGURED', detail: '拿不到 SillyTavern 的上下文' };
+    }
+
+    if (profileId) {
+        return probeProfile(ctx, profileId);
     }
 
     const loaded = await loadST();
@@ -103,21 +117,93 @@ export async function probeTransport(ctx) {
         return loaded;
     }
 
-    const ask = typeof ctx.canPerformToolCalls === 'function'
-        ? () => ctx.canPerformToolCalls('normal')
-        : (typeof ctx.isToolCallingSupported === 'function' ? () => ctx.isToolCallingSupported() : null);
+    return { ok: true, st: loaded.st };
+}
 
-    if (ask) {
-        try {
-            if (!ask()) {
-                return { ok: false, error: 'SESSION_TOOLS_UNSUPPORTED' };
-            }
-        } catch (err) {
-            return { ok: false, error: 'SESSION_DRIFT', detail: `工具可用性接口抛错：${err?.message ?? err}` };
-        }
+/**
+ * 检查指定的连接配置还能不能用。
+ *
+ * 三种失败分开报：服务不在（ST 版本或扩展被停用）、配置没了（被删了 / 换了设备）、
+ * 配置不是聊天补全（带不了工具）。
+ *
+ * @param {object} ctx
+ * @param {string} profileId
+ */
+function probeProfile(ctx, profileId) {
+    const service = ctx.ConnectionManagerRequestService;
+
+    if (!service || typeof service.sendRequest !== 'function' || typeof service.getProfile !== 'function') {
+        return {
+            ok: false,
+            error: 'SESSION_PROFILE_UNAVAILABLE',
+            detail: '这个 SillyTavern 没有连接配置服务（Connection Manager）',
+        };
     }
 
-    return { ok: true, st: loaded.st };
+    if (Array.isArray(ctx.extensionSettings?.disabledExtensions)
+        && ctx.extensionSettings.disabledExtensions.includes('connection-manager')) {
+        return {
+            ok: false,
+            error: 'SESSION_PROFILE_UNAVAILABLE',
+            detail: '「连接配置」扩展被停用了',
+        };
+    }
+
+    let profile;
+    try {
+        profile = service.getProfile(profileId);
+    } catch (err) {
+        return {
+            ok: false,
+            error: 'SESSION_PROFILE_MISSING',
+            detail: `选中的连接配置不在了：${err?.message ?? err}`,
+        };
+    }
+
+    let supported = true;
+    try {
+        supported = typeof service.isProfileSupported === 'function' ? service.isProfileSupported(profile) : true;
+    } catch {
+        // 判定接口抛错就当"支持"，真的不行会在请求那一步报出来
+        supported = true;
+    }
+
+    if (!supported) {
+        return {
+            ok: false,
+            error: 'SESSION_PROFILE_UNSUPPORTED',
+            detail: `连接配置「${profile?.name || profileId}」不是聊天补全（Chat Completion），带不了工具`,
+        };
+    }
+
+    return { ok: true, st: null };
+}
+
+/**
+ * 列出可选的连接配置，给设置页那个下拉用。
+ *
+ * 只读 `extension_settings.connectionManager.profiles`——那是 ST「连接配置」扩展自己
+ * 存下来的列表，`ConnectionManagerRequestService.getProfile` 也是在这张表里找。
+ *
+ * 只留聊天补全（`mode === 'cc'`）的几份：文本补全的配置带不了 `tools`，选中之后每一场
+ * 会话都会以 `SESSION_PROFILE_UNSUPPORTED` 失败，不如一开始就不让它出现在选项里。
+ *
+ * @param {object} ctx
+ * @returns {Array<{ id: string, name: string, model: string }>}
+ */
+export function listConnectionProfiles(ctx) {
+    const raw = ctx?.extensionSettings?.connectionManager?.profiles;
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+
+    return raw
+        .filter(profile => profile && profile.id && (profile.mode === undefined || profile.mode === 'cc'))
+        .map(profile => ({
+            id: String(profile.id),
+            name: String(profile.name || profile.model || profile.id),
+            model: String(profile.model || ''),
+        }));
 }
 
 /**
@@ -134,11 +220,16 @@ export async function probeTransport(ctx) {
  *   sampling?: object|null,
  *   signal?: AbortSignal|null,
  *   timeoutMs?: number,
- * }} req
+ *   profileId?: string,
+ * }} req `profileId` 非空时改走连接配置那条路（ST 的 ConnectionManagerRequestService）
  * @returns {Promise<{ ok: true, data: object } | { ok: false, error: string, detail?: string }>}
  */
 export async function requestOnce(ctx, req) {
-    const { messages, tools, sampling = null, signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = req ?? {};
+    const { messages, tools, sampling = null, signal = null, timeoutMs = DEFAULT_TIMEOUT_MS, profileId = '' } = req ?? {};
+
+    if (profileId) {
+        return requestViaProfile(ctx, { messages, tools, signal, timeoutMs, profileId });
+    }
 
     const loaded = await loadST();
     if (!loaded.ok) {
@@ -215,6 +306,80 @@ export async function requestOnce(ctx, req) {
             return { ok: false, error: 'SESSION_ABORTED' };
         }
         return { ok: false, error: 'SESSION_TRANSPORT', detail: err?.message ?? String(err) };
+    } finally {
+        gate.cancel();
+    }
+}
+
+/**
+ * 通过 ST 的某一份**连接配置**发一次请求。
+ *
+ * 交给 `ConnectionManagerRequestService` 而不是自己拼 payload：profile 里的
+ * api / 模型 / 预设 / 密钥 / 代理 / 自定义端点各有各的映射规则，抄一遍必然漂。
+ * 代价是采样参数完全由那份配置决定——这里不覆盖，也覆盖不了。
+ *
+ * `extractData: false` 是关键：默认会把响应解析成 `{ content, reasoning }`，
+ * 工具调用在那一步就丢了。要的是原始 JSON，交给 `readReply` 去读。
+ *
+ * @param {object} ctx
+ * @param {{ messages: object[], tools: object[], signal: AbortSignal|null, timeoutMs: number, profileId: string }} req
+ * @returns {Promise<{ ok: true, data: object } | { ok: false, error: string, detail?: string }>}
+ */
+async function requestViaProfile(ctx, { messages, tools, signal, timeoutMs, profileId }) {
+    const service = ctx?.ConnectionManagerRequestService;
+    if (!service || typeof service.sendRequest !== 'function') {
+        return { ok: false, error: 'SESSION_PROFILE_UNAVAILABLE', detail: '拿不到连接配置服务' };
+    }
+
+    // 上限继承当前聊天设置：profile 里没有 max_tokens 这一项，不传就由后端默认
+    const configured = Number(ctx?.chatCompletionSettings?.openai_max_tokens);
+    const maxTokens = Number.isFinite(configured) && configured > 0 ? configured : undefined;
+
+    console.debug(
+        `[Thrive] 会话请求 · 连接配置 ${profileId}`
+        + ` tools=${Array.isArray(tools) ? tools.length : 0} messages=${Array.isArray(messages) ? messages.length : 0}`,
+    );
+
+    const gate = withTimeout(signal, timeoutMs);
+
+    try {
+        const data = await service.sendRequest(
+            profileId,
+            messages,
+            maxTokens,
+            /*
+             * includePreset: false —— 这是隔离契约的一部分：那份配置的预设（系统提示 +
+             * 提示词列表）属于"聊天那边"的提示词，我们的会话有自己编译出来的一份，
+             * 两套一起发只会让模型同时收到两条互相打架的规则（ADR-049 / ADR-052）。
+             * 配置里真正影响能不能发出去的（api / 端点 / 密钥 / 模型）照旧生效。
+             */
+            { stream: false, extractData: false, includePreset: false, includeInstruct: false, signal: gate.signal },
+            { tools: Array.isArray(tools) ? tools : [], tool_choice: 'auto' },
+        );
+
+        if (!data || typeof data !== 'object') {
+            return { ok: false, error: 'SESSION_DRIFT', detail: '连接配置没有返回 JSON' };
+        }
+        if (data.error) {
+            return { ok: false, error: 'SESSION_TRANSPORT', detail: `接口返回错误：${shorten(errorText(data), 300)}` };
+        }
+
+        return { ok: true, data };
+    } catch (err) {
+        if (gate.timedOut()) {
+            return { ok: false, error: 'SESSION_TIMEOUT', detail: `超过 ${Math.round(Number(timeoutMs) / 1000)} 秒没有回应` };
+        }
+        if (err?.name === 'AbortError') {
+            return { ok: false, error: 'SESSION_ABORTED' };
+        }
+
+        // 服务层把真正的错误包在 cause 里（`new Error('API request failed', { cause })`）
+        const inner = err?.cause?.message ?? err?.cause?.error?.message;
+        return {
+            ok: false,
+            error: 'SESSION_TRANSPORT',
+            detail: shorten(inner || err?.message || String(err), 300),
+        };
     } finally {
         gate.cancel();
     }

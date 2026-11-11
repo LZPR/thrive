@@ -7,7 +7,7 @@
  * 状态全靠图标本身，三种，互不叠加成新含义：
  *   · 强调色 = 学习模式开着（会自动学）
  *   · 呼吸   = 正在学（一场学习会话在跑）
- *   · 置灰   = 现在切了也没用（没对话 / 工具调用不可用）
+ *   · 置灰   = 现在切了也没用（没打开对话）
  * 右上角的数字只表示"有几份待确认的描述改动"，和学不学无关。
  *
  * 为什么不在这里放开关：它们挤在输入框旁边，宽度随文字变，和 ST 那一排固定尺寸
@@ -18,9 +18,8 @@
 import { getContext } from '../../../../../extensions.js';
 import { TRIGGER, describeTrigger, intervalProgress, parseKeywords } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
-import { formatDiagnosis } from '../diagnostics.js';
 import { LEARNING_EVENT, notifyPanelToggle } from '../events.js';
-import { describeLearnRun } from '../learning.js';
+import { describeLearnRun, getLearningView } from '../learning.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import { getLastLearnRun, getLearningRunning, isEnabled } from '../store.js';
 import { refreshBadgeOnly, registerSurfaces } from './refresh.js';
@@ -144,16 +143,15 @@ export function syncBadgeOpenState() {
  * @param {object} ctx
  * @param {object} settings
  * @param {boolean} available 有没有打开对话
- * @param {{ok: boolean, code: string}} diag 环境诊断
  */
-function refreshBadge(ctx, settings, available, diag) {
+function refreshBadge(ctx, settings, available) {
     const badge = document.getElementById(BADGE_ID);
     if (!badge) {
         return;
     }
 
-    // 环境不支持时置灰：开关切过去也没有任何东西会生效
-    const usable = available && diag.ok;
+    // 没有对话时置灰：开关切过去也没有任何东西会生效
+    const usable = available;
 
     const enabled = isEnabled(ctx);
     const running = getLearningRunning();
@@ -162,7 +160,7 @@ function refreshBadge(ctx, settings, available, diag) {
     const patchPending = isUnresolved(getPatch(ctx)) ? 1 : 0;
 
     badge.classList.toggle('displayNone', !settings.showBadge);
-    // 两种"不可用"共用同一档置灰：没有对话、环境不支持工具调用
+    // 没有对话就置灰
     badge.classList.toggle('thrive-badge--muted', !usable);
     badge.classList.toggle('thrive-badge--active', enabled && usable);
     badge.classList.toggle('thrive-badge--running', Boolean(running));
@@ -177,14 +175,18 @@ function refreshBadge(ctx, settings, available, diag) {
     const lines = [];
     if (!available) {
         lines.push('请先打开一个对话');
-    } else if (!diag.ok) {
-        lines.push(`工具调用不可用：${formatDiagnosis(diag)}`);
     }
 
     // 正在学是当下最要紧的事实，放最前面；学不学得到的结果排在后面
     if (running) {
         const why = running.reason ? describeTrigger({ reason: running.reason }) : '';
         lines.push(`正在学习${why ? `（${why}）` : ''}：在独立会话里跑，不影响当前聊天`);
+
+        // 排队的那几场也得说一句：不说的话"我点了它怎么没反应"就没有答案
+        const queued = getLearningView(ctx, settings).queued;
+        if (queued > 0) {
+            lines.push(`排队 ${queued} 场：前一场跑完接着学，一次只跑一场`);
+        }
     } else {
         lines.push(`学习模式：${enabled ? '已开启' : '已关闭'}`);
 
@@ -233,5 +235,5 @@ function refreshBadge(ctx, settings, available, diag) {
 
 /* 登记给刷新编排 */
 registerSurfaces({
-    badge: ({ ctx, settings, available, diag }) => refreshBadge(ctx, settings, available, diag),
+    badge: ({ ctx, settings, available }) => refreshBadge(ctx, settings, available),
 });

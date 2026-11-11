@@ -16,7 +16,7 @@
  *   ui/refresh.js       刷新编排：谁该在什么时候刷，以及面板开合的开关
  *   ui/shared.js        共用的常量、toast、确认弹窗、面板开合状态
  *
- * 设置页内部也是"一组设置一个文件"：common / help / diagnostics / basics /
+ * 设置页内部也是"一组设置一个文件"：common / help / connection / basics /
  * learn-criteria / limit-fields / prompt-cards / appearance，入口是
  * ui/settings/index.js。改哪一组就只碰那个文件。
  *

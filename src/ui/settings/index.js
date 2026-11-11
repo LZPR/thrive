@@ -16,7 +16,7 @@
  *
  *   common.js         取元素、回填勾选框、状态小字、防抖落盘
  *   help.js           标签旁那个「?」的展开 / 收起
- *   diagnostics.js    顶部环境诊断
+ *   connection.js     API 连接：会话走哪一份连接配置
  *   basics.js         新对话默认开启、显示徽章
  *   learn-criteria.js 自动学习判据：每 N 条、关键词
  *   limit-fields.js   数值上限（含学习会话的目标内容字数与轮数）
@@ -32,7 +32,7 @@ import { refreshUI, registerSurfaces } from '../refresh.js';
 import { LOG } from '../shared.js';
 import { bindAppearanceControls, syncAppearanceControls } from './appearance.js';
 import { bindBasicsControls, syncBasicsControls } from './basics.js';
-import { bindDiagnosticRefresh, refreshDiagnostics } from './diagnostics.js';
+import { bindConnectionControls, syncConnectionControls } from './connection.js';
 import { bindHelpButtons } from './help.js';
 import { bindLearnCriteria, syncLearnCriteria } from './learn-criteria.js';
 import { bindLimitControls, syncLimitControls } from './limit-fields.js';
@@ -71,7 +71,6 @@ export async function initSettingsPanel(ctx = getContext()) {
 
     // 「?」必须等模板进来之后再挂：它按 id 找说明块
     bindHelpButtons();
-    bindDiagnosticRefresh();
     bindSettingsEvents();
 
     refreshUI();
@@ -80,6 +79,7 @@ export async function initSettingsPanel(ctx = getContext()) {
 /** 把各组的绑定叫一遍。新增一组只在这里加一行。 */
 function bindSettingsEvents() {
     bindBasicsControls();
+    bindConnectionControls();
     bindLearnCriteria();
     bindLimitControls();
     bindPromptControls();
@@ -97,6 +97,7 @@ function bindSettingsEvents() {
  */
 function refreshSettingsControls(ctx, settings) {
     syncBasicsControls(settings);
+    syncConnectionControls(ctx, settings);
     syncLearnCriteria(settings);
     syncLimitControls(settings);
     syncAppearanceControls(settings);
@@ -108,5 +109,4 @@ function refreshSettingsControls(ctx, settings) {
 /* 登记给刷新编排：设置页的几块都在这批文件里，refresh.js 不反过来 import 它们 */
 registerSurfaces({
     controls: ({ ctx, settings }) => refreshSettingsControls(ctx, settings),
-    diagnostics: ({ ctx, diag }) => refreshDiagnostics(ctx, diag),
 });
