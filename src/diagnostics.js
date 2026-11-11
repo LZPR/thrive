@@ -231,8 +231,12 @@ export const ERROR_HINTS = Object.freeze({
         + '先确认 SillyTavern 是 1.19，并刷新页面重试。',
     SESSION_DRIFT: 'ST 的这一处行为和预期不一样（请求类型或流式开关），内部会话已停下。'
         + '多半是 ST 升级改了实现，需要按新版本重新核对。',
-    SESSION_BUSY: '已经有一场内部会话在跑。等它结束，或用 `/thrive session stop` 中止它。',
-    SESSION_TOOLS_UNSUPPORTED: '当前连接不支持函数调用，内部会话没有工具可用。'
+    SESSION_BUSY: '已经有一场学习会话在跑。等它结束，或用 `/thrive stop` 中止它。',
+    SESSION_NO_PRESET: '这一场没有可发送的预设：学习规则与目标内容都被停用了，'
+        + '或者目标内容为空。到设置页的「提示词」里至少启用一条。',
+    SESSION_NO_MESSAGE: '这一场没有开场白：学习用的 User 消息是空的。'
+        + '到设置页的「提示词」里填一句，或点「恢复默认」。',
+    SESSION_TOOLS_UNSUPPORTED: '当前连接不支持函数调用，学习会话没有工具可用。'
         + '先按环境诊断的提示修好连接，再重试。',
     SESSION_PROVIDER_UNSUPPORTED: '模型返回的工具调用不是 OpenAI 形状，这一版只认这一种。'
         + '换一个 OpenAI 兼容来源，或等这一层补上对应适配。',

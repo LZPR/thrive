@@ -18,6 +18,15 @@
 /** 工具返回空内容时的占位。`role:'tool'` 的消息一旦内容为空，整条会被下游当成"没有这条" */
 export const EMPTY_TOOL_TEXT = '（工具没有返回内容）';
 
+/**
+ * 一张图按多少 token 估。
+ *
+ * 不能按 base64 长度算：一张 1024×768 的 JPEG 编码后 30 万字符，除 3 就是十万 token，
+ * 预算判定会立刻判"装不下"，而真实开销是一千上下（OpenAI 的 512px 切块口径）。
+ * 宁可高估一点：低估会撞接口报溢出，高估只是提前收手。
+ */
+export const IMAGE_TOKENS = 1100;
+
 const ROLES = new Set(['system', 'user', 'assistant', 'tool']);
 
 /* ------------------------------------------------------------------ 工厂 */
@@ -43,6 +52,44 @@ export function systemText(text) {
  */
 export function userText(text) {
     return Object.freeze({ role: 'user', content: String(text ?? '') });
+}
+
+/**
+ * 一条带图的用户消息。
+ *
+ * 图片按 OpenAI 的多模态写法挂在同一条消息里：`content` 变成
+ * `[{type:'text'}, {type:'image_url'}]` 的块数组。为什么不用"一条文本 + 一条只有图"：
+ * 图离开文字就会被当成另一件事，而"这张图就是刚才那段话说到的角色"正是教授时要表达的。
+ *
+ * 图必须是 data URL（`data:image/…;base64,…`）：会话不落盘、不引用 ST 的
+ * `user/images/` 目录，路径形式的图在任何一步都可能失效。
+ *
+ * 没有图时退回普通文本消息——`content` 一旦是数组，绕过 ST 的地方就要多认一种形状，
+ * 能不进入那条分支就不进入。
+ *
+ * @param {string} text
+ * @param {string[]} images data URL 列表
+ * @returns {object}
+ */
+export function userWithImages(text, images = []) {
+    const urls = (Array.isArray(images) ? images : [])
+        .map(url => String(url ?? '').trim())
+        .filter(url => url.startsWith('data:image/'));
+
+    if (urls.length === 0) {
+        return userText(text);
+    }
+
+    const body = String(text ?? '');
+    const parts = [];
+    if (body.trim()) {
+        parts.push(Object.freeze({ type: 'text', text: body }));
+    }
+    for (const url of urls) {
+        parts.push(Object.freeze({ type: 'image_url', image_url: Object.freeze({ url }) }));
+    }
+
+    return Object.freeze({ role: 'user', content: Object.freeze(parts) });
 }
 
 /**
@@ -116,7 +163,7 @@ export function toChat(messages) {
 
         const wire = {
             role: message.role,
-            content: message.content ?? null,
+            content: Array.isArray(message.content) ? message.content.slice() : (message.content ?? null),
         };
 
         // tool_call_id 只属于 tool 消息；其余角色带上它是协议错误
@@ -140,11 +187,32 @@ export function toChat(messages) {
  * 两边都落在真实值附近。纯本地、零往返，只用于"明显装不下时提前拦"——
  * 精确计数要发请求，那正是这一层要避免的东西。
  *
+ * 图片例外：base64 的长度与真实开销完全不成比例，所以先把 data URL 换成一个
+ * 固定占位串再算字节，然后按张数补 `IMAGE_TOKENS`。
+ *
  * @param {object[]} messages
  * @returns {number}
  */
 export function estimateTokens(messages) {
-    return Math.ceil(utf8Bytes(JSON.stringify(toChat(messages))) / 3);
+    let images = 0;
+
+    const shadow = toChat(messages).map(message => {
+        if (!Array.isArray(message.content)) {
+            return message;
+        }
+
+        const content = message.content.map(part => {
+            if (part?.type !== 'image_url') {
+                return part;
+            }
+            images += 1;
+            return { type: 'image_url', image_url: { url: 'data:image;base64,IMAGE' } };
+        });
+
+        return { ...message, content };
+    });
+
+    return Math.ceil(utf8Bytes(JSON.stringify(shadow)) / 3) + images * IMAGE_TOKENS;
 }
 
 /* -------------------------------------------------------------- 自检 */
@@ -159,6 +227,8 @@ export function estimateTokens(messages) {
  *   4. `${tool_calls[].function.arguments}` 必须是字符串
  *   5. `tool_calls[].id` 非空、同一轮内唯一
  *   6. tool 消息不带 `name`；`name` / `content` 的类型必须干净
+ *   7. 只有 user 消息的 `content` 可以是块数组，且块只能是 text / image_url，
+ *      image_url 必须是 data URL（见 `partsProblem`）
  *
  * @param {object[]} messages
  * @returns {{ ok: true } | { ok: false, reason: string }}
@@ -179,7 +249,14 @@ export function assertProtocol(messages) {
             return bad(`${at}的 role 是「${message.role}」`);
         }
         if (message.content !== null && message.content !== undefined && typeof message.content !== 'string') {
-            return bad(`${at}的 content 不是字符串`);
+            // 唯一允许的非字符串：user 消息的多模态块数组（带图）
+            if (message.role !== 'user' || !Array.isArray(message.content)) {
+                return bad(`${at}的 content 既不是字符串也不是合法的多模态数组`);
+            }
+            const parts = partsProblem(message.content);
+            if (parts) {
+                return bad(`${at}${parts}`);
+            }
         }
         if (message.name !== undefined) {
             return bad(`${at}带了 name（本版不产生这个字段）`);
@@ -234,7 +311,7 @@ export function assertProtocol(messages) {
         }
 
         // 到这里是普通的 user / assistant 消息：空内容发不出去，等于白占一条
-        if (!String(message.content ?? '').trim()) {
+        if (!hasContent(message.content)) {
             return bad(`${at}是空消息`);
         }
     }
@@ -246,6 +323,52 @@ export function assertProtocol(messages) {
 
 function bad(reason) {
     return { ok: false, reason };
+}
+
+/**
+ * 多模态块数组的形状检查。只认 OpenAI 的两种块：`text` 与 `image_url`。
+ *
+ * 认不出的块不放过：发出去之后接口只会回一句"content 格式不对"，那时候已经
+ * 分不清是哪一条消息的问题了。
+ *
+ * @param {unknown[]} content
+ * @returns {string} 有问题时的说明，没问题返回空串
+ */
+function partsProblem(content) {
+    if (content.length === 0) {
+        return '的 content 是空数组';
+    }
+
+    for (const part of content) {
+        if (!part || typeof part !== 'object') {
+            return '的 content 里有不是对象的块';
+        }
+        if (part.type === 'text') {
+            if (typeof part.text !== 'string') {
+                return '的文本块没有 text 字符串';
+            }
+            continue;
+        }
+        if (part.type === 'image_url') {
+            const url = part.image_url?.url;
+            if (typeof url !== 'string' || !url.startsWith('data:image/')) {
+                return '的图片块不是 data URL（会话不引用外部图片路径）';
+            }
+            continue;
+        }
+        return `的 content 里有不认识的块类型「${part.type}」`;
+    }
+
+    return '';
+}
+
+/** 字符串内容或块数组里到底有没有东西 */
+function hasContent(content) {
+    if (Array.isArray(content)) {
+        return content.some(part => part?.type === 'image_url'
+            || (typeof part?.text === 'string' && part.text.trim()));
+    }
+    return Boolean(String(content ?? '').trim());
 }
 
 /**

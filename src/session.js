@@ -4,20 +4,22 @@
  * 五步，每步一个函数，可以单独替换、单独验证：
  *
  *   openSession     体检 + 建对象（不计数、不发请求）
- *   applyPreset     预设 → 消息（stub：两段固定文本）
- *   sendUserMessage 追加一条用户消息（stub：一句固定指令）
+ *   applyPreset     预设 → 消息（由 prompt.js 的卡片编译而来）
+ *   sendUserMessage 追加一条用户消息（学习用的开场白）
  *   runLoop         请求 → 解析 → 执行工具 → 再请求，直到结束
  *   closeSession    收尾 + 记一笔（幂等）
  *
- * `runSession` 是给斜杠命令用的组合体，把五步串起来并处理 "已经开始一场" 的互斥。
+ * `runSession` 是组合体，把五步串起来并处理 "已经开始一场" 的互斥。学习由
+ * learning.js 调用它；斜杠命令与自检也走同一条路。
  *
  * 三条硬约定：
  *   1. 跨模块只传普通对象与 session，`runLoop` 不知道预设从哪来，`applyPreset` 不知道模型
  *   2. 每个函数都返回 `{ ok, ... }`，**永不 throw**（`runSession` 里唯一一个兜底 catch）
  *   3. 所有 ST 耦合都在 `session-transport.js`，这里只认 `deps.request`
  *
- * 这一版不显示、不落盘、不写 chat_metadata：会话只活在这个对象里，
- * 结束后只剩一条控制台摘要（`/thrive session log` 才打全文）。
+ * 会话不显示、不落盘、不写 chat_metadata：它只活在这个对象里，结束后由调用方
+ * 决定记什么（learning.js 只往对话状态里写"结果摘要"）。全文进控制台摘要，
+ * `logTranscript({ full: true })` 才打全文。
  */
 
 import { hintFor } from './diagnostics.js';
@@ -29,10 +31,11 @@ import {
     toChat,
     toolResult,
     userText,
+    userWithImages,
 } from './session-messages.js';
-import { STUB_PRESET, compilePreset } from './session-preset.js';
+import { compilePreset } from './session-preset.js';
 import { readReply } from './session-provider.js';
-import { createScratch, createSessionTools, executeTool, toOpenAITools } from './session-tools.js';
+import { createSessionTools, executeTool, toOpenAITools } from './session-tools.js';
 import { DEFAULT_TIMEOUT_MS, probeTransport, requestOnce } from './session-transport.js';
 import { createId } from './util.js';
 
@@ -51,14 +54,11 @@ const FALLBACK_CONTEXT = 8192;
 /**
  * 默认采样覆盖。
  *
- * 只写 `temperature`：让自检的结果稳定一点。其余采样参数全部继承 ST 设置——
+ * 只写 `temperature`：让学习结果稳定一点。其余采样参数全部继承 ST 设置——
  * 会话用的就是用户配好的那个后端与模型，那不是"污染"，是"就应该用这个"。
  * 覆盖时会跳过 payload 里不存在的键（o1 / gpt-5 被 ST 删掉了 temperature）。
  */
 const DEFAULT_SAMPLING = Object.freeze({ temperature: 0.3 });
-
-/** stub 阶段的用户消息。接真实学习时换成实际指令 */
-const STUB_USER_MESSAGE = '开始自检：先读「北境」，再把它写进去。';
 
 /** 正在跑的那一场（用于互斥与中止） */
 let active = null;
@@ -85,7 +85,7 @@ let last = null;
  * }} options
  * @returns {Promise<{ ok: true, session: object } | { ok: false, error: string, hint: string, detail?: string }>}
  */
-export async function openSession({ ctx, deps = null, preset = null, maxRounds = null } = {}) {
+export async function openSession({ ctx, deps = null, preset = null, maxRounds = null, tools = null } = {}) {
     const probe = typeof deps?.probe === 'function' ? deps.probe : probeTransport;
     const probed = await probe(ctx);
 
@@ -102,14 +102,13 @@ export async function openSession({ ctx, deps = null, preset = null, maxRounds =
         st: probed.st ?? null,
         deps: { request: typeof deps?.request === 'function' ? deps.request : requestOnce },
         messages: [],
-        tools: createSessionTools(),
+        tools: Array.isArray(tools) ? tools : createSessionTools(),
         sampling: deps?.sampling ?? DEFAULT_SAMPLING,
         abort: new AbortController(),
         limits,
         stats: { rounds: 0, toolCalls: 0, sawTools: false, startedAt: Date.now(), ms: 0 },
         transcript: [],
-        scratch: createScratch(),
-        presetId: String((preset ?? STUB_PRESET)?.id ?? ''),
+        presetId: String(preset?.id ?? ''),
         lastReply: '',
         lastError: null,
     };
@@ -125,7 +124,7 @@ export async function openSession({ ctx, deps = null, preset = null, maxRounds =
  * 第二步：把预设填进会话。
  *
  * 预设编译成"有序 run 列表"后逐段转成消息。同一角色的相邻段**不合并**：
- * 合并是 `buildInjection` 的职责（那里才知道用户怎么排的卡片），
+ * 用户是自己排的顺序，合并之后"我把它放在这一条之后"就不再是字面上的意思了；
  * 这里只负责把已经排好的顺序照抄成 messages。
  *
  * @param {object} session
@@ -165,22 +164,28 @@ export function applyPreset(session, preset = null) {
  * 空消息直接拒：`toChat()` 会把它过滤掉，等于这次请求少了一句话，
  * 而错误会以"模型答非所问"的形式出现，极难归因。
  *
+ * `images` 是 data URL 列表（教授时可以附图）。有图时这条消息的 `content`
+ * 变成多模态块数组，图片与文字同条发出去。
+ *
  * @param {object} session
  * @param {string} text
- * @returns {{ ok: true, chars: number } | { ok: false, error: string, hint: string, detail?: string }}
+ * @param {{ images?: string[]|null }} [options]
+ * @returns {{ ok: true, chars: number, images: number } | { ok: false, error: string, hint: string, detail?: string }}
  */
-export function sendUserMessage(session, text) {
+export function sendUserMessage(session, text, { images = null } = {}) {
     if (!usable(session, 'open')) {
         return { ok: false, error: 'SESSION_PROTOCOL', hint: composeHint('SESSION_PROTOCOL', '会话不在可发送状态') };
     }
 
     const body = String(text ?? '');
-    if (!body.trim()) {
+    const list = Array.isArray(images) ? images : [];
+
+    if (!body.trim() && list.length === 0) {
         return { ok: false, error: 'SESSION_PROTOCOL', hint: composeHint('SESSION_PROTOCOL', '用户消息是空的'), detail: '用户消息是空的' };
     }
 
-    session.messages.push(userText(body));
-    return { ok: true, chars: body.length };
+    session.messages.push(userWithImages(body, list));
+    return { ok: true, chars: body.length, images: list.length };
 }
 
 /**
@@ -237,14 +242,18 @@ export async function runLoop(session, { maxRounds = null } = {}) {
             return stop(session, 'error', reply.error, reply.detail);
         }
 
-        // 没有工具调用 = 这一轮说完了
+        /*
+         * 没有工具调用 = 这一轮说完了。
+         *
+         * 正文可以是空的：学习只认工具产出，"没什么值得记的"本来就该什么都不写。
+         * 空正文不塞进消息栈（空 assistant 消息在下一次请求里会被丢掉，白白多一条）。
+         */
         if (reply.toolCalls.length === 0) {
-            if (!reply.content.trim()) {
-                return stop(session, 'error', 'SESSION_EMPTY_REPLY');
+            if (reply.content.trim()) {
+                session.messages.push(assistantReply(reply.content));
+                session.lastReply = reply.content;
             }
 
-            session.messages.push(assistantReply(reply.content));
-            session.lastReply = reply.content;
             session.stats.rounds += 1;
             record(session, { kind: 'assistant', chars: reply.content.length });
             return { ok: true, stopped: 'no_tool_calls', ...summary(session) };
@@ -264,7 +273,7 @@ export async function runLoop(session, { maxRounds = null } = {}) {
          */
         let fatal = false;
         for (const call of assistant.tool_calls) {
-            const out = executeTool(
+            const out = await executeTool(
                 session.tools,
                 { id: call.id, name: call.function.name, arguments: call.function.arguments },
                 session,
@@ -336,12 +345,21 @@ export function closeSession(session, reason = 'done') {
  *   ctx: object,
  *   preset?: object|null,
  *   userMessage?: string|null,
+ *   images?: string[]|null,
  *   maxRounds?: number|null,
  *   deps?: object|null,
  * }} options
  * @returns {Promise<object>}
  */
-export async function runSession({ ctx, preset = null, userMessage = null, maxRounds = null, deps = null } = {}) {
+export async function runSession({
+    ctx,
+    preset = null,
+    userMessage = null,
+    images = null,
+    maxRounds = null,
+    deps = null,
+    tools = null,
+} = {}) {
     if (active || starting) {
         return {
             ok: false,
@@ -359,7 +377,7 @@ export async function runSession({ ctx, preset = null, userMessage = null, maxRo
     starting = true;
     let opened;
     try {
-        opened = await openSession({ ctx, deps, preset, maxRounds });
+        opened = await openSession({ ctx, deps, preset, maxRounds, tools });
     } finally {
         starting = false;
     }
@@ -386,9 +404,9 @@ export async function runSession({ ctx, preset = null, userMessage = null, maxRo
             return stop(session, 'error', prepared.error, prepared.detail);
         }
 
-        const sent = sendUserMessage(session, userMessage ?? STUB_USER_MESSAGE);
+        const sent = sendUserMessage(session, userMessage ?? '', { images });
         if (!sent.ok) {
-            return stop(session, 'error', sent.error, sent.detail);
+            return stop(session, 'error', 'SESSION_NO_MESSAGE', '开场白是空的');
         }
 
         const result = await runLoop(session, { maxRounds });
@@ -606,6 +624,17 @@ function label(message) {
 function preview(message) {
     if (message.tool_calls?.length) {
         return `→ ${message.tool_calls.map(call => call.function.name).join(', ')}`;
+    }
+
+    // 带图的消息：正文和"几张图"分开说，否则整条会打成一串 base64
+    if (Array.isArray(message.content)) {
+        const text = message.content
+            .filter(part => part?.type === 'text')
+            .map(part => String(part.text ?? '').replace(/\s+/g, ' ').trim())
+            .join(' ');
+        const images = message.content.filter(part => part?.type === 'image_url').length;
+        const head = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+        return [head, `${images} 张图`].filter(Boolean).join(' · ');
     }
 
     const text = String(message.content ?? '').replace(/\s+/g, ' ').trim();

@@ -12,7 +12,7 @@
 import { DESC_STORAGE } from './desc-entry.js';
 import { notifyPanel } from './events.js';
 import { LIMIT_DEFAULTS, readLimit } from './limits.js';
-import { CARD_ID, HEAD_PROMPT_ORDER } from './prompt-order.js';
+import { CARD_ID } from './prompt-order.js';
 import { fnv1a } from './util.js';
 
 export const MODULE_NAME = 'thrive';
@@ -27,37 +27,17 @@ export const DEFAULT_SETTINGS = Object.freeze({
     /** 输入框旁是否显示状态徽章 */
     showBadge: true,
     /**
-     * 新对话默认是否开启被动学习。
-     *
-     * **被动学习的开关是对话级的**（`state.passive.enabled`），这里只是新对话的初值，
-     * 与 `enabledByDefault` 是同一套约定：默认值全局一份，开没开按对话各记各的。
+     * 自动学习判据：从上次学习算起，攒够这么多条可见消息就触发一次。
+     * 0 = 不用这条判据（全局）。开关本身按对话记（`state.enabled`）。
      */
-    passiveByDefault: false,
-    /** 被动学习：每多少条消息触发一次；0 = 不用条数触发（全局） */
-    passiveInterval: 0,
-    /** 被动学习：关键词，逗号/分号/换行分隔；空 = 不用关键词触发（全局） */
-    passiveKeywords: '',
-    /**
-     * 是否让工具定义常驻。
-     *
-     * 关：关闭学习模式时工具的 shouldRegister 返回 false，tools 数组从有变无——
-     * 这段位于请求最前面，前缀缓存从第一个 token 起就废了。
-     * 开：工具定义一直留在请求里，可用性改由「工具指令」那段文字表达（见 prompt.js），
-     * 切换模式只会改动尾部或 system 段末尾，不会动工具定义。
-     */
-    toolsResident: false,
-    /**
-     * 工具指令的正文。空串 = 使用 prompt.js 的 DEFAULT_TOOL_PROMPT。
-     * 支持 {{工具名}} / {{!工具名}} 两种宏，见 expandToolMacros。
-     */
-    toolPrompt: '',
+    learnInterval: 0,
+    /** 自动学习判据：关键词，逗号/分号/换行分隔；空 = 不用关键词触发（全局） */
+    learnKeywords: '',
     /**
      * 提示词卡片的顺序（prompt-order.js 里的 id 数组，以及自建提示词的 id）。
-     * 空数组 = 默认顺序；顺序里带一张分界线卡片，上方进系统提示词区、下方进尾部。
+     * 空数组 = 默认顺序。这份顺序就是学习会话里消息的先后。
      */
     promptOrder: [],
-    /** 是否自动注入这些提示词。关掉 = 用户自己把它们放进预设，插件不再往提示词里塞东西 */
-    promptInject: true,
     /**
      * 用户自建的提示词。
      *
@@ -75,13 +55,23 @@ export const DEFAULT_SETTINGS = Object.freeze({
     promptRoles: {},
 
     /**
-     * 学习块三段的正文。注入时按 promptOrder 拼成两段（见 prompt.js 的 buildInjection）。
-     * 空串 = 使用 prompt.js 里对应那段的 DEFAULT_BLOCK_*。存空串而不是存整段默认文本，
-     * 默认文本随版本更新时老用户也能拿到新版。
+     * 学习会话的两段通用提示词。
+     *
+     *   learnPrompt   系统规则（会话里做什么、产出方式、守什么规矩）
+     *   targetPrompt  目标内容卡的描述行（默认「以下是目标内容：」），
+     *                 真正的内容由 learning.js 在发请求前追加在后面
+     *
+     * 空串 = 使用 prompt.js 里对应的 DEFAULT_*（默认文本随版本更新时老用户也能拿到新版）。
+     * 两段都由学习与压缩共用，所以不带任何"这一轮学多少"之类的一次性说法。
      */
-    blockCommon: '',
-    blockActive: '',
-    blockPassive: '',
+    learnPrompt: '',
+    targetPrompt: '',
+    /**
+     * 两类会话各自的 User 消息（开场白）。空串 = 用 prompt.js 的默认文本。
+     * 它们不是提示词卡片：卡片是"模型该知道的"，这一条是"这一次要它做什么"。
+     */
+    learningUserMessage: '',
+    compactUserMessage: '',
     /*
      * 「角色描述存哪儿」（descStorage）与「可写书」（writableBook）不在这里：
      * 它们按对话保存（ADR-044），见 createChatState。老版本留在全局的旧值只当
@@ -95,16 +85,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
      * 的类型补全也覆盖到它们（老用户没有这些键，缺一个就会被当成 0）。
      */
     ...LIMIT_DEFAULTS,
-    /**
-     * 超过软/硬上限时追加的压缩指令。
-     * 空串 = 使用 compact.js 里的 DEFAULT_COMPACT_PROMPT（理由同学习块）。
-     */
-    compactPrompt: '',
-    /**
-     * 发下一条消息时把旧工具日志移出上下文（ADR-013）。
-     * 关掉之后按 ST 原生行为保留在上下文里——看得见，但会一直占 token。
-     */
-    dropTraces: true,
     /**
      * 记录面板的布局。位置/尺寸是按屏幕算的，与具体对话无关，所以放全局设置：
      *   panelX / panelY  -1 = 还没拖过，走样式里的右下角；否则是左上角像素坐标
@@ -340,8 +320,21 @@ export function ensureSettings(ctx) {
     const settings = root[MODULE_NAME];
     let dirty = false;
 
-    // v0.18 之前只有一段 blockText。搬进通用段（它原本写的就是通用规则），
-    // 搬完把旧键删掉：留着会被下一次升级再搬一次，用户哪天清空通用段也会被复活。
+    /*
+     * v0.33：对话与学习分离（ADR-050）。
+     *
+     * 学习的语义变了：不再有"主动 / 被动"两套模式，也没有"借下一轮"这回事。
+     * 学习一律发生在独立会话里，聊天请求里不再出现任何插件提示词与工具。
+     * 因此这一版要搬的东西比较多，全部只搬一次：
+     *
+     *   blockText / blockCommon / blockActive / blockPassive → learnPrompt
+     *   passiveInterval / passiveKeywords                  → learnInterval / learnKeywords
+     *   passiveByDefault                                   → enabledByDefault（取或）
+     *   compactPrompt                                      → compactUserMessage
+     *   blockPosition / promptInject / toolsResident / toolPrompt → 丢掉
+     *
+     * 主动段与被动段不再存在，只保留通用段：它原本写的就是"和这一轮学多少无关"的规则。
+     */
     if (Object.hasOwn(settings, 'blockText')) {
         const legacy = typeof settings.blockText === 'string' ? settings.blockText : '';
         if (!Object.hasOwn(settings, 'blockCommon') && legacy.trim()) {
@@ -351,38 +344,77 @@ export function ensureSettings(ctx) {
         dirty = true;
     }
 
-    /*
-     * v0.20：一个 blockPosition 换成可拖动的卡片顺序表。
-     *   head → 学习块整体搬到分界线上方（进系统提示词区）
-     *   tail → 默认顺序（全在分界线下方）
-     *   none → 关掉自动注入，正文留在原处
-     * 只搬一次：promptOrder 已经有序时不再按旧值覆盖。
-     */
-    if (Object.hasOwn(settings, 'blockPosition')) {
-        const legacy = settings.blockPosition;
-        const hasOrder = Array.isArray(settings.promptOrder) && settings.promptOrder.length > 0;
-
-        if (!hasOrder && legacy === 'head') {
-            settings.promptOrder = HEAD_PROMPT_ORDER.slice();
+    if (Object.hasOwn(settings, 'blockCommon')) {
+        const legacy = typeof settings.blockCommon === 'string' ? settings.blockCommon : '';
+        if (!String(settings.learnPrompt ?? '').trim() && legacy.trim()) {
+            settings.learnPrompt = legacy;
         }
-        if (legacy === 'none') {
-            settings.promptInject = false;
-        }
-
-        delete settings.blockPosition;
+        delete settings.blockCommon;
         dirty = true;
     }
 
+    for (const legacyKey of ['blockActive', 'blockPassive', 'blockPosition', 'promptInject', 'toolsResident', 'toolPrompt']) {
+        if (Object.hasOwn(settings, legacyKey)) {
+            delete settings[legacyKey];
+            dirty = true;
+        }
+    }
+
     /*
-     * v0.26：被动学习的开关从全局搬到对话（state.passive.enabled）。
-     * 旧值转成「新对话默认」而不是丢掉：老对话补字段时按这个默认值初始化，
-     * 升级前后看到的状态才对得上（ADR-044）。转换只发生一次。
+     * 原来由 limits.js 管的两个键也跟着"工具日志"一起消失：
+     *   traceMaxChars  日志压缩的单行上限（日志本身没了）
+     *   learnRounds / learnHistoryChars 是新增的，不需要搬
+     * 留着它们只是垃圾：limits.js 的 readLimits 只读自己表里的键，读到也永远不会用。
      */
+    if (Object.hasOwn(settings, 'traceMaxChars')) {
+        delete settings.traceMaxChars;
+        dirty = true;
+    }
+
+    for (const [legacyKey, nextKey] of [
+        ['passiveInterval', 'learnInterval'],
+        ['passiveKeywords', 'learnKeywords'],
+    ]) {
+        if (Object.hasOwn(settings, legacyKey)) {
+            const legacy = settings[legacyKey];
+            if (!Object.hasOwn(settings, nextKey) || !settings[nextKey]) {
+                settings[nextKey] = typeof legacy === typeof DEFAULT_SETTINGS[nextKey] ? legacy : DEFAULT_SETTINGS[nextKey];
+            }
+            delete settings[legacyKey];
+            dirty = true;
+        }
+    }
+
+    if (Object.hasOwn(settings, 'passiveByDefault')) {
+        // 以前"被动开着"的人，升级后想要的就是"学习模式开着"：两个开关合并成一个
+        if (settings.passiveByDefault === true) {
+            settings.enabledByDefault = true;
+        }
+        delete settings.passiveByDefault;
+        dirty = true;
+    }
+
     if (Object.hasOwn(settings, 'passiveEnabled')) {
-        if (typeof settings.passiveEnabled === 'boolean') {
-            settings.passiveByDefault = settings.passiveEnabled;
+        // v0.26 之前的全局开关，更早的一层；同样只是初值
+        if (settings.passiveEnabled === true) {
+            settings.enabledByDefault = true;
         }
         delete settings.passiveEnabled;
+        dirty = true;
+    }
+
+    if (Object.hasOwn(settings, 'compactPrompt')) {
+        const legacy = typeof settings.compactPrompt === 'string' ? settings.compactPrompt : '';
+        if (!String(settings.compactUserMessage ?? '').trim() && legacy.trim()) {
+            settings.compactUserMessage = legacy;
+        }
+        delete settings.compactPrompt;
+        dirty = true;
+    }
+
+    if (Object.hasOwn(settings, 'dropTraces')) {
+        // 聊天里不再有插件工具，也就没有"工具日志"要清理
+        delete settings.dropTraces;
         dirty = true;
     }
 
@@ -435,75 +467,61 @@ export function ensureSettings(ctx) {
 }
 
 /**
- * 被动学习的对话状态。
- *   enabled             这一场对话开没开被动学习（0.26 起按对话记，ADR-044）
- *   baseline            上一次"学过 / 已同步"时的可见消息条数；-1 = 还没初始化
- *   pending             已经触发、等待下一轮消耗的一次性学习；null = 没有
- *   lastLearnedUserHash 刚学完的那一轮的用户消息哈希，用来避免同一轮重复触发
+ * 学习的对话状态。
+ *
+ *   baseline  上一次真正学过时的可见消息条数；-1 = 还没初始化
+ *   lastHash  上一次学习所依据的那条用户消息的哈希，避免同一句话反复触发
+ *   lastRun   最近一次学习会话的结果，面板靠它显示"上次学习"那一行
  *
  * baseline 存"条数快照"而不是"已累计几条"：用户删消息、编辑消息之后，
  * 用差值算出来的进度会自动跟上，不会因为我们自己记了个计数器而永远对不上。
  */
-export const PASSIVE_BASELINE_NONE = -1;
+export const LEARN_BASELINE_NONE = -1;
 
-export const PENDING_REASONS = Object.freeze(['interval', 'keyword', 'manual']);
+/** 最近一次学习结果：形状不认识或没有时间戳就当没有 */
+function normalizeLastRun(raw) {
+    if (!isPlainObject(raw)) {
+        return null;
+    }
 
-/** 当前运行模式。注入时用它决定拼哪一段模式提示词（见 getLearningMode） */
-export const LEARNING_MODE = Object.freeze({
-    ACTIVE: 'active',
-    PASSIVE: 'passive',
-});
+    const at = Number(raw.at);
+    if (!Number.isFinite(at) || at <= 0) {
+        return null;
+    }
 
-function createPassiveState(settings) {
+    const count = value => (Number(value) >= 0 ? Math.floor(Number(value)) : 0);
+
     return {
-        // 新对话的初值；判据（条数 / 关键词）是全局的，开关是这一场对话自己的
-        enabled: Boolean(settings?.passiveByDefault),
-        baseline: PASSIVE_BASELINE_NONE,
-        pending: null,
-        lastLearnedUserHash: '',
+        at,
+        ok: raw.ok === true,
+        stopped: typeof raw.stopped === 'string' ? raw.stopped : '',
+        reason: typeof raw.reason === 'string' ? raw.reason : '',
+        rounds: count(raw.rounds),
+        toolCalls: count(raw.toolCalls),
+        chars: count(raw.chars),
+        ms: count(raw.ms),
+        error: typeof raw.error === 'string' ? raw.error : '',
+        hint: typeof raw.hint === 'string' ? raw.hint : '',
     };
 }
 
+function createLearnState() {
+    return { baseline: LEARN_BASELINE_NONE, lastHash: '', lastRun: null };
+}
+
 /**
- * 规范 passive 状态。老聊天文件里没有这个字段，手改过的可能只有半个对象——
- * 一律补成完整形状，缺的按"没有待学习"处理。
- *
- * 就地改写并返回**同一个对象**（形状不认识时才换新的）：
- * getState 每次都会调它，如果每次返回新对象，调用方手里那个引用就会在
- * 下一次 getState 之后变成孤儿——写进去的 pending / baseline 会凭空消失。
- *
- * @param {unknown} raw
- * @param {object} settings 只用来取新字段的初值（passiveByDefault）
+ * 规范 learn 状态。就地改写并返回同一个对象：getState 每次都会调它，
+ * 每次换新对象的话，调用方手里那个引用会在下一次 getState 之后变成孤儿。
  */
-function normalizePassive(raw, settings) {
+function normalizeLearn(raw) {
     const source = isPlainObject(raw) ? raw : {};
     const baseline = Number(source.baseline);
-    const rawPending = isPlainObject(source.pending) ? source.pending : null;
 
     source.baseline = Number.isFinite(baseline) && baseline >= 0
         ? Math.floor(baseline)
-        : PASSIVE_BASELINE_NONE;
-
-    // 0.26 之前的聊天文件没有这个字段：按全局默认补，而那个默认值正是从
-    // 旧的全局开关转过来的，所以老对话不会因为升级而"被动突然关了"
-    if (typeof source.enabled !== 'boolean') {
-        source.enabled = Boolean(settings?.passiveByDefault);
-    }
-
-    source.pending = rawPending
-        ? {
-            reason: PENDING_REASONS.includes(rawPending.reason) ? rawPending.reason : 'manual',
-            // 只在关键词触发时才有意义，其他原因是空串
-            keyword: typeof rawPending.keyword === 'string' ? rawPending.keyword : '',
-            at: Number(rawPending.at) > 0 ? Number(rawPending.at) : 0,
-            // "已经进过一次非 dryRun 生成"，结算时用它决定要不要记进 lastLearnedUserHash
-            used: rawPending.used === true,
-        }
-        : null;
-
-    source.lastLearnedUserHash = typeof source.lastLearnedUserHash === 'string'
-        ? source.lastLearnedUserHash
-        : '';
+        : LEARN_BASELINE_NONE;
+    source.lastHash = typeof source.lastHash === 'string' ? source.lastHash : '';
+    source.lastRun = normalizeLastRun(source.lastRun);
 
     return source;
 }
@@ -554,7 +572,7 @@ export function createChatState(settings) {
         lastBook: null,
         patch: null,
         backups: { lore: [], desc: [] },
-        passive: createPassiveState(settings),
+        learn: createLearnState(),
         /**
          * 角色描述存在哪（ADR-042）：
          *   'card'      角色卡的 description 字段（默认）
@@ -644,8 +662,32 @@ export function getState(ctx) {
         state.backups.desc = state.backups.desc.filter(isPlainObject).slice(0, 1);
     }
 
-    // 被动学习：老对话没有这个字段，补一份"没有待学习、也没累计进度"的空状态
-    state.passive = normalizePassive(state.passive, settings);
+    /*
+     * v0.33：旧的 passive.{baseline,lastLearnedUserHash} 并进 learn。
+     *
+     * 那时"被动开着"就是这个人想在这场上定期学，所以并进总开关；
+     * 基线一起搬过来，升级后不用从头再数一遍消息。
+     */
+    if (isPlainObject(state.passive)) {
+        const legacy = state.passive;
+        const learn = isPlainObject(state.learn) ? state.learn : {};
+
+        if (legacy.enabled === true) {
+            state.enabled = true;
+        }
+        if (learn.baseline === undefined && Number(legacy.baseline) >= 0) {
+            learn.baseline = Number(legacy.baseline);
+        }
+        if (!learn.lastHash && typeof legacy.lastLearnedUserHash === 'string') {
+            learn.lastHash = legacy.lastLearnedUserHash;
+        }
+
+        state.learn = learn;
+        delete state.passive;
+    }
+
+    // 学习进度与上次结果：老对话没有这个字段，补一份空状态
+    state.learn = normalizeLearn(state.learn);
 
     // 缓冲区：老对话没有这个字段（null 就是"没有缓冲区"），手改坏的当没有
     state.draft = normalizeDraft(state.draft);
@@ -731,152 +773,107 @@ export function setDraftState(ctx, draft) {
     getState(ctx).draft = draft;
 }
 
-/* ---------------------------------------------------------------- 被动学习 */
+/* ------------------------------------------------------------------ 学习 */
 /*
- * 被动学习的"状态"放在这里，"怎么判断该不该触发"放在 passive.js：
- * store 只管读写，不引入消息扫描逻辑，避免 store ↔ passive 互相 import。
+ * 学习的"状态"放在这里，"什么时候该触发一次"放在 auto-learn.js：
+ * store 只管读写，不引入消息扫描，避免 store ↔ auto-learn 互相 import。
  */
 
-/** 被动学习的对话状态（可直接改，改完记得 saveChat） */
-export function getPassive(ctx) {
-    return getState(ctx).passive;
+/** 学习的对话状态（可直接改，改完记得 saveChat） */
+export function getLearn(ctx) {
+    return getState(ctx).learn;
 }
 
 /**
- * 这一场对话开没开被动学习。
+ * 更换学习模式总开关并落盘。
  *
- * 判据（条数 / 关键词）是全局的，只有这个开关按对话记（ADR-044）：
- * 判据同一个人到处都一样，而"这个对话要不要定期抽查"是就事论事的决定。
+ * 这就是唯一的开关：开着时按判据自动触发，或者手动触发；关着时一次都不会自己学。
+ * 没有"主动 / 被动"之分，也没有"只借这一轮"的临时记号——学习本来就在另一场
+ * 会话里跑，不存在"借聊天的一轮"这回事（ADR-050）。
  *
- * 注意别把它和 isEnabled（主动）混用：主动一开就直接学，被动还要等判据命中。
- * 注入与门控统一走 getLearningMode。
- */
-export function isPassiveEnabled(ctx) {
-    return getState(ctx).passive.enabled === true;
-}
-
-/**
- * 切换被动学习开关并落盘。
- *
- * 关掉时顺手丢掉待学习：那个记号是被动机制自己攒出来的，留着会出现
- * "面板说被动关着、徽章却在闪待学"这种自相矛盾的状态。
- * @param {object} ctx
- * @param {boolean} enabled
- */
-export function setPassiveEnabled(ctx, enabled) {
-    const state = getState(ctx);
-    state.passive.enabled = Boolean(enabled);
-    if (!state.passive.enabled) {
-        state.passive.pending = null;
-    }
-    saveChat(ctx);
-    return state.passive;
-}
-
-/** 有一次已触发、还没消耗的学习。它为 true 时注入与工具门控都当作"已开启" */
-export function isPending(ctx) {
-    return Boolean(getState(ctx).passive.pending);
-}
-
-/** 待学习的详情，没有时返回 null */
-export function getPending(ctx) {
-    const pending = getState(ctx).passive.pending;
-    return pending ? { ...pending } : null;
-}
-
-/**
- * 挂上一次待学习。
- *
- * 已有待学习时不覆盖：同一个待学习期内两条触发路径只该响一次，
- * 否则"关键词 + 条数"同时命中会让计数被莫名其妙地重置两次。
- *
- * @param {object} ctx
- * @param {{ reason: string, keyword?: string }} info
- * @returns {boolean} 是否真的挂上了
- */
-export function setPending(ctx, info = {}) {
-    const passive = getState(ctx).passive;
-    if (passive.pending) {
-        return false;
-    }
-
-    const reason = PENDING_REASONS.includes(info.reason) ? info.reason : 'manual';
-    passive.pending = {
-        reason,
-        keyword: reason === 'keyword' ? String(info.keyword ?? '') : '',
-        at: Date.now(),
-        used: false,
-    };
-    return true;
-}
-
-/** 标记"这次待学习已经进入生成"，结算时用它区分 dryRun 与真正的学习轮 */
-export function markPendingUsed(ctx) {
-    const pending = getState(ctx).passive.pending;
-    if (!pending) {
-        return false;
-    }
-    pending.used = true;
-    return true;
-}
-
-/** 丢掉待学习（用户主动取消、或主动模式被打开时） */
-export function clearPending(ctx) {
-    const passive = getState(ctx).passive;
-    if (!passive.pending) {
-        return false;
-    }
-    passive.pending = null;
-    return true;
-}
-
-/**
- * 当前这一轮该走哪一套：`'active'` / `'passive'` / `null`（都没开）。
- *
- * **主动优先**：主动开关开着就算主动，哪怕还挂着一个待学记号。这和
- * "主动开着时被动不触发、打开主动会丢掉记号"是同一条规则，两处不要各判一套。
- *
- * 注入（prompt.js 选哪段模式提示词）与门控都该经过它或 isLearningActive。
- * @param {object} ctx
- */
-export function getLearningMode(ctx) {
-    const state = getState(ctx);
-    if (state.enabled === true) {
-        return LEARNING_MODE.ACTIVE;
-    }
-    if (state.passive.pending) {
-        return LEARNING_MODE.PASSIVE;
-    }
-    return null;
-}
-
-/**
- * "模型现在该看到学习块、该拿到工具吗"。
- *
- * 两个入口：主动开关（对话级 enabled）与被动学习的一次性待命（pending）。
- * 注入和 shouldRegister 都必须走这一个判断，否则会出现"块注入了但工具没注册"
- * 这类半开半关的状态。
- */
-export function isLearningActive(ctx) {
-    return getLearningMode(ctx) !== null;
-}
-
-/**
- * 切换开关并落盘。
- *
- * 打开主动模式时顺手丢掉待学习：主动已经覆盖了这一轮，留着它只会在关掉主动之后
- * 突然又冒出一轮"临时学习"，看起来像开关失灵。
  * @param {object} ctx
  * @param {boolean} enabled
  */
 export function setEnabled(ctx, enabled) {
     const state = getState(ctx);
     state.enabled = Boolean(enabled);
-    if (state.enabled) {
-        state.passive.pending = null;
-    }
     saveChat(ctx);
     return state;
+}
+
+/**
+ * 记下"这一次学的是哪一段"：基线推到当前条数、记下所依据的那条用户消息。
+ *
+ * 在**触发时**就写，不等会话跑完：跑到一半又来了新消息时，基线不该把它算进
+ * 下一次的进度里（那几条会在下一轮重新被看到）。
+ *
+ * @param {object} ctx
+ * @param {{ total?: number, hash?: string }} info
+ * @returns {object} learn 状态
+ */
+export function beginLearn(ctx, { total = null, hash = '' } = {}) {
+    const state = getState(ctx);
+    const count = Number(total);
+
+    if (Number.isFinite(count) && count >= 0) {
+        state.learn.baseline = Math.floor(count);
+    }
+    state.learn.lastHash = String(hash ?? '');
+
+    return state.learn;
+}
+
+/**
+ * 记下一次学习的结果。只写内存，落盘交给调用方。
+ * @param {object} ctx
+ * @param {object} result `{ ok, stopped, rounds, toolCalls, chars, ms, error, hint }`
+ * @returns {object} learn 状态
+ */
+export function finishLearn(ctx, result = null) {
+    const state = getState(ctx);
+    state.learn.lastRun = normalizeLastRun({ at: Date.now(), ...(result ?? {}) });
+    return state.learn;
+}
+
+/** 最近一次学习的结果；没学过时返回 null */
+export function getLastLearnRun(ctx) {
+    const run = getState(ctx).learn.lastRun;
+    return run ? { ...run } : null;
+}
+
+/**
+ * 运行时标记：此刻有没有一场学习会话在跑。
+ *
+ * 它是**进程级**的，不随对话切换重置：会话只活在一次异步调用里，不落在任何
+ * 对话上。工具层靠它判断"现在是不是学习时间"——聊天请求里已经没有任何插件
+ * 工具，会话工具是唯一的入口。
+ */
+let runningLearn = null;
+
+/**
+ * 标记学习会话开始 / 结束。传 null 表示结束。
+ * @param {{ reason?: string, startedAt?: number }|null} info
+ */
+export function markLearningRunning(info = null) {
+    runningLearn = info
+        ? { reason: String(info.reason ?? ''), startedAt: Number(info.startedAt) || Date.now() }
+        : null;
+    return runningLearn;
+}
+
+/** 正在跑的那一场的简述；空闲时 null */
+export function getLearningRunning() {
+    return runningLearn ? { ...runningLearn } : null;
+}
+
+/**
+ * 工具层问的"现在能不能写"。
+ *
+ * 以前它表示"学习模式开着"，现在表示"有一场学习会话正在跑"：聊天里既没有
+ * 提示词也没有工具，模型只有在这个窗口里才可能调用它们。
+ */
+export function isLearningActive() {
+    return Boolean(runningLearn);
 }
 
 /** 有没有打开一个对话（没有对话时 chat_metadata 是空对象，写进去会丢） */

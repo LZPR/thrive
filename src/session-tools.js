@@ -1,133 +1,45 @@
 /**
  * session-tools.js · 会话私有的工具表
  *
- * 和主对话那 10 个工具（`src/tools.js`）**没有任何关系**：不进 `ToolManager`、
- * 不走 `ctx.registerFunctionTool`，只在这一次请求的 `tools` 字段里出现。
- * 这样开关学习模式不会改动主对话请求头部的 `tools` 数组，前缀缓存不受影响；
- * 反过来，会话也不受"学习模式开没开"的门控。
+ * 会话的 `tools` 从不进 `ToolManager`、不走 `ctx.registerFunctionTool`：它只出现在
+ * 这一次会话的请求体里。这样聊天请求里一个插件工具都没有（ADR-050），
+ * 会话自己又永远拿得到完整的一套。
  *
- * 这一版的三个工具都是自检用的存根，不碰世界书、不碰角色卡：
- *   stub_read   读一条内置事实，顺手发一个本场专属 ticket
- *   stub_write  必须带着那个 ticket 才能写 —— 模型猜不到它，所以物理上必须先读后写
- *   stub_boom   主动制造一个致命错误，用来走通"循环停下"的分支
+ * 工具实现就是 tools.js 里那十个（世界书 / 角色描述读写）。这里只做两件事：
  *
- * `stub_write` 的 ticket 不是防呆，是**让"多轮"成为结构事实**：只要它写成功了，
- * 第二轮请求里就必然带着第一轮的 tool 消息，不必依赖对模型行为的软断言。
+ *   1. 把定义表翻译成会话要的形状：`{ name, description, parameters, run }`
+ *   2. 执行一次调用，并把结果收成一条**非空**的工具消息正文
+ *
+ * `execution` 的边界很窄：解析参数、找工具、兜住异常、序列化。业务判断全在
+ * 工具自己的实现里，这一层不认识世界书也不认识角色描述。
  */
 
-import { createId } from './util.js';
-
-/** 内置事实表。真实实现里这里会换成世界书读取 */
-const STUB_FACTS = Object.freeze({
-    北境: Object.freeze({
-        title: '北境',
-        body: '北境常年积雪，南面是灰石山脉，首府白港；当地人用盐和毛皮换取南方的铁器。',
-    }),
-    灰石山脉: Object.freeze({
-        title: '灰石山脉',
-        body: '灰石山脉横在北境与南方之间，山口只有三处，冬季全部封闭。',
-    }),
-});
-
-const STUB_KEYS = Object.keys(STUB_FACTS);
+import { getToolDefs } from './tools.js';
 
 /**
  * 造一组会话工具。
  *
- * @returns {Array<{name: string, description: string, parameters: object, run: (args: object, session: object) => {ok?: boolean, text: string, fatal?: boolean}}>}
+ * tools.js 里的定义用 `action`；这里统一包成 `run`，因为会话只认 `run(args, session)`，
+ * 而 `session` 只给确有的工具用（世界书工具不需要 scratch）。
+ *
+ * @param {{ defs?: Array<object> }} [options] 传 defs 可以换一套（自检 / 测试用）
+ * @returns {Array<{ name: string, description: string, parameters: object, run: Function }>}
  */
-export function createSessionTools() {
-    return [
-        {
-            name: 'stub_read',
-            description: '读取一条内置事实。返回 title、body 与一个 ticket；写之前必须先读。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    key: { type: 'string', description: `要读的条目名，可用：${STUB_KEYS.join('、')}` },
-                },
-                required: ['key'],
-            },
-            run(args, session) {
-                const key = String(args?.key ?? '').trim();
+export function createSessionTools({ defs = null } = {}) {
+    const source = Array.isArray(defs) ? defs : getToolDefs();
 
-                if (!STUB_FACTS[key]) {
-                    return {
-                        ok: false,
-                        text: json({
-                            ok: false,
-                            error: 'STUB_NO_KEY',
-                            hint: `没有「${key || '空'}」这一条。可用的 key：${STUB_KEYS.join(' / ')}`,
-                        }),
-                    };
-                }
-
-                const fact = STUB_FACTS[key];
-                return {
-                    ok: true,
-                    text: json({ ok: true, title: fact.title, body: fact.body, ticket: session?.scratch?.ticket ?? '' }),
-                };
-            },
-        },
-
-        {
-            name: 'stub_write',
-            description: '把内容写入本场会话的暂存区。必须带上 stub_read 返回的 ticket。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    title: { type: 'string', description: '标题' },
-                    body: { type: 'string', description: '正文' },
-                    ticket: { type: 'string', description: 'stub_read 返回的那个 ticket，原样带上' },
-                },
-                required: ['title', 'body', 'ticket'],
-            },
-            run(args, session) {
-                const scratch = session?.scratch ?? { ticket: '', writes: [] };
-                const ticket = String(args?.ticket ?? '').trim();
-
-                if (!ticket || ticket !== scratch.ticket) {
-                    return {
-                        ok: false,
-                        text: json({
-                            ok: false,
-                            error: 'STUB_TICKET',
-                            hint: 'ticket 不对或没带。先调用 stub_read 拿到 ticket，再把这个值原样传回来。',
-                        }),
-                    };
-                }
-
-                const title = String(args?.title ?? '').trim();
-                if (!title) {
-                    return { ok: false, text: json({ ok: false, error: 'STUB_TITLE', hint: '标题不能为空。' }) };
-                }
-
-                scratch.writes.push({ title, body: String(args?.body ?? '') });
-                return { ok: true, text: json({ ok: true, count: scratch.writes.length, latest: title }) };
-            },
-        },
-
-        {
-            name: 'stub_boom',
-            description: '自检用：主动报一个致命错误，让工具循环立刻停下。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    fatal: { type: 'boolean', description: '传 false 表示只是普通返回，不致命' },
-                },
-            },
-            run(args) {
-                if (args?.fatal === false) {
-                    return { ok: true, text: json({ ok: true, note: '没有致命化，循环应当继续。' }) };
-                }
-                return {
-                    ok: false,
-                    fatal: true,
-                    text: json({ ok: false, error: 'STUB_FATAL', hint: '这一场由 stub_boom 主动终止，属于自检预期行为。' }),
-                };
-            },
-        },
-    ];
+    return source.map(def => ({
+        name: String(def.name ?? ''),
+        description: String(def.description ?? ''),
+        parameters: def.parameters ?? { type: 'object', properties: {} },
+        /**
+         * 执行体。收到的就是模型给的参数对象，返回任意可序列化的结果；
+         * `executeTool` 负责把它变成工具消息的正文。
+         */
+        run: (args, session) => (typeof def.run === 'function'
+            ? def.run(args, session)
+            : def.action(args, session)),
+    }));
 }
 
 /**
@@ -167,12 +79,15 @@ export function findTool(tools, name) {
  * `text` 非空是硬要求：`role:'tool'` 的消息内容一旦为空，整条会被下游当成不存在，
  * `tool_call_id` 跟着消失，下一轮必然 400。
  *
+ * 工具实现返回的通常是 `{ ok: true, ... }` 这种结构化对象（ST 那边也是这么交的），
+ * 这里统一序列化成 JSON；只有自带 `text` 的（自检工具）才原样使用。
+ *
  * @param {Array<object>} tools
  * @param {{ id: string, name: string, arguments?: unknown }} call
  * @param {object} session 工具可以用 `session.scratch` 存自己的状态
  * @returns {{ ok: boolean, text: string, fatal: boolean, error?: string }}
  */
-export function executeTool(tools, call, session) {
+export async function executeTool(tools, call, session) {
     const name = String(call?.name ?? '').trim();
     const tool = findTool(tools, name);
 
@@ -186,14 +101,7 @@ export function executeTool(tools, call, session) {
     }
 
     try {
-        const result = tool.run(args.value, session) ?? {};
-        const text = String(result.text ?? '');
-        return {
-            ok: result.ok !== false,
-            fatal: result.fatal === true,
-            text: text.trim() ? text : json({ ok: false, error: 'EMPTY_RESULT', hint: '工具没有返回内容。' }),
-            ...(result.ok === false ? { error: 'TOOL_REPORTED_ERROR' } : {}),
-        };
+        return shape(await tool.run(args.value, session));
     } catch (err) {
         // 工具自己炸了：当成软错误喂回模型，让它换个做法，而不是整场会话中断
         return soft('TOOL_CRASHED', `工具自身报错：${err?.message ?? err}`);
@@ -202,13 +110,37 @@ export function executeTool(tools, call, session) {
 
 /* ------------------------------------------------------------------ 内部 */
 
+/** 工具返回值 → 会话要的形状 */
+function shape(output) {
+    const value = output ?? {};
+
+    // 自检工具直接给 text；真实工具给的是普通对象
+    if (typeof value.text === 'string') {
+        return {
+            ok: value.ok !== false,
+            fatal: value.fatal === true,
+            text: value.text.trim() ? value.text : json({ ok: true, note: '（没有更多内容）' }),
+            ...(value.ok === false ? { error: 'TOOL_REPORTED_ERROR' } : {}),
+        };
+    }
+
+    return {
+        ok: value.ok !== false,
+        fatal: value.fatal === true,
+        text: json(value),
+        ...(value.ok === false ? { error: String(value.error ?? 'TOOL_REPORTED_ERROR') } : {}),
+    };
+}
+
 function soft(error, hint) {
     return { ok: false, fatal: false, error, text: json({ ok: false, error, hint }) };
 }
 
 function json(value) {
     try {
-        return JSON.stringify(value);
+        const text = JSON.stringify(value);
+        // undefined / 函数之类序列化后是 undefined，兜底成一句可读的
+        return typeof text === 'string' && text ? text : json({ ok: true });
     } catch {
         return '{"ok":false,"error":"SERIALIZE_FAILED"}';
     }
@@ -232,9 +164,4 @@ function parseArgs(raw) {
     } catch (err) {
         return { ok: false, detail: err?.message ?? String(err) };
     }
-}
-
-/** 本场会话的随机 ticket。放这里是因为只有工具用得上它 */
-export function createScratch() {
-    return { ticket: createId('tk'), writes: [] };
 }

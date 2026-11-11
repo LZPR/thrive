@@ -9,20 +9,19 @@
  *
  * 作用域原则（ADR-043 / ADR-045）：**位置即作用域**。这一页只放跨对话一致的设置；
  * 按对话生效的一律在浮动面板里，一个都不留在这儿——
- *   - 主动 / 被动开关、描述存哪儿、可写书、待确认改动、写入记录 → ui/panel.js
+ *   - 学习模式开关、描述存哪儿、可写书、待确认改动、写入记录 → ui/panel.js
  *
- * 所以这一页的内容不随对话变化，切对话时它不需要重铺任何下拉。被动判据（每 N 条 /
- * 关键词）是全局的，因此回到这一页的「被动学习」组（passive-criteria.js）。
+ * 所以这一页的内容不随对话变化，切对话时它不需要重铺任何下拉。学习判据（每 N 条 /
+ * 关键词）是全局的，因此留在这一页的「自动学习」组（learn-criteria.js）。
  *
  *   common.js         取元素、回填勾选框、状态小字、防抖落盘
  *   help.js           标签旁那个「?」的展开 / 收起
  *   diagnostics.js    顶部环境诊断
- *   basics.js         新对话默认开启（主动 / 被动）、显示徽章
- *   passive-criteria.js 被动判据：每 N 条、关键词
- *   limit-fields.js   14 个数值上限
- *   prompt-cards.js   提示词入口（编辑器在独立窗口里）与两个开关
- *   tool-catalog.js   只读工具清单与复制
- *   appearance.js     旧日志清理、浮动面板外观、压缩面板入口
+ *   basics.js         新对话默认开启、显示徽章
+ *   learn-criteria.js 自动学习判据：每 N 条、关键词
+ *   limit-fields.js   数值上限（含学习会话的目标内容字数与轮数）
+ *   prompt-cards.js   提示词入口（编辑器在独立窗口里）
+ *   appearance.js     浮动面板外观、压缩面板入口
  *
  * 加一项设置：挑一个现有的组文件改，不新建文件；实在不属于任何一组，再开一个文件
  * 并在下面两处各加一行。
@@ -35,10 +34,9 @@ import { bindAppearanceControls, syncAppearanceControls } from './appearance.js'
 import { bindBasicsControls, syncBasicsControls } from './basics.js';
 import { bindDiagnosticRefresh, refreshDiagnostics } from './diagnostics.js';
 import { bindHelpButtons } from './help.js';
+import { bindLearnCriteria, syncLearnCriteria } from './learn-criteria.js';
 import { bindLimitControls, syncLimitControls } from './limit-fields.js';
-import { bindPassiveCriteria, syncPassiveCriteria } from './passive-criteria.js';
 import { bindPromptControls, updatePromptCards, updatePromptStats } from './prompt-cards.js';
-import { bindToolCatalog, renderToolCatalog } from './tool-catalog.js';
 
 /**
  * 渲染并挂载设置面板。重复调用安全。
@@ -82,10 +80,9 @@ export async function initSettingsPanel(ctx = getContext()) {
 /** 把各组的绑定叫一遍。新增一组只在这里加一行。 */
 function bindSettingsEvents() {
     bindBasicsControls();
-    bindPassiveCriteria();
+    bindLearnCriteria();
     bindLimitControls();
     bindPromptControls();
-    bindToolCatalog();
     bindAppearanceControls();
 }
 
@@ -100,13 +97,12 @@ function bindSettingsEvents() {
  */
 function refreshSettingsControls(ctx, settings) {
     syncBasicsControls(settings);
-    syncPassiveCriteria(settings);
+    syncLearnCriteria(settings);
     syncLimitControls(settings);
     syncAppearanceControls(settings);
 
     updatePromptCards(settings);
     updatePromptStats(ctx, settings);
-    renderToolCatalog(ctx);
 }
 
 /* 登记给刷新编排：设置页的几块都在这批文件里，refresh.js 不反过来 import 它们 */

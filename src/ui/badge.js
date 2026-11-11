@@ -1,33 +1,31 @@
 /**
  * ui/badge.js · 输入框旁的状态徽章
  *
- * 徽章只干一件事：开关浮动面板。它不知道面板长什么样、也不知道怎么切换模式，
+ * 徽章只干一件事：开关浮动面板。它不知道面板长什么样、也不知道怎么切换学习，
  * 点击只是发一个 PANEL_TOGGLE_EVENT（见 events.js）——面板那边自己接。
  *
- * 状态全靠图标本身：强调色 = 主动开着，Em 色 = 只有被动开着，「待学」让图标呼吸；
- * 具体文案在 tooltip 与面板里。
+ * 状态全靠图标本身，三种，互不叠加成新含义：
+ *   · 强调色 = 学习模式开着（会自动学）
+ *   · 呼吸   = 正在学（一场学习会话在跑）
+ *   · 置灰   = 现在切了也没用（没对话 / 工具调用不可用）
+ * 右上角的数字只表示"有几份待确认的描述改动"，和学不学无关。
+ *
+ * 为什么不在这里放开关：它们挤在输入框旁边，宽度随文字变，和 ST 那一排固定尺寸
+ * 的方块按钮站不到一起；而且 #leftSendForm 是 flex 容器，徽章会跟着一起被拉高。
+ * 开关在面板里，点一下徽章就看见。
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { TRIGGER, describeTrigger, intervalProgress, parseKeywords } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { formatDiagnosis } from '../diagnostics.js';
-import { PASSIVE_EVENT, notifyPanelToggle } from '../events.js';
-import { describePending, intervalProgress, parseKeywords } from '../passive.js';
+import { LEARNING_EVENT, notifyPanelToggle } from '../events.js';
+import { describeLearnRun } from '../learning.js';
 import { getPatch, isUnresolved } from '../patch.js';
-import { getPending, isEnabled, isPassiveEnabled } from '../store.js';
+import { getLastLearnRun, getLearningRunning, isEnabled } from '../store.js';
 import { refreshBadgeOnly, registerSurfaces } from './refresh.js';
 import { BADGE_ID, LOG, PANEL_ID, isPanelOpen, toast } from './shared.js';
 
-/**
- * 徽章 = 一个方块图标 + 待确认计数，只作为浮动面板的开关。
- *
- * 为什么把「主动 / 被动」两段从这里拿掉：它们挤在输入框旁边，宽度随文字变，和 ST 那一排
- * 固定尺寸的方块按钮站不到一起；而且 #leftSendForm 是 flex 容器，徽章会跟着一起被拉高。
- *
- * 状态也不再用额外的点/圈去画——35px 的方块里塞什么都显脏。图标颜色本身就是状态
- * （强调色 = 主动开着，Em 色 = 只有被动开着），「待学」让图标整体呼吸，
- * 具体文案都在面板里，点一下就看见。
- */
 const BADGE_HTML = `
 <div id="thrive_badge" class="thrive-badge interactable" role="button" tabindex="0"
     aria-controls="${PANEL_ID}" aria-expanded="false" aria-label="学习模式：打开面板">
@@ -70,20 +68,43 @@ export function initBadge() {
     });
 
     /*
-     * 被动学习挂上 / 结算时，徽章要立刻跟着变，并且弹一条说明。
+     * 学习的开始与结束都要立刻反映到徽章上，并在结束时弹一句结果。
      *
-     * 走事件而不是让 passive.js 直接调这里：触发发生在"发消息""收到回复"两个
-     * 用户没在操作界面的时刻，如果只在评估完刷一次界面，徽章会停在旧状态，
-     * 用户看不到"下一轮会临时学习"这件事——而这正是最需要提示的地方。
+     * 走事件而不是让 learning.js 直接调这里：这两件事发生在用户没在操作界面的时刻
+     * （判据命中、后台跑完），如果不刷，徽章会停在旧状态——"呼吸停了但没说结果"
+     * 比不呼吸更让人困惑。
+     *
+     * 开始时不弹 toast：图标已经在呼吸，再弹一条只会挡住输入框。结束时必须说一句，
+     * 因为它同时在另一场会话里改了世界书，用户得知道刚才发生了什么。
      */
-    document.addEventListener(PASSIVE_EVENT, event => {
+    document.addEventListener(LEARNING_EVENT, event => {
         const detail = event?.detail ?? {};
         refreshBadgeOnly(getContext());
 
-        if (detail.fired) {
-            const why = describePending({ reason: detail.reason, keyword: detail.keyword });
-            toast(`被动学习已触发（${why}）：下一轮对话临时开启学习模式，回复结束后自动关闭`);
+        if (detail.running) {
+            return;
         }
+
+        const result = detail.result;
+        if (!result) {
+            return;
+        }
+
+        if (!result.ok) {
+            const why = String(result.hint || result.error || '').trim();
+            toast(`学习没跑完${why ? `：${why}` : ''}`);
+            return;
+        }
+
+        const why = detail.reason ? describeTrigger({ reason: detail.reason }) : '';
+        // 教授与学习是两件事，结束语也该分开；教授本身已是"手动"，不必再说一遍
+        const head = detail.reason === TRIGGER.TEACH
+            ? '教授结束'
+            : `学习结束${why ? `（${why}）` : ''}`;
+        // 没调用工具是正常结果（没有值得记的内容），别把它说得像失败
+        toast(result.toolCalls === 0
+            ? `${head}：没有调用工具，这次没有值得记下的内容`
+            : `${head}：${result.toolCalls} 次工具调用 · ${result.rounds} 轮`);
     });
 }
 
@@ -91,7 +112,7 @@ export function initBadge() {
  * 徽章点击：开 / 关面板。
  *
  * 这里**不做任何守卫**：环境不可用时更需要能打开面板——原因就写在面板里，
- * 比只弹一句 toast 有用。真正挡住切换的是面板里那两个开关。
+ * 比只弹一句 toast 有用。真正挡住切换的是面板里那颗开关。
  *
  * 也只是发一个事件：徽章不认识面板，开合时该顺带刷什么归刷新编排管。
  *
@@ -120,8 +141,10 @@ export function syncBadgeOpenState() {
 /**
  * 刷新徽章：颜色、计数、tooltip。
  *
- * 徽章不再承载开关，状态全靠图标本身：强调色 = 主动开着，Em 色 = 只有被动开着，
- * 「待学」让图标呼吸；具体文案另有 tooltip，面板里还有完整说明。
+ * @param {object} ctx
+ * @param {object} settings
+ * @param {boolean} available 有没有打开对话
+ * @param {{ok: boolean, code: string}} diag 环境诊断
  */
 function refreshBadge(ctx, settings, available, diag) {
     const badge = document.getElementById(BADGE_ID);
@@ -130,23 +153,19 @@ function refreshBadge(ctx, settings, available, diag) {
     }
 
     // 环境不支持时置灰：开关切过去也没有任何东西会生效
-    const unsupported = !diag.ok;
-    const usable = available && !unsupported;
+    const usable = available && diag.ok;
 
-    const activeOn = isEnabled(ctx);
-    // 被动开关按对话（ADR-044）；判据仍是全局的，所以进度照旧从 settings 里读
-    const passiveOn = isPassiveEnabled(ctx);
-    const pending = getPending(ctx);
+    const enabled = isEnabled(ctx);
+    const running = getLearningRunning();
+    const last = getLastLearnRun(ctx);
     // 徽章计数：待确认的改动只有 patch 一种，且同一时刻最多一份
     const patchPending = isUnresolved(getPatch(ctx)) ? 1 : 0;
 
     badge.classList.toggle('displayNone', !settings.showBadge);
     // 两种"不可用"共用同一档置灰：没有对话、环境不支持工具调用
     badge.classList.toggle('thrive-badge--muted', !usable);
-    badge.classList.toggle('thrive-badge--active', activeOn);
-    badge.classList.toggle('thrive-badge--passive', passiveOn);
-    badge.classList.toggle('thrive-badge--armed', Boolean(pending));
-    badge.classList.toggle('thrive-badge--pending', patchPending > 0);
+    badge.classList.toggle('thrive-badge--active', enabled && usable);
+    badge.classList.toggle('thrive-badge--running', Boolean(running));
     syncBadgeOpenState();
 
     const count = badge.querySelector('.thrive-badge__count');
@@ -158,33 +177,47 @@ function refreshBadge(ctx, settings, available, diag) {
     const lines = [];
     if (!available) {
         lines.push('请先打开一个对话');
-    } else if (unsupported) {
+    } else if (!diag.ok) {
         lines.push(`工具调用不可用：${formatDiagnosis(diag)}`);
+    }
+
+    // 正在学是当下最要紧的事实，放最前面；学不学得到的结果排在后面
+    if (running) {
+        const why = running.reason ? describeTrigger({ reason: running.reason }) : '';
+        lines.push(`正在学习${why ? `（${why}）` : ''}：在独立会话里跑，不影响当前聊天`);
     } else {
-        lines.push(`主动学习：${activeOn ? '已开启' : '已关闭'}`);
-        lines.push(`被动学习：${passiveOn ? '已开启' : '已关闭'}`);
+        lines.push(`学习模式：${enabled ? '已开启' : '已关闭'}`);
 
-        const progress = intervalProgress(ctx, settings);
-        if (passiveOn && progress.interval > 0) {
-            lines.push(`下次按条数触发还差 ${progress.remaining} 条（已累计 ${progress.since} / ${progress.interval}）`);
+        /*
+         * 开了但没配判据是最常见的空转：只写"已开启"等于没说，
+         * 用户会以为它会自己学。这里把"靠什么触发"写出来。
+         */
+        if (enabled) {
+            const progress = intervalProgress(ctx, settings);
+            const keywords = parseKeywords(settings.learnKeywords);
+
+            if (progress.interval > 0) {
+                lines.push(`下次按条数触发还差 ${progress.remaining} 条（已累计 ${progress.since} / ${progress.interval}）`);
+            }
+            if (keywords.length > 0) {
+                lines.push(`关键词 ${keywords.length} 个：${keywords.slice(0, 4).join(' / ')}${keywords.length > 4 ? ' …' : ''}`);
+            }
+            if (progress.interval <= 0 && keywords.length === 0) {
+                lines.push('还没配判据：只有手动「立刻学一次」会触发');
+            }
         }
-        const keywords = parseKeywords(settings.passiveKeywords);
-        if (passiveOn && keywords.length > 0) {
-            lines.push(`关键词 ${keywords.length} 个：${keywords.slice(0, 4).join(' / ')}${keywords.length > 4 ? ' …' : ''}`);
-        }
+
+        lines.push(describeLearnRun(last));
     }
 
-    if (pending) {
-        lines.push(`本次待学习：${describePending(pending)} —— 下一轮对话临时开启，回复后自动关闭`);
-    }
     if (patchPending > 0) {
         lines.push(`有 ${patchPending} 份待确认的描述改动`);
     }
 
     /*
      * 超长内容只在 tooltip 里提一句，不在徽章上再加一个标记：
-     * 这个方块已经用颜色表达模式、用数字表达待确认改动，再叠一层就分不清了。
-     * 真正的高亮在面板里的「压缩」那一段与设置页那一组。
+     * 这个方块已经用颜色表达开关、用呼吸表达在跑、用数字表达待确认改动，
+     * 再叠一层就分不清了。真正的高亮在面板标题栏那颗按钮上。
      */
     const compressCount = getCompressSnapshot().items.length;
     if (compressCount > 0) {
@@ -192,7 +225,7 @@ function refreshBadge(ctx, settings, available, diag) {
     }
 
     // 点徽章只会开 / 关面板，说清楚，省得用户以为它还像以前那样切开关
-    lines.push(isPanelOpen() ? '点击收起面板' : '点击打开面板（模式开关在里面）');
+    lines.push(isPanelOpen() ? '点击收起面板' : '点击打开面板（学习开关在里面）');
 
     badge.title = lines.join('\n');
     badge.setAttribute('aria-label', lines.join('；'));

@@ -2,7 +2,7 @@
  * limits.js · 所有可调数值上限的唯一出口
  *
  * 这些数字原本散在四个模块里（targets 读世界书、tools 写、store 快照槽位、
- * trace 日志截断），设置页一处也碰不到。要做成设置项，如果每个模块继续各写
+ * learning 拼目标内容），设置页一处也碰不到。要做成设置项，如果每个模块继续各写
  * `Number(settings.x) || 常量`，改默认值要改四处，范围校验会各写一套，
  * 读到的脏数据也各有各的处理方式。这里统一收口：
  *
@@ -21,7 +21,7 @@
  * `min` 是"再小就没有意义"的底线（比如关键词上限至少 1 个，否则新建条目
  * 永远满足不了 ADR-009）；`max` 是"再大就不是限制"的天花板，只防手滑。
  *
- * 顺序与设置页一致：世界书条目 → 角色描述 → 读取返回 → 记录与日志。
+ * 顺序与设置页一致：世界书条目 → 角色描述 → 读取返回 → 记录 → 学习会话。
  */
 export const LIMIT_SPECS = Object.freeze({
     /** 单条世界书正文的软提醒（字）：只在压缩面板里标记该压，不拦截任何写入 */
@@ -53,8 +53,16 @@ export const LIMIT_SPECS = Object.freeze({
 
     /** 面板"已写入"保留几条：既是备份槽位数，也是能退几步 */
     loreBackupLimit: Object.freeze({ default: 10, min: 1, max: 50, step: 1 }),
-    /** 工具日志单行截断字数 */
-    traceMaxChars: Object.freeze({ default: 200, min: 40, max: 2000, step: 10 }),
+
+    /**
+     * 一次学习带走多少字的对话记录。
+     *
+     * 目标内容是整段对话记录（合并成一条消息），它决定学习会话的起始体积：
+     * 太大容易撞上下文上限，太小会漏掉早期的设定。超出时从最早的消息往前截。
+     */
+    learnHistoryChars: Object.freeze({ default: 6000, min: 500, max: 100000, step: 500 }),
+    /** 一次学习最多几轮工具调用。硬上限 10 在 session.js 里，再高就不是"学一次"了 */
+    learnRounds: Object.freeze({ default: 6, min: 1, max: 10, step: 1 }),
 });
 
 export const LIMIT_KEYS = Object.freeze(Object.keys(LIMIT_SPECS));

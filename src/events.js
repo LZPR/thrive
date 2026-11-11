@@ -13,8 +13,8 @@
 
 export const PANEL_EVENT = 'thrive:panel';
 
-/** 被动学习"挂上 / 结算"时广播，界面据此刷新徽章并弹提示 */
-export const PASSIVE_EVENT = 'thrive:passive';
+/** 学习会话开始 / 结束时广播，界面据此刷新"学习中"状态并弹提示 */
+export const LEARNING_EVENT = 'thrive:learning';
 
 /** 徽章被点了：请求开 / 关浮动面板。谁开谁关由刷新编排决定 */
 export const PANEL_TOGGLE_EVENT = 'thrive:panel-toggle';
@@ -37,16 +37,16 @@ export function notifyPanel(detail = null) {
 }
 
 /**
- * 通知被动学习状态变化。
+ * 通知学习状态变化。
  *
- * 由 passive.js 在触发/结算时发；ui/badge.js 订阅它去弹 toast、刷徽章。
- * 走事件而不是直接调用：passive.js 不该知道界面长什么样，
- * 反过来界面又要 import passive.js（设置页的进度提示），直接互相 import 会成环。
+ * 由 learning.js 在开始 / 结束时发；ui/badge.js 与 ui/panel.js 订阅它去刷新
+ * "学习中"并弹一条结果说明。走事件而不是直接调用：learning.js 不该知道界面长什么样，
+ * 反过来界面又要 import learning.js（面板要读状态），直接互相 import 会成环。
  *
- * @param {object|null} [detail] `{ fired, reason, keyword }`
+ * @param {{ running: boolean, reason?: string, result?: object }} [detail]
  */
-export function notifyPassive(detail = null) {
-    dispatch(PASSIVE_EVENT, detail);
+export function notifyLearning(detail = null) {
+    dispatch(LEARNING_EVENT, detail);
 }
 
 /** 请求开 / 关浮动面板（徽章点击就是这一下）。 */

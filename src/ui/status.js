@@ -6,17 +6,18 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { TRIGGER, intervalProgress, parseKeywords } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { diagnoseEnvironment } from '../diagnostics.js';
 import { summarizeDraft } from '../draft.js';
-import { describePending, intervalProgress, parseKeywords } from '../passive.js';
+import { describeLearnRun } from '../learning.js';
 import { getPatch, isUnresolved } from '../patch.js';
 import {
     ensureSettings,
-    getPending,
+    getLastLearnRun,
+    getLearningRunning,
     isChatAvailable,
     isEnabled,
-    isPassiveEnabled,
     isWorldbookDesc,
 } from '../store.js';
 import { getWritableBook, isBookScanned } from '../targets.js';
@@ -49,10 +50,8 @@ export function describeStatus(ctx = getContext()) {
             : book;
 
     const pending = isUnresolved(getPatch(ctx)) ? 1 : 0;
-    const oneShot = getPending(ctx);
     const parts = [
-        `主动：${isEnabled(ctx) ? '已开启' : '已关闭'}`,
-        `被动：${describePassiveState(ctx, settings)}`,
+        `学习：${describeLearnState(ctx, settings)}`,
         `模块：${modules.join(' + ')}`,
         `可写书：${bookText}`,
         `待确认：${pending} 份`,
@@ -67,10 +66,6 @@ export function describeStatus(ctx = getContext()) {
         parts.push(draft.touched > 0
             ? `虚拟世界书：${draft.touched} 条改动待保存（面板标题栏那颗书页图标）`
             : '虚拟世界书：开着，没有改动');
-    }
-
-    if (oneShot) {
-        parts.push(`待学习：${describePending(oneShot)}（下一轮临时开启）`);
     }
 
     /*
@@ -90,25 +85,42 @@ export function describeStatus(ctx = getContext()) {
     return parts.join(' · ');
 }
 
-/** 被动学习的一行摘要：开没开、用什么判据、还差几条 */
-function describePassiveState(ctx, settings) {
-    if (!isPassiveEnabled(ctx)) {
-        return '已关闭';
+/**
+ * 学习的一行摘要：在跑 / 开没开 / 用什么判据 / 还差几条 / 上次的结果。
+ *
+ * 在跑的时候其余都不说：这一秒最要紧的只有"它在干活"，判据和上次结果都可以等。
+ *
+ * @param {object} ctx
+ * @param {object} settings
+ */
+function describeLearnState(ctx, settings) {
+    const running = getLearningRunning();
+    if (running) {
+        // 教授的输入是自己写的一段话，说"自动触发"会误导
+        if (running.reason === TRIGGER.TEACH) {
+            return '教授中（你写的那段话，不影响当前聊天）';
+        }
+        return `学习中（${running.reason === TRIGGER.MANUAL ? '手动' : '自动'}触发，不影响当前聊天）`;
+    }
+
+    if (!isEnabled(ctx)) {
+        const last = getLastLearnRun(ctx);
+        return last ? `已关闭（${describeLearnRun(last)}）` : '已关闭';
     }
 
     const rules = [];
-    const interval = Math.max(0, Math.floor(Number(settings.passiveInterval) || 0));
+    const interval = Math.max(0, Math.floor(Number(settings.learnInterval) || 0));
     if (interval > 0) {
         rules.push(`每 ${interval} 条`);
     }
 
-    const keywords = parseKeywords(settings.passiveKeywords);
+    const keywords = parseKeywords(settings.learnKeywords);
     if (keywords.length > 0) {
         rules.push(`关键词 ${keywords.length} 个`);
     }
 
     if (rules.length === 0) {
-        return '已开启（未配判据）';
+        return '已开启（未配判据，只能手动 /thrive learn）';
     }
 
     const progress = intervalProgress(ctx, settings);

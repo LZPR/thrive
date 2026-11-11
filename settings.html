@@ -3,7 +3,7 @@
         <div class="inline-drawer-toggle inline-drawer-header">
             <div class="flex-container alignitemscenter margin0">
                 <b>Thrive · 学习模式</b>
-                <span class="thrive-version">v0.28.0</span>
+                <span class="thrive-version">v0.34.0</span>
             </div>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
@@ -29,27 +29,20 @@
                 <div class="inline-drawer-content">
                     <small class="thrive-hint thrive-hint--moved">
                         这一页只放跨对话一致的设置。按对话生效的都在徽章打开的面板里：
-                        主动 / 被动开关、描述存哪儿、可写书、待确认改动、写入记录。
+                        学习模式开关、描述存哪儿、可写书、待确认改动、写入记录。
                     </small>
 
                     <div class="thrive-check">
                         <label class="checkbox_label" for="thrive_enabled_by_default">
                             <input id="thrive_enabled_by_default" type="checkbox">
-                            <span>新对话默认开启</span>
+                            <span>新对话默认开启学习模式</span>
                         </label>
+                        <button type="button" class="thrive-help" data-help="thrive_help_enabled_default"
+                            aria-expanded="false" aria-controls="thrive_help_enabled_default" title="说明">?</button>
                     </div>
-
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_passive_by_default">
-                            <input id="thrive_passive_by_default" type="checkbox">
-                            <span>新对话默认开启被动学习</span>
-                        </label>
-                        <button type="button" class="thrive-help" data-help="thrive_help_passive_default"
-                            aria-expanded="false" aria-controls="thrive_help_passive_default" title="说明">?</button>
-                    </div>
-                    <div id="thrive_help_passive_default" class="thrive-help__body">
-                        被动学习的开 / 关按对话记：这里只是新对话的初值，当前这一场的开关在浮动面板里。
-                        判据（每 N 条、关键词）是全局的，在下一条「被动学习」里配——它们对所有对话一致。
+                    <div id="thrive_help_enabled_default" class="thrive-help__body">
+                        学习只有这一个总开关，按对话记：这里只是新对话的初值，
+                        当前这一场的开关在浮动面板最上面。
                     </div>
 
                     <div class="thrive-check">
@@ -61,41 +54,43 @@
                             aria-expanded="false" aria-controls="thrive_help_badge" title="说明">?</button>
                     </div>
                     <div id="thrive_help_badge" class="thrive-help__body">
-                        徽章是输入框旁那颗图标：点一下开 / 关浮动面板，按对话生效的开关与落点都在面板里。
-                        强调色 = 主动开着，Em 色 = 只有被动开着，图标在呼吸 = 已挂上一次临时学习，
+                        徽章是输入框旁那颗图标：点一下开 / 关浮动面板，学习开关与落点都在面板里。
+                        强调色 = 学习模式开着，图标在呼吸 = 正在学（一场学习会话在跑），
+                        置灰 = 现在切了也没用（没对话 / 工具调用不可用），
                         右上角数字 = 待确认的描述改动。
                     </div>
                 </div>
             </div>
 
-            <!-- 被动学习：判据是全局的（所有对话共用一套）；开 / 关按对话记，在浮动面板里 -->
-            <div class="inline-drawer thrive-group" id="thrive_passive_group">
+            <!-- 自动学习：判据是全局的（所有对话共用一套）；开关按对话记，在浮动面板里 -->
+            <div class="inline-drawer thrive-group" id="thrive_learn_group">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
-                        <b>被动学习</b>
+                        <b>自动学习</b>
                         <small class="thrive-group__hint">判据 · 全局</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
                     <small class="thrive-hint thrive-hint--moved">
-                        两条判据是 or 关系，任一命中就在下一轮挂一次学习。
-                        它们对所有对话一致，所以放在这一页；开 / 关是每场对话各自的事，在浮动面板里。
+                        两条判据是 or 关系，任一命中就在角色回复完之后、在独立会话里学一次。
+                        它们对所有对话一致，所以放在这一页；开关是每场对话各自的事，在浮动面板里。
+                        两条都空着也正常——那就只用面板上的「立刻学一次」。
                     </small>
 
                     <div class="thrive-field">
                         <div class="thrive-row">
                             <span class="thrive-row__label">
-                                <label for="thrive_passive_interval">每 N 条</label>
-                                <button type="button" class="thrive-help" data-help="thrive_help_passive_interval"
-                                    aria-expanded="false" aria-controls="thrive_help_passive_interval" title="说明">?</button>
+                                <label for="thrive_learn_interval">每 N 条</label>
+                                <button type="button" class="thrive-help" data-help="thrive_help_learn_interval"
+                                    aria-expanded="false" aria-controls="thrive_help_learn_interval" title="说明">?</button>
                             </span>
-                            <input id="thrive_passive_interval" class="text_pole thrive-number" type="number"
+                            <input id="thrive_learn_interval" class="text_pole thrive-number" type="number"
                                 inputmode="numeric" min="0" max="500" step="1" placeholder="0">
                         </div>
-                        <div id="thrive_help_passive_interval" class="thrive-help__body">
-                            从上次学习算起，攒够这么多条可见消息（工具日志这类系统消息不计）就挂一次。
-                            只在角色回复完时结算，用户刚发完消息不会触发。填 0 = 不用这条判据。
+                        <div id="thrive_help_learn_interval" class="thrive-help__body">
+                            从上次学习算起，攒够这么多条可见消息（工具日志这类系统消息不计）就学一次。
+                            只在角色回复完之后结算，用户刚发完消息不会触发。填 0 = 不用这条判据。
                             上限 500：再大就不是"定期抽查"，是永远等不到。
                         </div>
                     </div>
@@ -103,19 +98,19 @@
                     <div class="thrive-field">
                         <span class="thrive-field-title">
                             关键词
-                            <button type="button" class="thrive-help" data-help="thrive_help_passive_keywords"
-                                aria-expanded="false" aria-controls="thrive_help_passive_keywords" title="说明">?</button>
+                            <button type="button" class="thrive-help" data-help="thrive_help_learn_keywords"
+                                aria-expanded="false" aria-controls="thrive_help_learn_keywords" title="说明">?</button>
                         </span>
-                        <div id="thrive_help_passive_keywords" class="thrive-help__body">
-                            最近一轮的 User / Assistant 消息里出现任意一个词就挂一次，大小写不敏感。
+                        <div id="thrive_help_learn_keywords" class="thrive-help__body">
+                            最近一轮的 User / Assistant 消息里出现任意一个词就学一次，大小写不敏感。
                             中英文逗号、分号、换行、竖线都当分隔符，单个词最多取 40 字。
                             只看聊天消息本身，世界书 / 作者注释 / 预设里的字不算。留空 = 不用这条判据。
                         </div>
-                        <textarea id="thrive_passive_keywords" class="text_pole thrive-block-text thrive-block-text--short"
+                        <textarea id="thrive_learn_keywords" class="text_pole thrive-block-text thrive-block-text--short"
                             rows="2" placeholder="逗号或换行分隔，例如：记住，笔记，整理"></textarea>
                     </div>
 
-                    <small id="thrive_passive_hint" class="thrive-hint"></small>
+                    <small id="thrive_learn_hint" class="thrive-hint"></small>
                 </div>
             </div>
 
@@ -124,7 +119,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>数值与上限</b>
-                        <small class="thrive-group__hint">字数 · 条数 · 记录</small>
+                        <small class="thrive-group__hint">字数 · 条数 · 记录 · 学习</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -219,24 +214,40 @@
                     </div>
 
                     <span class="thrive-limit-title">
-                        记录与日志
+                        学习会话
+                        <button type="button" class="thrive-help" data-help="thrive_help_limit_learn"
+                            aria-expanded="false" aria-controls="thrive_help_limit_learn" title="说明">?</button>
+                    </span>
+                    <div id="thrive_help_limit_learn" class="thrive-help__body">
+                        「目标内容」带的是当前对话记录（合并成一条消息）：带得越多，模型的上下文越满；带得太少，
+                        早期的设定就看不到。超出时从最早的消息往前截，并在开头注明漏了多少条。
+                        轮数是这一场最多来回几次——学习通常两三轮就够，调大只会让它多绕几圈。
+                        默认：6000 字 / 6 轮。
+                    </div>
+
+                    <div class="thrive-row">
+                        <label for="thrive_limit_learn_chars">目标内容最多带<span class="thrive-unit">字</span></label>
+                        <input id="thrive_limit_learn_chars" class="text_pole thrive-number" type="number" inputmode="numeric">
+                    </div>
+
+                    <div class="thrive-row">
+                        <label for="thrive_limit_learn_rounds">一场最多<span class="thrive-unit">轮</span></label>
+                        <input id="thrive_limit_learn_rounds" class="text_pole thrive-number" type="number" inputmode="numeric">
+                    </div>
+
+                    <span class="thrive-limit-title">
+                        写入记录
                         <button type="button" class="thrive-help" data-help="thrive_help_limit_record"
                             aria-expanded="false" aria-controls="thrive_help_limit_record" title="说明">?</button>
                     </span>
                     <div id="thrive_help_limit_record" class="thrive-help__body">
                         记录条数既是面板「已写入」显示几行，也是能往回恢复几步；调小之后多出来的旧记录会被裁掉，
-                        只影响面板历史，书里的内容不动。日志只在上下文里做「这轮调了什么」的提示，超长直接截断。
-                        默认：10 条 / 200 字。
+                        只影响面板历史，书里的内容不动。默认：10 条。
                     </div>
 
                     <div class="thrive-row">
                         <label for="thrive_limit_backup">写入记录保留<span class="thrive-unit">条</span></label>
                         <input id="thrive_limit_backup" class="text_pole thrive-number" type="number" inputmode="numeric">
-                    </div>
-
-                    <div class="thrive-row">
-                        <label for="thrive_limit_trace_chars">工具日志单行<span class="thrive-unit">字</span></label>
-                        <input id="thrive_limit_trace_chars" class="text_pole thrive-number" type="number" inputmode="numeric">
                     </div>
 
                     <small id="thrive_limits_hint" class="thrive-hint"></small>
@@ -255,36 +266,14 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>提示词</b>
-                        <small class="thrive-group__hint">编辑器 · 注入开关</small>
+                        <small class="thrive-group__hint">预设 · 会话开场白</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_tools_resident">
-                            <input id="thrive_tools_resident" type="checkbox">
-                            <span>工具提示词常驻</span>
-                        </label>
-                        <button type="button" class="thrive-help" data-help="thrive_help_resident"
-                            aria-expanded="false" aria-controls="thrive_help_resident" title="说明">?</button>
-                    </div>
-                    <div id="thrive_help_resident" class="thrive-help__body">
-                        关着时，关闭学习模式会把工具从请求里撤下，tools 数组一变，前缀缓存就从工具定义处失效。
-                        开着时工具定义一直留在请求里，改由「工具指令」说明哪些工具不能调用。
-                    </div>
-                    <small id="thrive_tools_resident_hint" class="thrive-hint"></small>
-
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_prompt_inject">
-                            <input id="thrive_prompt_inject" type="checkbox">
-                            <span>自动注入这些提示词</span>
-                        </label>
-                        <button type="button" class="thrive-help" data-help="thrive_help_inject"
-                            aria-expanded="false" aria-controls="thrive_help_inject" title="说明">?</button>
-                    </div>
-                    <div id="thrive_help_inject" class="thrive-help__body">
-                        关掉 = 由你在预设里手动放置，插件不再往提示词里塞任何东西（压缩指令本来就不参与注入）。
-                    </div>
+                    <small class="thrive-hint thrive-hint--moved">
+                        这些提示词只进学习会话，聊天请求里没有它们（所以也不会污染前缀缓存）。
+                    </small>
 
                     <span class="thrive-field-title thrive-prompt-entry-title">
                         提示词编辑器
@@ -292,18 +281,19 @@
                             aria-expanded="false" aria-controls="thrive_help_cards" title="说明">?</button>
                     </span>
                     <div id="thrive_help_cards" class="thrive-help__body">
-                        独立窗口里编辑：新增 / 删除 / 改名、逐条启用与角色、拖动排序，
+                        独立窗口里编辑：内置的「学习规则」与「目标内容」，加上你可以自由增删的自建提示词；
+                        逐条启用与角色、拖动排序。列表从上到下就是这一场会话的消息顺序。
+                        目标内容卡的正文不在卡片里——学习时由插件把当前对话记录追加在描述行下面。
+                        窗口最下面是「会话开场白」：学习 / 压缩各一段，作为那一场会话的第一条 User 消息。
                         也可以导入 SillyTavern 预设（有损：保留正文、角色、启用状态与顺序，
-                        忽略触发器与位置 / 深度，丢弃世界书、角色卡这类无法注入的标记块）。
-                        分界线「其它提示词」上方进系统提示词区，下方进对话尾部。
-                        自建提示词与学习块一样，只在学习模式开启的那一轮注入。
+                        忽略触发器与注入位置，丢弃世界书、角色卡这类无法发送的标记块）。
                         支持 &#123;&#123;char&#125;&#125; / &#123;&#123;user&#125;&#125; /
                         &#123;&#123;setvar::名::值&#125;&#125; / &#123;&#123;getvar::名&#125;&#125; 等 ST 宏。
                     </div>
 
                     <div class="thrive-prompt-entry">
                         <div id="thrive_prompt_open" class="menu_button thrive-prompt-entry__open"
-                            title="打开独立窗口：增删改、启用 / 停用、角色、排序、导入预设">
+                            title="打开独立窗口：卡片增删改、启用 / 停用、角色、排序、开场白、导入预设">
                             <i class="fa-solid fa-table-list"></i>
                             <span>打开提示词编辑器</span>
                         </div>
@@ -315,66 +305,21 @@
                     </div>
 
                     <small id="thrive_prompt_macro_hint" class="thrive-hint">
-                        工具指令里的工具宏见「工具清单」；其它宏按列表顺序在注入前展开。
+                        宏按列表顺序在发请求前展开；开场白最后发。
                     </small>
                 </div>
             </div>
 
-            <!-- 工具清单：只读，内容由 ui/settings/tool-catalog.js 渲染 -->
-            <div class="inline-drawer thrive-group thrive-tool-catalog">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <div class="thrive-group__title">
-                        <b>工具清单</b>
-                        <small id="thrive_tool_catalog_meta" class="thrive-group__hint">—</small>
-                    </div>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <div class="thrive-tool-copy">
-                        <div id="thrive_tool_copy_all" class="menu_button">
-                            <i class="fa-solid fa-copy"></i>
-                            <span id="thrive_tool_copy_all_label">复制全部</span>
-                        </div>
-                        <div id="thrive_tool_copy_all_neg" class="menu_button">
-                            <i class="fa-solid fa-copy"></i>
-                            <span id="thrive_tool_copy_all_neg_label">复制全部取反</span>
-                        </div>
-                        <button type="button" class="thrive-help" data-help="thrive_help_catalog"
-                            aria-expanded="false" aria-controls="thrive_help_catalog" title="说明">?</button>
-                    </div>
-                    <div id="thrive_help_catalog" class="thrive-help__body">
-                        只读，内容就是实际发给模型的工具定义。点击任意宏可单独复制；
-                        &#123;&#123;x&#125;&#125; 在工具可用时展开成工具名，&#123;&#123;!x&#125;&#125; 反过来——
-                        两种写法都贴全部十个，状态变化后才依然正确。
-                    </div>
-                    <div id="thrive_tool_catalog_list" class="thrive-tool-list"></div>
-                </div>
-            </div>
-
-            <!-- 日志与面板 -->
+            <!-- 面板与窗口 -->
             <div class="inline-drawer thrive-group" id="thrive_appearance_group">
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
-                        <b>日志与面板</b>
-                        <small class="thrive-group__hint">日志 · 面板外观</small>
+                        <b>面板与窗口</b>
+                        <small class="thrive-group__hint">面板外观 · 压缩入口</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
                 <div class="inline-drawer-content">
-                    <div class="thrive-check">
-                        <label class="checkbox_label" for="thrive_drop_traces">
-                            <input id="thrive_drop_traces" type="checkbox">
-                            <span>把旧工具日志移出上下文</span>
-                        </label>
-                        <button type="button" class="thrive-help" data-help="thrive_help_traces"
-                            aria-expanded="false" aria-controls="thrive_help_traces" title="说明">?</button>
-                    </div>
-                    <div id="thrive_help_traces" class="thrive-help__body">
-                        发下一条消息时，把上一轮及更早的工具日志移出上下文；消息本身留在聊天里，照常显示。
-                        关掉则按 ST 原生行为留在上下文里，看得见，但会随轮次累积、持续占 token。
-                    </div>
-                    <small id="thrive_drop_traces_hint" class="thrive-hint"></small>
-
                     <div class="thrive-field">
                         <span class="thrive-field-title">
                             浮动面板
@@ -383,7 +328,8 @@
                         </span>
                         <div id="thrive_help_panel" class="thrive-help__body">
                             点徽章打开 / 收起。打开后拖动标题栏能挪到任意位置；位置、大小和不透明度按屏幕记住，
-                            与具体对话无关。面板里是模式开关、落点（描述存哪儿、可写书）、待确认改动与写入记录。
+                            与具体对话无关。面板里是学习开关、立刻学一次、落点（描述存哪儿、可写书）、
+                            待确认改动与写入记录。
                         </div>
 
                         <div class="thrive-row">

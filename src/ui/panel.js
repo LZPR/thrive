@@ -2,16 +2,17 @@
  * ui/panel.js · 浮动面板
  *
  * 面板只装**作用于当前对话**的东西，全局设置一律留在扩展设置页：
- *   - 模式：主动 / 被动两块，整块可点（不再有单独的「开 / 关」按钮）
- *   - 更多设置（默认收起）：描述存哪儿、可写书、现在触发一次——三样都只落在这一场
+ *   - 学习模式：一个总开关，整块可点；下面写着"学习中 / 上次学习 / 还差几条"
+ *   - 立刻学一次 / 停止学习：不等判据，手动起一场会话（或中止正在跑的那场）
+ *   - 更多设置（默认收起）：描述存哪儿、可写书——都只落在这一场
  *   - 角色描述落点、待确认改动、写入记录
  *
- * 被动**判据**（每 N 条 / 关键词）不在这里：它对所有对话一致，在设置页的「被动学习」组。
- * 面板里只读它来算"还差几条"，并在没配判据时指一句路（ADR-045）。
+ * 判据（每 N 条 / 关键词）不在这里：它对所有对话一致，在设置页的「自动学习」组。
+ * 面板里只读它来算"还差几条"，并在没配判据时指一句路。
  *
  * 另外三件事：
  *   - 重绘：refreshPanel 现算状态，签名没变就不碰 DOM
- *   - 交互：写入 / 丢弃 / 恢复 / 重写 / 开关模式 / 改判据
+ *   - 交互：写入 / 丢弃 / 恢复 / 重写 / 开关学习 / 手动学习
  *   - 入口：initPanel 挂载，openPanel 给 `/thrive panel` 用
  *
  * 位置、尺寸、拖动这些几何细节在 ui/panel-layout.js；面板开没开的状态在 ui/shared.js
@@ -19,16 +20,18 @@
  */
 
 import { getContext } from '../../../../../extensions.js';
+import { TRIGGER, describeTrigger } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { getDescTargetSnapshot, isWorldbookDesc } from '../desc.js';
 import { diagnoseEnvironment, formatDiagnosis } from '../diagnostics.js';
 import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../events.js';
 import {
-    armManual,
-    describePending,
-    intervalProgress,
-    parseKeywords,
-} from '../passive.js';
+    describeLearnRun,
+    getLearningView,
+    isLearningRunning,
+    startLearning,
+    stopLearning,
+} from '../learning.js';
 import {
     PATCH_STATUS,
     applyPatch,
@@ -40,7 +43,6 @@ import {
     restoreDescBackup,
     rewriteAppliedDescription,
 } from '../patch.js';
-import { syncFromContext } from '../prompt.js';
 import { summarizeDraft } from '../draft.js';
 import {
     clearReadHash,
@@ -48,15 +50,12 @@ import {
     findLoreBackup,
     getDescBackup,
     getLoreBackups,
-    getPending,
     isChatAvailable,
     isEnabled,
-    isPassiveEnabled,
     loreReadKey,
     markLoreBackupRestored,
     saveChat,
     setEnabled,
-    setPassiveEnabled,
 } from '../store.js';
 import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '../targets.js';
 import { escapeHtml, normalizeEol } from '../util.js';
@@ -67,6 +66,7 @@ import { openDraftWindow } from './draft-window.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './panel-layout.js';
 import { refreshBadgeOnly, refreshUI, registerSurfaces, setPanelOpen } from './refresh.js';
 import { LOG, PANEL_ID, askConfirm, isPanelOpen, markPanelOpen, toast } from './shared.js';
+import { openTeachWindow } from './teach-window.js';
 
 /* ------------------------------------------------------------------ 浮动面板 */
 
@@ -130,9 +130,9 @@ export function initPanel() {
 /**
  * 重绘浮动面板。
  *
- * 面板现在**总是有内容**：第一段是模式（主动 / 被动 两块），第二段是收起的「更多设置」，
- * 后面才是有才画的记录。所以它不再是"有记录才出现"，而是由面板的开关状态决定——
- * 打开着就画，关着就整块隐藏。
+ * 面板现在**总是有内容**：第一段是学习（一个总开关 + 状态行 + 立刻学一次），
+ * 第二段是收起的「更多设置」，后面才是有才画的记录。所以它不再是"有记录才出现"，
+ * 而是由面板的开关状态决定——打开着就画，关着就整块隐藏。
  *
  * @param {object} [ctx]
  */
@@ -203,29 +203,27 @@ export function refreshPanel(ctx = getContext()) {
         return;
     }
 
-    const mode = readModeView(ctx, settings);
+    const learn = readLearnView(ctx, settings);
     const descChoice = descTargetView(ctx);
     const compress = getCompressSnapshot();
     const draft = summarizeDraft(ctx);
 
     /*
      * 重绘判据要含内容哈希：合并进同一份 patch 时 id 不变，两次改动的字数还可能刚好相等。
-     * 模式状态也在里面——面板里就摆着两块开关，它们变了必须重画。
+     * 学习状态也在里面——面板里就摆着那颗开关与"学习中"那一行，它们变了必须重画。
      * 「已写入」「更多设置」的展开状态同理：它们只改这段的 DOM，不重画就没有反馈。
-     * 判据的两个值在里面，是因为折头的摘要与被动那块的"还差几条"都跟着它们走。
-     * 压缩那段同理：条数或字数变了，入口上的提示与高亮都要跟着变。
      */
     const signature = JSON.stringify([
-        mode.active,
-        mode.passive,
-        mode.usable,
-        mode.diag.code,
-        mode.pending ? [mode.pending.reason, mode.pending.keyword] : null,
-        mode.interval,
-        mode.since,
-        mode.keywordCount,
-        settings.passiveInterval,
-        settings.passiveKeywords,
+        learn.enabled,
+        learn.usable,
+        learn.diag.code,
+        learn.running ? [learn.running.reason, learn.running.startedAt] : null,
+        learn.last ? [learn.last.at, learn.last.ok, learn.last.toolCalls, learn.last.stopped] : null,
+        learn.interval,
+        learn.since,
+        learn.keywordCount,
+        settings.learnInterval,
+        settings.learnKeywords,
         moreExpanded,
         // 落点两个下拉：模式、书名，以及"列表里有哪些书"（别处新建/删除之后要重排）
         [descChoice.storage, descChoice.book, descChoice.books.length],
@@ -252,7 +250,7 @@ export function refreshPanel(ctx = getContext()) {
      */
     const focus = capturePanelFocus();
     panel.innerHTML = renderPanel({
-        mode,
+        learn,
         patch,
         descTarget,
         descChoice,
@@ -323,38 +321,32 @@ function restorePanelFocus(focus) {
 }
 
 /**
- * 面板「模式」那一段要用的所有状态，一次算齐。
+ * 面板「学习」那一段要用的所有状态，一次算齐。
  *
- * 徽章与面板都从同一份状态出发，省得两处各判一次、判出不一样的结果。
+ * 徽章与面板都从同一份状态出发（learning.js 的 getLearningView），省得两处各判
+ * 一次、判出不一样的结果。
  *
  * @param {object} ctx
  * @param {object} settings
  */
-function readModeView(ctx, settings) {
-    const available = isChatAvailable(ctx);
+function readLearnView(ctx, settings) {
+    const view = getLearningView(ctx, settings);
     const diag = diagnoseEnvironment(ctx);
-    const progress = intervalProgress(ctx, settings);
-    const keywords = parseKeywords(settings.passiveKeywords);
+    const available = isChatAvailable(ctx);
 
     return {
-        active: isEnabled(ctx),
-        passive: isPassiveEnabled(ctx),
-        pending: getPending(ctx),
+        ...view,
+        available,
         // 两种"不可用"共用一档：没有对话、环境不支持工具调用
         usable: available && diag.ok,
-        available,
         diag,
-        interval: progress.interval,
-        since: progress.since,
-        remaining: progress.remaining,
-        keywordCount: keywords.length,
     };
 }
 
-/* -------------------------------------------------------------- 模式开关 */
+/* -------------------------------------------------------------- 学习开关 */
 
 /**
- * "现在点了也没用"的三个原因，任一成立就不能切。
+ * "现在点了也没用"的两个原因，任一成立就不能切。
  *
  * 只判不喊：原因由面板正文里那行 notice 说明（整块压暗 + 一行字），切换本身一律静默——
  * 拨一下开关就弹一条 toast，在窄屏上挡住半块面板，比不给反馈更烦人。
@@ -362,43 +354,25 @@ function readModeView(ctx, settings) {
  * @param {object} ctx
  * @returns {boolean} 能不能切
  */
-function canToggleMode(ctx) {
-    // 没对话 / 环境不支持工具调用时开了也只是"灯亮着"
-    // （ADR-020：不替用户去改 ST 的设置与模块）
+function canToggleLearn(ctx) {
+    // 没对话 / 环境不支持工具调用时开了也只是"灯亮着"（ADR-020：不替用户改 ST 设置）
     return isChatAvailable(ctx) && diagnoseEnvironment(ctx).ok;
 }
 
 /**
- * 主动开关（对话级，存在 chat_metadata 里）。
+ * 学习模式总开关（对话级，存在 chat_metadata 里）。
+ *
+ * 切换只影响"要不要自动触发学习"：正在跑的那一场不受影响，聊天请求也不会因此
+ * 多出任何东西来（学习本来就在另一场会话里）。
+ *
  * @param {object} ctx
  */
-function toggleActive(ctx) {
-    if (!canToggleMode(ctx)) {
+function toggleLearn(ctx) {
+    if (!canToggleLearn(ctx)) {
         return;
     }
 
-    // 切换只改变注入与 shouldRegister 的依据，不重载页面、不插消息
     setEnabled(ctx, !isEnabled(ctx));
-    syncFromContext(ctx);
-    refreshUI(ctx);
-}
-
-/**
- * 被动学习的开关（对话级，ADR-044）。判据仍是全局的，开关不是。
- *
- * 关掉时把已经挂上的待学习一并丢掉（在 setPassiveEnabled 里做）：那个记号本来就是
- * 被动机制攒出来的，留着会出现"被动显示关闭、徽章却在闪待学"这种自相矛盾的状态。
- *
- * 切完不弹 toast：被动那块自己的第二行就写着"还差几条 / 没有判据"，状态已经在眼前。
- */
-function togglePassive(ctx) {
-    if (!canToggleMode(ctx)) {
-        return;
-    }
-
-    setPassiveEnabled(ctx, !isPassiveEnabled(ctx));
-
-    syncFromContext(ctx);
     refreshUI(ctx);
 }
 
@@ -407,7 +381,7 @@ function togglePassive(ctx) {
 /**
  * 打开浮动面板，给 `/thrive panel` 用（徽章点击走的是同一套开关）。
  *
- * 面板里始终有「模式」这一段，所以"没有记录"不再是打不开的理由——
+ * 面板里始终有「学习」这一段，所以"没有记录"不再是打不开的理由——
  * 也正因为如此它不会再回声"没什么可看"。
  *
  * @param {object} [ctx]
@@ -447,7 +421,7 @@ function isDescriptionEditorStale(ctx, applied) {
 }
 
 function renderPanel({
-    mode,
+    learn,
     patch,
     descTarget,
     descChoice,
@@ -514,8 +488,8 @@ function renderPanel({
         </div>`;
 
     const body = [
-        renderModeSection(mode),
-        renderMoreSection({ mode, choice: descChoice, expanded: moreOpen }),
+        renderLearnSection(learn),
+        renderMoreSection({ learn, choice: descChoice, expanded: moreOpen }),
         renderDescTargetSection(descTarget),
         renderPatchSection(patch, drift, editorStale),
         renderHistorySection(backups, descBackup, historyExpanded),
@@ -525,28 +499,35 @@ function renderPanel({
 }
 
 /**
- * 模式分区：主动 / 被动两块，横排。
+ * 学习分区：一个总开关 + 一行状态 + 两个入口。
  *
- * 不再有分区标题，也不再有"都没开 / 主动开着"这种总述——两块自己就是标题，
- * 灯亮灯灭加上第二行的"本对话 / 全局 · 还差几条"已经说完了要说的。
- * 这一块也是整个面板最常点的地方，所以整块可点，不再挂一颗小小的「开 / 关」。
+ * 这个块是整个面板最常看/最常点的地方：灯亮 = 会自动学，第二行说"还差几条"，
+ * 下面一行是"学习中 / 上次学习的结果"。两个入口放在同一块里，因为它们回答的是
+ * 同一个问题——"现在学什么"：
  *
- * @param {ReturnType<typeof readModeView>} mode
+ *   立刻学一次  学这段对话
+ *   教授        学我写的那段话（与对话无关，会打开教授窗口）
+ *
+ * 教授只在空闲时出现：同一时刻只允许一场会话，摆一个按不动的按钮不如不摆。
+ *
+ * @param {ReturnType<typeof readLearnView>} view
  */
-function renderModeSection(mode) {
-    const { active, passive, usable, available, diag, pending, interval, remaining, keywordCount } = mode;
+function renderLearnSection(view) {
+    const { enabled, running, last, usable, available, diag, interval, remaining, keywordCount } = view;
 
     /*
-     * 被动那块第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
-     * 只写"全局"等于没说——用户以为开了就会自己学。
+     * 第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
+     * 只写"已开启"等于没说——用户以为开了就会自己学。
      */
-    const passiveHint = !passive
-        ? '本对话'
-        : interval > 0
-            ? `还差 ${remaining} 条`
-            : keywordCount > 0
-                ? `${keywordCount} 个词`
-                : '没有判据';
+    const hint = running
+        ? '学习中…'
+        : !enabled
+            ? '未开启'
+            : interval > 0
+                ? `还差 ${remaining} 条`
+                : keywordCount > 0
+                    ? `${keywordCount} 个词`
+                    : '未配判据';
 
     /*
      * 不可用的原因只能写一条：同时列两条，用户还是不知道该先改哪个。
@@ -558,92 +539,94 @@ function renderModeSection(mode) {
             ? `工具调用不可用：${formatDiagnosis(diag)}`
             : '';
 
+    const status = running
+        // 教授与学习是两件事，一行里说清楚现在跑的是哪一种
+        ? running.reason === TRIGGER.TEACH
+            ? '正在教授 · 不影响当前聊天'
+            : `正在学（${describeTrigger({ reason: running.reason })}）· 不影响当前聊天`
+        : describeLearnRun(last);
+
     return `
         <section class="thrive-panel__section thrive-modes">
             <div class="thrive-modes__row">
-                ${renderModeTile({
-                    action: 'toggle-active',
-                    variant: 'active',
-                    title: '主动学习',
-                    hint: '本对话',
-                    on: active,
-                    usable,
-                })}
-                ${renderModeTile({
-                    action: 'toggle-passive',
-                    variant: 'passive',
-                    title: '被动学习',
-                    hint: passiveHint,
-                    on: passive,
-                    usable,
-                })}
+                ${renderLearnTile({ on: enabled, hint, usable, running })}
             </div>
             ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
-            ${pending
-                ? `<div class="thrive-mode__pending">待学习：${escapeHtml(describePending(pending))} · 下一轮生效</div>`
-                : ''}
+            <div class="thrive-learn${running ? ' is-running' : ''}">
+                <span class="thrive-learn__status" title="学习在独立会话里跑，结果只写进世界书与角色描述">
+                    ${escapeHtml(status)}
+                </span>
+                <div class="thrive-learn__actions">
+                    ${running ? '' : `<div class="menu_button thrive-panel__button thrive-learn__go"
+                        data-thrive-action="open-teach"
+                        title="跳过这段对话，直接写一段话（可附图）教模型一件事">教授</div>`}
+                    <div class="menu_button thrive-panel__button thrive-learn__go${running ? ' thrive-panel__button--ghost' : ''}"
+                        data-thrive-action="${running ? 'stop-learn' : 'learn-now'}"
+                        title="${running
+                            ? '中止正在跑的这一场；已经写进去的内容不会撤回'
+                            : '不等判据，立刻在独立会话里学一次'}">${running ? '停止' : '立刻学一次'}</div>
+                </div>
+            </div>
         </section>`;
 }
 
 /**
- * 一块开关。灯亮 = 开，灭 = 关；不可用时整块压暗，点了不动（原因在下面那行 notice）。
+ * 学习开关。灯亮 = 开，灭 = 关；不可用时整块压暗，点了不动（原因在下面那行 notice）。
  *
  * 用 div + role="switch" + tabindex 而不是 <button>：按钮样式会把这一块压成另一种观感，
  * 而整块可点又要能 Tab 到、空格切换，所以无障碍行为自己补（onPanelKeydown）。
  *
- * @param {{action: string, variant: 'active'|'passive', title: string, hint: string,
- *     on: boolean, usable: boolean}} props
+ * @param {{on: boolean, hint: string, usable: boolean, running: boolean}} props
  */
-function renderModeTile({ action, variant, title, hint, on, usable }) {
+function renderLearnTile({ on, hint, usable, running }) {
     // 不可用时不要说"点一下切换"：点了不会动，原因就在下面那行 notice 里
     const tip = usable
-        ? `${title}：${hint}（点一下切换）`
-        : `${title}：现在切换不了——原因见下方说明`;
+        ? `学习模式：${on ? '已开启' : '已关闭'}（点一下${on ? '关闭' : '开启'}）· ${hint}`
+        : '学习模式：现在切换不了——原因见下方说明';
 
     return `
-        <div class="thrive-mode thrive-mode--${variant}${on ? ' is-on' : ''}${usable ? '' : ' is-muted'}"
+        <div class="thrive-mode thrive-mode--learn${on ? ' is-on' : ''}${usable ? '' : ' is-muted'}${running ? ' is-running' : ''}"
             role="switch" tabindex="0" aria-checked="${on ? 'true' : 'false'}"
-            data-thrive-action="${action}"
+            data-thrive-action="toggle-learn"
             title="${escapeHtml(tip)}">
             <span class="thrive-mode__led" aria-hidden="true"></span>
-            <span class="thrive-mode__title">${escapeHtml(title)}</span>
+            <span class="thrive-mode__title">学习模式</span>
             <span class="thrive-mode__hint">${escapeHtml(hint)}</span>
         </div>`;
 }
 
 /**
- * 「更多设置」：这一场对话的落点配置 + 手动触发。
+ * 「更多设置」：这一场对话的落点配置。
  *
- * 三样东西都只作用于当前对话（ADR-044 / ADR-045）：
+ * 两样东西都只作用于当前对话（ADR-044 / ADR-045）：
  *   · 角色描述存哪儿（角色卡 / 世界书条目）
  *   · 可写书（世界书工具写哪本；统一描述模式下由插件钉死）
- *   · 现在触发一次（不等判据，给下一轮挂一次学习）
  *
  * 判据（每 N 条 / 关键词）不在这里：那是"我隔多久想被提醒一次"，对所有对话一致，
- * 住在设置页的「被动学习」组。
+ * 住在设置页的「自动学习」组。"立刻学一次"也不在这里——它和开关回答同一个问题，
+ * 放在最上面那块。
  *
  * 默认收起：面板打开的常态是"看状态、拨开关"，换落点是偶发动作。块内平铺，不套第二层折叠。
  *
- * @param {{mode: ReturnType<typeof readModeView>,
+ * @param {{learn: ReturnType<typeof readLearnView>,
  *          choice: ReturnType<typeof descTargetView>, expanded: boolean}} props
  */
-function renderMoreSection({ mode, choice, expanded }) {
+function renderMoreSection({ learn, choice, expanded }) {
     /*
-     * 折头上的摘要回答"现在写到哪"：描述落点 + 可写书。它比"N 条 · N 词"更该在这里——
-     * 判据搬走之后，这一块本来就只剩落点了。
+     * 折头上的摘要回答"现在写到哪"：描述落点 + 可写书。
      */
     const meta = choice.storage === 'worldbook'
         ? `描述：世界书${choice.book ? ` · ${choice.book}` : ''}`
         : `描述：角色卡${choice.book ? ` · ${choice.book}` : ' · 未选书'}`;
 
-    const rows = expanded ? renderMoreRows({ mode, choice }) : '';
+    const rows = expanded ? renderMoreRows({ learn, choice }) : '';
 
     return `
         <section class="thrive-panel__section thrive-panel__section--fold">
             <div class="thrive-panel__head thrive-panel__fold${expanded ? ' is-open' : ''}"
                 role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}"
                 data-thrive-action="toggle-more"
-                title="展开 / 收起落点设置（描述存哪儿、可写书、现在触发一次；都只作用于本对话）">
+                title="展开 / 收起落点设置（描述存哪儿、可写书；都只作用于本对话）">
                 <span class="thrive-panel__section-title">
                     <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>更多设置
                 </span>
@@ -657,8 +640,10 @@ function renderMoreSection({ mode, choice, expanded }) {
  * 折起来的那几行。单独拆出来是因为它只在展开时存在，和折头的摘要不是一回事。
  *
  * 两个下拉都钉 `data-thrive-field`：重绘靠它保住焦点，事件靠它认字段。
+ *
+ * @param {{learn: ReturnType<typeof readLearnView>, choice: ReturnType<typeof descTargetView>}} props
  */
-function renderMoreRows({ mode, choice }) {
+function renderMoreRows({ learn, choice }) {
     const storageOptions = [
         { value: 'card', label: '角色卡' },
         { value: 'worldbook', label: '世界书条目' },
@@ -670,10 +655,10 @@ function renderMoreRows({ mode, choice }) {
             + `${escapeHtml(item.label)}</option>`).join('');
 
     /*
-     * 判据一个都没配时，被动开着也是空转。这句提示得说清楚"去哪配"——
-     * 判据已经不在面板里了，不指路等于让用户在面板里找一圈。
+     * 判据一个都没配时，学习开着也是空转。这句提示得说清楚"去哪配"——
+     * 判据已经不在面板里了（它对所有对话一致），不指路等于让用户在面板里找一圈。
      */
-    const noRule = mode.passive && mode.interval <= 0 && mode.keywordCount === 0;
+    const noRule = learn.enabled && learn.interval <= 0 && learn.keywordCount === 0;
 
     return `
         <div class="thrive-more">
@@ -689,7 +674,7 @@ function renderMoreRows({ mode, choice }) {
                     data-thrive-field="book"${choice.forced ? ' disabled' : ''}
                     title="${choice.forced
                         ? '「描述存哪儿 = 世界书条目」时固定为角色同名书'
-                        : '世界书工具只会写这一本；没选书时它们不注册'}">${bookOptions}</select>
+                        : '世界书工具只会写这一本'}">${bookOptions}</select>
             </div>
 
             <div class="thrive-panel__actions">
@@ -697,9 +682,7 @@ function renderMoreRows({ mode, choice }) {
                     choice.forced
                         ? '世界书条目模式下可写书固定为角色同名书，描述就存在那本里。'
                         : '两项都只对当前对话生效；换对话可以各选各的。'
-                }${noRule ? ' 被动还没配判据，到扩展设置的「被动学习」里配。' : ''}</small>
-                <div class="menu_button thrive-panel__button" data-thrive-action="trigger-once"
-                    title="不等判据，立刻给下一轮挂一次学习，用来验证判据配得对不对">现在触发一次</div>
+                }${noRule ? ' 学习已经开着但还没配判据，到扩展设置的「自动学习」里配（也可以点上面「立刻学一次」）。' : ''}</small>
             </div>
         </div>`;
 }
@@ -1011,8 +994,17 @@ function onPanelClick(event) {
             moreExpanded = !moreExpanded;
             refreshPanel(getContext());
             break;
-        case 'trigger-once':
-            triggerOnceAndReport();
+        case 'toggle-learn':
+            toggleLearn(getContext());
+            break;
+        case 'learn-now':
+            void learnNowAndReport();
+            break;
+        case 'open-teach':
+            openTeachWindow();
+            break;
+        case 'stop-learn':
+            stopLearnAndReport();
             break;
         case 'hide-panel':
             setPanelOpen(false);
@@ -1024,12 +1016,6 @@ function onPanelClick(event) {
         case 'open-draft':
             /* 同上：虚拟世界书也是独立窗口，开着它还能继续聊 */
             openDraftWindow(getContext());
-            break;
-        case 'toggle-active':
-            toggleActive(getContext());
-            break;
-        case 'toggle-passive':
-            togglePassive(getContext());
             break;
         case 'restore-lore':
             void restoreLoreAndReport(trigger.dataset.backupId);
@@ -1095,8 +1081,7 @@ function onPanelChange(event) {
 
     const done = () => {
         descTargetBusy = false;
-        // 落点变了：注入不变，但面板与设置页的提示、patch 开关的可用性都要跟着刷
-        syncFromContext(ctx);
+        // 落点变了：patch 的可用性、设置页的提示、描述那一整段都要跟着刷
         refreshUI(ctx);
     };
 
@@ -1110,15 +1095,17 @@ function onPanelChange(event) {
 }
 
 /**
- * 不等判据，立刻给下一轮挂一次学习。
+ * 不等判据，立刻学一次（`manual` 触发）。
  *
  * 存在的理由不是方便，而是**可验证**：用户配完判据之后总得能立刻看见它生效，
- * 否则要等到真出现那句话，期间只能猜。
+ * 否则要等到真出现那句话，期间只能猜。顺带它也是"我现在就想让它学一下"的正门——
+ * 不需要为了学一次先去改判据。
  *
- * 成功不弹 toast：`armManual` 会广播 PASSIVE_EVENT，徽章那边统一报一句；
- * 这里只负责把"没能挂上"的原因说清楚。
+ * 不 await 整场：一次学习要跑十几秒，面板不该在这期间没有响应。开始成功之后
+ * 状态行会自己变成"正在学"，结果出来时 LEARNING_EVENT 会把面板刷一遍。
+ * 失败只报"没能开始"的原因——跑到一半失败属于结果，由面板的状态行说明。
  */
-function triggerOnceAndReport() {
+async function learnNowAndReport() {
     const ctx = getContext();
 
     if (!isChatAvailable(ctx)) {
@@ -1131,17 +1118,34 @@ function triggerOnceAndReport() {
         toast(`工具调用不可用：${formatDiagnosis(diag)}`);
         return;
     }
-    if (getPending(ctx)) {
-        toast('已经有一次待学习了，下一次生成就会用掉它');
-        return;
-    }
-    if (!armManual(ctx)) {
-        toast('没能挂上待学习，请稍后再试');
+
+    const started = await startLearning(ctx, { reason: 'manual' });
+
+    if (!started.ok) {
+        toast(started.hint ?? `没能开始学习：${started.error}`);
         return;
     }
 
-    saveChat(ctx);
-    syncFromContext(ctx);
+    // 开始成功不弹 toast：状态行与徽章会立刻变成"学习中"，再弹一条反而挡住面板
+    refreshUI(ctx);
+}
+
+/**
+ * 中止正在跑的那一场。
+ *
+ * 中止只停"还没发生的"：已经写进世界书 / 角色描述的改动不会撤回（那些是工具
+ * 当场落盘的），所以不弹确认——按钮上写着"停止"，用户要的是赶紧停。
+ */
+function stopLearnAndReport() {
+    const ctx = getContext();
+
+    if (!isLearningRunning()) {
+        refreshPanel(ctx);
+        return;
+    }
+
+    stopLearning();
+    toast('已中止这次学习（已经写进去的内容不会撤回）');
     refreshUI(ctx);
 }
 

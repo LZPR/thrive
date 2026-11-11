@@ -1,8 +1,11 @@
 /**
- * ui/settings/appearance.js · 「日志与面板」组
+ * ui/settings/appearance.js · 「面板与窗口」组
  *
- * 三件不相干但都属"环境偏好"的事：旧工具日志要不要清出上下文、浮动面板长什么样、
- * 以及压缩面板的入口。放在一组是因为都不会改变学习行为——调错了不影响写进去的内容。
+ * 两件不相干但都属"环境偏好"的事：浮动面板长什么样、压缩面板的入口。
+ * 放在一组是因为都不会改变学习行为——调错了不影响写进去的内容。
+ *
+ * 旧工具日志那一段随 v0.33 一起删了：学习不在聊天请求里跑，聊天里也不再写工具日志，
+ * 「把旧日志移出上下文」这件事已经没有对象可作用（ADR-050）。
  */
 
 import { getContext } from '../../../../../../extensions.js';
@@ -10,53 +13,16 @@ import { ensureSettings, DEFAULT_SETTINGS } from '../../store.js';
 import { openCompressPanel } from '../compress-panel.js';
 import { applyPanelLayout } from '../panel-layout.js';
 import { toast } from '../shared.js';
-import { byId, paintHint, syncCheckbox } from './common.js';
+import { byId } from './common.js';
 
 export function bindAppearanceControls() {
-    bindTraceControls();
     bindPanelLayoutControls();
     bindCompressEntry();
 }
 
 /** @param {object} settings */
 export function syncAppearanceControls(settings) {
-    syncCheckbox('thrive_drop_traces', settings.dropTraces);
     syncPanelLayoutControls(settings);
-    updateTraceHint(settings);
-}
-
-/* ------------------------------------------------------------ 工具日志清理 */
-
-function bindTraceControls() {
-    const toggle = byId('thrive_drop_traces');
-    if (!toggle) {
-        return;
-    }
-
-    toggle.addEventListener('change', function () {
-        const ctx = getContext();
-        const settings = ensureSettings(ctx);
-        settings.dropTraces = Boolean(this.checked);
-        ctx.saveSettingsDebounced?.();
-        updateTraceHint(settings);
-
-        // 关掉只是"以后不再清"，已经清掉的日志不会自己回来——说明清楚，别让人以为没生效
-        toast(this.checked
-            ? '下一条消息起，旧工具日志会移出上下文（界面里仍可见）'
-            : '旧工具日志会按 ST 原生行为留在上下文里');
-    });
-}
-
-/**
- * 只在关掉的时候说话：开着就是这个开关的字面意思，再解释一遍是噪音。
- * @param {object} settings
- */
-function updateTraceHint(settings) {
-    paintHint(
-        'thrive_drop_traces_hint',
-        settings.dropTraces === false ? '已关闭：日志会随轮次累积、持续占 token。' : '',
-        settings.dropTraces === false,
-    );
 }
 
 /* -------------------------------------------------------------- 面板布局 */

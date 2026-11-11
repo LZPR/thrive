@@ -1,68 +1,38 @@
 /**
  * Thrive · 学习模式 —— 入口
  *
- * 当前进度（Step 17）：
- *   1. 扩展能被 ST 加载
- *   2. 对话级开关（chat_metadata.thrive.enabled）+ 输入框旁的方块徽章（只开关浮动面板，
- *      主动 / 被动两个开关在面板里，待确认改动在徽章角上带计数）
- *   3. 开启时注入学习块，关闭时彻底清空
- *   4. 工具：世界书 lore_list / lore_read / lore_add / lore_append / lore_replace /
- *      lore_rewrite，角色描述 desc_read / desc_append / desc_replace / desc_rewrite
- *   5. 描述改动先暂存成 patch；世界书写入留快照，面板里可恢复
- *   6. 工具日志：当轮压成一行纯文本，下一条消息起移出上下文
- *   7. 环境诊断（设置页顶部 + 徽章置灰）+ `/thrive on|off|passive|once|status|panel`
- *   8. 被动学习：条数 / 关键词任一命中就"借"一轮，回复完自动关闭（src/passive.js）
- *   9. 超长时的压缩指令可配（src/compact.js）
- *  10. 字数上限 / 返回条数 / 记录槽位 / 日志长度等数值全部可配（src/limits.js）
- *  11. 设置项按用途分成七组折叠，默认全收起（settings.html + style.css）
- *  12. 界面按块拆分：src/ui/ 下一块界面一个文件，src/ui.js 只做门面（src/ui/*.js）
- *  13. 提示词卡片：拖动排序、按分界线分头部/尾部注入、弹窗编辑（src/prompt-order.js）
- *  14. 工具常驻：开关模式不再改变 tools 数组，改用「工具指令」的宏说明哪些不可用（src/tool-state.js）
- *  15. 压缩改成手动：软提醒不再进工具返回，超长内容由独立的压缩面板处理（src/compress.js）
- *  16. 设置页收敛：解释收进「?」、可见小字只报状态、基本设置合并两组，
- *      并按一组一个文件拆进 src/ui/settings/（ADR-041）
- *  17. 角色描述可选存进世界书：与角色同名那本书里的一条常驻条目，desc_* 工具照旧，
- *      lore_* 工具看不到它也改不了它（src/desc.js，ADR-042）
- *  18. 界面按作用域分区：对话级的（两个开关、被动判据、触发一次、待确认、记录）全在浮动面板，
- *      设置页只留跨对话一致的设置，切对话不再跟着变（ADR-043）
- *  19. 作用域补齐到存储层：可写书、角色描述存储、被动开关改成按对话记；统一描述模式下
- *      可写书固定为角色同名书；判据仍是全局（ADR-044）
- *  20. 位置即作用域：落点（描述存哪儿、可写书）搬进浮动面板，被动判据搬回设置页的
- *      「被动学习」组；设置页从此不随对话变化，也不再靠「对话」标签说明作用域（ADR-045）
- *  21. 虚拟世界书：工具的每一笔世界书改动先落缓冲区，用户在独立窗口里看完 diff 才决定
- *      保存还是丢弃；真实世界书的文件与编辑器在这之前一个字都不动（src/draft.js，ADR-047）
- *  22. 提示词编辑器独立成窗口（src/ui/prompt-window.js）：增删改、逐条启用与角色、
- *      有损导入 ST 预设；注入改成按角色分段（src/prompt.js、src/prompt-import.js，ADR-048）
- *  23. 一次性内部会话框架（src/session*.js）：独立消息栈 + 直连传输 + 会话私有工具，
- *      预设 / 用户消息 / 工具先用 stub；`/thrive session` 跑一场自检（ADR-049）
+ * 当前架构（v0.33，ADR-050）：**对话与学习分离**。
+ *
+ *   聊天请求里没有插件提示词、也没有插件工具；学习在另一场独立会话里跑，
+ *   会话带着提示词卡片编译出的预设、当前对话记录、以及那十个真实工具。
+ *
+ * 这个入口只做四件事：
+ *   1. 初始化：设置、界面（设置页 / 徽章 / 浮动面板 / 三个独立窗口）、斜杠命令
+ *   2. 判据：角色回复完之后评估"该不该学一次"，命中就异步起一场会话
+ *   3. 事件：切对话时收拾正在跑的那一场、世界书 / 角色卡变化时重画界面
+ *   4. 命令：`/thrive on|off|learn|stop|status|panel|compress|prompt`
+ *
+ * 历史（只留对现在还有约束力的）：
+ *   · 工具的实现按"读得越少，能写的越少"分四级守卫（src/tools.js）
+ *   · 世界书写入先落虚拟世界书，用户点保存才进真实世界书（src/draft.js，ADR-047）
+ *   · 描述改动先暂存成 patch，面板里确认后才落盘（src/patch.js）
+ *   · 一次性会话框架：独立消息栈 + 直连传输 + 会话私有工具（src/session*.js，ADR-049）
  */
 
 import { getContext } from '../../../extensions.js';
+import { evaluateAuto, describeTrigger } from './src/auto-learn.js';
 import { requestCompressScan } from './src/compress.js';
-import { syncFromContext } from './src/prompt.js';
+import { diagnoseEnvironment, formatDiagnosis } from './src/diagnostics.js';
+import { startLearning, stopLearning } from './src/learning.js';
 import {
     ensureSettings,
     isChatAvailable,
     isEnabled,
-    isPassiveEnabled,
-    isPending,
-    markPendingUsed,
+    isLearningActive,
     resetReads,
     saveChat,
     setEnabled,
-    setPassiveEnabled,
 } from './src/store.js';
-import { armManual, consumePending, evaluatePassive } from './src/passive.js';
-import { registerTools } from './src/tools.js';
-import { compressToolTrace, pruneToolTraces } from './src/trace.js';
-import { diagnoseEnvironment, formatDiagnosis } from './src/diagnostics.js';
-import {
-    abortActiveSession,
-    describeResult,
-    isSessionRunning,
-    logTranscript,
-    runSession,
-} from './src/session.js';
 import {
     bindCompressRefresh,
     describeStatus,
@@ -72,6 +42,7 @@ import {
     initPanel,
     initPromptWindow,
     initSettingsPanel,
+    initTeachWindow,
     openCompressPanel,
     openPanel,
     openPromptWindow,
@@ -80,8 +51,7 @@ import {
 } from './src/ui.js';
 
 const LOG = '[Thrive]';
-const COMMAND_ACTIONS = ['on', 'off', 'status', 'panel', 'compress', 'passive', 'once', 'prompt', 'session'];
-const SESSION_SUBCOMMANDS = ['stop', 'log'];
+const COMMAND_ACTIONS = ['on', 'off', 'learn', 'stop', 'status', 'panel', 'compress', 'prompt'];
 
 /**
  * 现取 context。
@@ -96,13 +66,10 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.32.0 · 一次性会话框架`);
+    console.log(`${LOG} 启动 v0.34.0 · 对话与学习分离（含教授）`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());
-
-    // 工具只注册一次，之后靠 shouldRegister 门控（ADR-001）
-    registerTools(context());
 
     await initSettingsPanel();
     await initBadge();
@@ -110,26 +77,25 @@ async function init() {
     initCompressPanel();
     initDraftWindow();
     initPromptWindow();
+    initTeachWindow();
     bindCompressRefresh();
     await initSlashCommand();
     bindEvents();
 
-    const ctx = context();
-    syncFromContext(ctx);
-    refreshUI(ctx);
+    refreshUI(context());
 
     /*
      * 首次检查延后一点：ST 启动时世界书列表还在陆续加载，太早扫会读到一半。
      * refreshUI 里已经排过一次（去抖 250ms），这里只是兜一个更晚的时机，
      * 两次结果一样时不会重画。
      */
-    requestCompressScan(ctx, 1200);
+    requestCompressScan(context(), 1200);
 }
 
 /* ---------------------------------------------------------------- 斜杠命令 */
 
 /**
- * 注册 `/thrive on|off|status|panel`。
+ * 注册 `/thrive ...`。
  *
  * 名字只用 `thrive` 这一个前缀，不和 ST 内置命令重名；没写动作时按 status 处理，
  * 因为"随手敲一下看现在什么状态"是最常见的用法。
@@ -154,11 +120,11 @@ async function initSlashCommand() {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'thrive',
             helpString: '学习模式：`/thrive on` 开启、`off` 关闭（都只作用于当前对话）、'
-                + '`passive` 切换被动学习、`once` 让下一轮临时学一次、'
+                + '`learn` 立刻学一次（不等判据）、`stop` 中止正在跑的那一场、'
                 + '`compress` 打开压缩面板（超长条目与角色描述）、'
-                + '`prompt` 打开提示词编辑器（增删改、启用、角色、导入预设）、'
-                + '`session` 跑一场内部自检会话（`session stop` 中止、`session log` 看全文）、'
-                + '`status` 看主动/被动/模块/可写书/待确认、`panel` 打开浮动面板（模式开关 + 记录）。不写动作等于 `status`。',
+                + '`prompt` 打开提示词编辑器（预设卡片、顺序、角色、导入预设）、'
+                + '`status` 看开关 / 判据 / 学习中 / 可写书 / 待确认、`panel` 打开浮动面板。'
+                + '不写动作等于 `status`。',
             returns: '一行状态说明',
             unnamedArgumentList: [
                 SlashCommandArgument.fromProps({
@@ -166,13 +132,8 @@ async function initSlashCommand() {
                     typeList: [ARGUMENT_TYPE.STRING],
                     enumList: COMMAND_ACTIONS,
                 }),
-                SlashCommandArgument.fromProps({
-                    description: '子命令（仅 session 用）',
-                    typeList: [ARGUMENT_TYPE.STRING],
-                    enumList: SESSION_SUBCOMMANDS,
-                }),
             ],
-            callback: (_named, action, sub) => runThriveCommand(action, sub),
+            callback: (_named, action) => runThriveCommand(action),
         }));
     } catch (err) {
         console.warn(`${LOG} 斜杠命令注册失败`, err);
@@ -186,10 +147,9 @@ async function initSlashCommand() {
  * 直接在输入框里敲命令时 ST 不展示返回值，只返回给 STscript 调用方（`/thrive status |`）。
  *
  * @param {string} [raw]
- * @param {string} [sub]
  * @returns {string}
  */
-function runThriveCommand(raw, sub) {
+function runThriveCommand(raw) {
     const action = String(raw ?? '').trim().toLowerCase() || 'status';
     const ctx = context();
     const settings = ensureSettings(ctx);
@@ -198,7 +158,7 @@ function runThriveCommand(raw, sub) {
         case 'on': {
             const diag = diagnoseEnvironment(ctx);
             if (!diag.ok) {
-                return report(`工具调用不可用，开了也没有工具可用：${formatDiagnosis(diag)}`);
+                return report(`工具调用不可用，开了也学不了：${formatDiagnosis(diag)}`);
             }
             if (!isChatAvailable(ctx)) {
                 return report('请先打开一个对话');
@@ -208,9 +168,8 @@ function runThriveCommand(raw, sub) {
             }
 
             setEnabled(ctx, true);
-            syncFromContext(ctx);
             refreshUI(ctx);
-            return report('学习模式已开启（只作用于当前对话）');
+            return report(`学习模式已开启（只作用于当前对话）· ${describeRules(settings)}`);
         }
 
         case 'off': {
@@ -218,14 +177,31 @@ function runThriveCommand(raw, sub) {
                 return report('这个对话本来就是关闭状态');
             }
             setEnabled(ctx, false);
-            syncFromContext(ctx);
             refreshUI(ctx);
-            return report('学习模式已关闭（只作用于当前对话）');
+            return report(isLearningActive()
+                ? '学习模式已关闭；正在跑的那一场不受影响（要停就 `/thrive stop`）'
+                : '学习模式已关闭（只作用于当前对话）');
+        }
+
+        case 'learn': {
+            const started = startLearning(ctx, { reason: 'manual' });
+            if (!started.ok) {
+                return report(`没能开始学习：${started.hint}`);
+            }
+
+            started.promise.catch(err => console.error(`${LOG} 学习异常`, err));
+            return report('学习已开始：在独立会话里跑，不会影响当前聊天；结束后另弹一条摘要');
+        }
+
+        case 'stop': {
+            return report(stopLearning()
+                ? '已发出中止：这一场不会向世界书或角色卡写入任何东西'
+                : '现在没有在跑的学习');
         }
 
         case 'panel': {
             openPanel(ctx);
-            return report('面板已打开：模式开关在最上面，记录在下面');
+            return report('面板已打开：学习模式开关在最上面');
         }
 
         /*
@@ -237,112 +213,18 @@ function runThriveCommand(raw, sub) {
             if (!openCompressPanel(ctx)) {
                 return report('压缩面板还没挂载，刷新页面再试');
             }
-            // 不在这里报条数：打开时刚排了一次重扫，此刻读到的是上一份快照
             return report('压缩面板已打开：超长条目与角色描述都在里面');
         }
 
         /*
-         * 提示词编辑器也是独立窗口。它不需要对话：提示词是一份跨对话的设置，
-         * 在没有对话的分支里也能打开。打开后按当前模式算一遍"哪几条生效"，
-         * 所以这里不预判状态。
+         * 提示词编辑器也是独立窗口。它不需要对话：预设是一份跨对话的设置，
+         * 在没有对话的分支里也能打开。
          */
         case 'prompt': {
             if (!openPromptWindow(ctx)) {
                 return report('提示词窗口还没挂载，刷新页面再试');
             }
-            return report('提示词编辑器已打开：增删改 / 启用 / 角色 / 导入预设');
-        }
-
-        /*
-         * 被动学习的开关是对话级的（ADR-044），判据是全局的、在设置页的「被动学习」组里配；
-         * 关掉时一并清掉已经挂上的待学习。
-         */
-        case 'passive': {
-            if (!isChatAvailable(ctx)) {
-                return report('请先打开一个对话');
-            }
-
-            const diag = diagnoseEnvironment(ctx);
-            if (!diag.ok) {
-                return report(`工具调用不可用：${formatDiagnosis(diag)}`);
-            }
-
-            setPassiveEnabled(ctx, !isPassiveEnabled(ctx));
-
-            syncFromContext(ctx);
-            refreshUI(ctx);
-
-            const hasRule = Number(settings.passiveInterval) > 0 || String(settings.passiveKeywords).trim();
-            return report(isPassiveEnabled(ctx)
-                ? (hasRule
-                    ? '主动 / 被动学习都已开启（命中判据后下一轮临时学一次）'
-                    : '被动学习已开启，但还没配间隔或关键词，不会触发')
-                : '被动学习已关闭（主动开关不受影响）');
-        }
-
-        case 'once': {
-            if (!isChatAvailable(ctx)) {
-                return report('请先打开一个对话');
-            }
-
-            const diag = diagnoseEnvironment(ctx);
-            if (!diag.ok) {
-                return report(`工具调用不可用：${formatDiagnosis(diag)}`);
-            }
-            if (isPending(ctx)) {
-                return report('已经有一次待学习了，下一条消息就会用掉它');
-            }
-            if (!armManual(ctx)) {
-                return report('没能挂上待学习');
-            }
-
-            saveChat(ctx);
-            syncFromContext(ctx);
-            refreshUI(ctx);
-            return report('已挂上：下一条消息会临时开启学习模式，回复结束后自动关闭');
-        }
-
-        /*
-         * 内部自检会话。
-         *
-         * 刻意不 await：这一整套东西存在的意义就是"对话不必等学习跑完"，
-         * 命令自己也该是这个形态。跑完另弹一条摘要，全文进控制台。
-         *
-         * 这里不预判"学习模式有没有开"：会话是独立的一次性上下文，
-         * 与当前对话的学习块、工具注册都无关（ADR-049）。只查工具调用能力，
-         * 因为那决定了模型能不能用会话里的工具。
-         */
-        case 'session': {
-            const mode = String(sub ?? '').trim().toLowerCase();
-
-            if (mode === 'stop') {
-                return report(abortActiveSession()
-                    ? '已发出中止：这一场不会向聊天写入任何东西'
-                    : '现在没有在跑的内部会话');
-            }
-
-            if (mode === 'log') {
-                logTranscript(undefined, { full: true });
-                return report('最近一场内部会话的全文已打到控制台');
-            }
-
-            if (isSessionRunning()) {
-                return report('已经有一场内部会话在跑，等它结束或 `/thrive session stop`');
-            }
-
-            const diag = diagnoseEnvironment(ctx);
-            if (!diag.ok) {
-                return report(`工具调用不可用，内部会话跑不起来：${formatDiagnosis(diag)}`);
-            }
-
-            runSession({ ctx })
-                .then(result => report(describeResult(result)))
-                .catch(err => {
-                    console.error(`${LOG} 内部会话异常`, err);
-                    report('内部会话异常，已停下（控制台里有堆栈）');
-                });
-
-            return report('内部会话已开始：全部用 stub，跑完会另弹一条摘要');
+            return report('提示词编辑器已打开：预设卡片 / 顺序 / 角色 / 导入预设');
         }
 
         case 'status':
@@ -363,80 +245,61 @@ function report(message) {
     return message;
 }
 
+/** 判据的一句话摘要，给 on 的回复用 */
+function describeRules(settings) {
+    const rules = [];
+    const interval = Math.max(0, Math.floor(Number(settings.learnInterval) || 0));
+    if (interval > 0) {
+        rules.push(`每 ${interval} 条`);
+    }
+    if (String(settings.learnKeywords ?? '').trim()) {
+        rules.push('关键词');
+    }
+    return rules.length ? `判据：${rules.join(' + ')}` : '还没配判据，开着也不会自动学（可以手动 `/thrive learn`）';
+}
+
 function bindEvents() {
     const ctx = context();
     const events = ctx.eventSource;
     const types = ctx.eventTypes ?? ctx.event_types;
 
     if (!events || !types) {
-        console.warn(`${LOG} 拿不到 eventSource / eventTypes，聊天切换与注入同步会失效`);
+        console.warn(`${LOG} 拿不到 eventSource / eventTypes，聊天切换与自动学习会失效`);
         return;
     }
 
-    // 状态是对话级的：切换聊天要重取状态，并立刻重算注入
+    /*
+     * 状态是对话级的：切换聊天要重取状态。
+     *
+     * 正在跑的学习必须先停下：工具走的是"当前对话"（可写书、读取登记都在
+     * chat_metadata 上），跑到一半换场就可能把这一场的内容写进另一个角色。
+     */
     events.on(types.CHAT_CHANGED, () => {
+        if (isLearningActive()) {
+            console.info(`${LOG} 切换对话，正在跑的学习已中止`);
+            stopLearning();
+        }
+
         const next = context();
-        syncFromContext(next);
         refreshUI(next);
     });
 
-    // 以下两个时机都紧跟"构建提示词之前"，都调用一次；函数幂等，谁先到都无所谓。
-    // MESSAGE_SENT 在消息入栈后、Generate 之前触发，作为主时机；
-    // GENERATION_STARTED 兜住"重新生成""续写"这类不经过 MESSAGE_SENT 的路径。
+    // 用户发一条消息 = 新一轮：作废上一场的读取登记，学习要重新读才能写
     events.on(types.MESSAGE_SENT, () => {
         const next = context();
-
-        // 先清日志：此刻刚发的用户消息已在栈尾，它之前的就是"上一轮及更早"。
-        // 必须在构建提示词之前改完，否则这一轮请求里还带着旧日志
-        if (ensureSettings(next).dropTraces !== false) {
-            const pruned = pruneToolTraces(next);
-            if (pruned > 0) {
-                // MESSAGE_SENT 之前 ST 已经存过一次盘，改动得自己落盘
-                saveChat(next);
-                console.debug(`${LOG} 已把 ${pruned} 条工具日志移出上下文`);
-            }
-        }
-
-        /*
-         * 被动学习：用户刚发的这条消息本身可能就命中了关键词。
-         *
-         * 放在这里（而不是等角色回复完）是因为它必须赶在构建提示词之前：
-         * 用户说"记住，北境在南边"，想记的时候就是这一轮，不是下一轮。
-         */
-        if (evaluatePassive(next, 'user').fired) {
-            saveChat(next);
-        }
-
-        // 用户发一条消息 = 新一轮：作废上一轮的读取登记，写入必须重新先读
         resetReads(next);
-        syncFromContext(next);
         refreshBadgeOnly(next);
     });
 
-    events.on(types.GENERATION_STARTED, (_type, _options, dryRun) => {
-        // dryRun 是摘要、翻译之类的静默生成，不该塞学习块
-        if (dryRun) {
-            return;
-        }
-
-        const next = context();
-        // 记一笔"这次待学习真的进了生成"：结算时靠它区分真学习轮与静默生成
-        if (isPending(next)) {
-            markPendingUsed(next);
-        }
-        syncFromContext(next);
-    });
-
     /*
-     * 角色回复落盘 = 这一轮学完了。
+     * 角色回复落盘 = 这一轮结束了，是判断"该不该学一次"的时候。
      *
-     * 结算放在这里而不是 GENERATION_ENDED：那个事件在"点了停止"时也会发，
-     * 生成被中断时其实什么都没学到，把待学习扣掉等于白白浪费一次。
-     * 而 MESSAGE_RECEIVED 只在真的有一条角色消息入栈时才有。
+     * 只在这里判（不在 MESSAGE_SENT）：学习是独立会话，不必抢在生成之前；
+     * 放在回复之后，既不会和正在生成的聊天抢后端，也保证这一轮两边都已经在记录里。
      */
     if (types.MESSAGE_RECEIVED) {
         events.on(types.MESSAGE_RECEIVED, (messageId, type) => {
-            // 开场白不是"这一轮学完了"
+            // 开场白不是"这一轮结束了"
             if (type === 'first_message') {
                 return;
             }
@@ -450,44 +313,33 @@ function bindEvents() {
                 return;
             }
 
-            // 先结算：这一轮学完了，立刻关掉临时学习
-            const consumed = consumePending(next);
-            // 再判断要不要挂下一次（关键词出现在角色回复里同样算命中）
-            const evaluation = evaluatePassive(next, 'assistant');
+            const evaluation = evaluateAuto(next, 'assistant');
+            if (evaluation.fire) {
+                const started = startLearning(next, { reason: evaluation.reason });
 
-            if (consumed || evaluation.fired) {
+                if (started.ok) {
+                    console.info(`${LOG} 自动学习已触发（${describeTrigger(evaluation)}）`);
+                    started.promise.catch(err => console.error(`${LOG} 学习异常`, err));
+                } else {
+                    console.warn(`${LOG} 没能开始自动学习：${started.hint}`);
+                }
+            } else {
+                // 基线可能刚被对齐（第一次评估 / 删过消息），落一次盘省得下次重算
                 saveChat(next);
-                syncFromContext(next);
             }
+
             refreshBadgeOnly(next);
 
             /*
              * 这一轮可能刚写进一条长条目（也可能刚把一条写超了）。重扫一次，
-             * 好在下一轮开始之前就把"该压缩了"标出来——等用户自己想起来去点，
-             * 往往已经又写进去两条了。
+             * 好在下一轮开始之前就把"该压缩了"标出来。
              */
             requestCompressScan(next, 500);
         });
     }
 
-    // 工具调用刚产生、还没渲染：此刻改写 mes，addOneMessage 用到的就是新文本
-    if (types.TOOL_CALLS_PERFORMED) {
-        events.on(types.TOOL_CALLS_PERFORMED, invocations => {
-            try {
-                const next = context();
-                if (!compressToolTrace(next, invocations, ensureSettings(next))) {
-                    return;
-                }
-                console.debug(`${LOG} 工具日志已压缩`, invocations.map(item => item?.name));
-            } catch (err) {
-                // 压不压得动都不该影响这一轮生成：真出错就退回 ST 原生日志
-                console.warn(`${LOG} 工具日志压缩失败`, err);
-            }
-        });
-    }
-
     // 用户在世界书面板里勾选/取消勾选，会改变"写进去的条目会不会生效"，
-    // 面板上的"未激活"提示必须跟着变，否则它会一直停在旧状态
+    // 面板上的"未激活"提示必须跟着变
     if (types.WORLDINFO_SETTINGS_UPDATED) {
         events.on(types.WORLDINFO_SETTINGS_UPDATED, () => {
             refreshUI(context());
@@ -497,7 +349,7 @@ function bindEvents() {
     /*
      * 角色卡被保存（角色编辑器点了保存、世界书页签改了绑定）。
      * 这是"面板说已写入、编辑器里却没有"的关键时机：编辑器提交的是表单里的旧文本，
-     * 保存会把插件刚写进去的描述盖回去。这里立刻重算一次，面板好把漂移状态说出来。
+     * 保存会把插件刚写进去的描述盖回去。这里立刻重算一次，好把漂移状态说出来。
      */
     if (types.CHARACTER_EDITED) {
         events.on(types.CHARACTER_EDITED, () => {

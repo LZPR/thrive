@@ -23,7 +23,7 @@
  */
 
 import { getContext } from '../../../../extensions.js';
-import { compactHint } from './compact.js';
+import { getCompactMessage } from './prompt.js';
 import { isWorldbookDesc, readDesc, writeDesc } from './desc.js';
 import { isReservedEntry } from './desc-entry.js';
 import { COMPRESS_EVENT } from './events.js';
@@ -508,7 +508,8 @@ function locateByUid(data, uid) {
  * 摘要而不是它自己的记忆（见 compact.js 的注释）。
  *
  * 区别只在触发方式：从"工具返回里自动附一句"改成"用户在面板里勾选后手动发起"，
- * 所以压缩指令仍然留在提示词卡片里可编辑（`compactPrompt`），命令也没换。
+ * 所以压缩指令仍然可编辑——它就是提示词编辑器里那段「压缩时发送的 User 消息」
+ * （settings.compactUserMessage，见 prompt.js 的 getCompactMessage）。
  *
  * 还没接线，缺的是三件事：调模型的入口、结果预览、逐条确认后才写回。在那之前
  * 这里只返回 NOT_IMPLEMENTED，界面据此说明"还没实现"，绝不假装压过。
@@ -539,7 +540,10 @@ export function smartCompress(ctx, settings, items) {
          */
         requests: picked.map(item => ({
             id: item.id,
-            prompt: compactHint(settings, factFor(item)),
+            // 事实在前、指令在后：模型先知道"这条现在多少字、超了多少"，再决定怎么压
+            prompt: [factFor(item), String(getCompactMessage(settings ?? {})).trim()]
+                .filter(Boolean)
+                .join('\n'),
         })),
     };
 }

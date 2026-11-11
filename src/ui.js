@@ -5,11 +5,11 @@
  * 重新导出——index.js 与回归脚本都还从 './src/ui.js' 拿这些名字：
  *
  *   ui/settings/        扩展设置页（settings.html 的绑定与回填，见下面的分工）
- *   ui/panel.js         浮动面板（重绘 / 交互 / 模式开关 / 入口）
+ *   ui/panel.js         浮动面板（重绘 / 交互 / 学习开关 / 入口）
  *   ui/panel-layout.js  面板的位置、尺寸、不透明度与拖拽
  *   ui/compress-panel.js 压缩面板（独立窗口：超长条目、手动编辑、智能压缩占位）
  *   ui/draft-window.js  虚拟世界书（独立窗口：条目的真实世界书 vs 缓冲区 diff、保存 / 丢弃）
- *   ui/prompt-window.js 提示词编辑器（独立窗口：增删改、启用、角色、导入 ST 预设）
+ *   ui/prompt-window.js 提示词编辑器（独立窗口：一场学习会话的预设卡 + 两段开场白）
  *   ui/badge.js         输入框旁的状态徽章
  *   ui/status.js        状态摘要文本（`/thrive status`）
  *   ui/desc-target.js   两个落点：描述存哪儿、可写书（对话级，面板的「更多设置」用它）
@@ -17,8 +17,8 @@
  *   ui/shared.js        共用的常量、toast、确认弹窗、面板开合状态
  *
  * 设置页内部也是"一组设置一个文件"：common / help / diagnostics / basics /
- * write-targets / passive-criteria / desc-patch / limit-fields / prompt-cards /
- * tool-catalog / appearance，入口是 ui/settings/index.js。改哪一组就只碰那个文件。
+ * learn-criteria / limit-fields / prompt-cards / appearance，入口是
+ * ui/settings/index.js。改哪一组就只碰那个文件。
  *
  * 一条界线值得记住：**对话级的界面件不放在 ui/settings/ 里**。落点那两块之所以在
  * ui/desc-target.js 而不是 settings/desc-storage.js，就是因为面板要用它们，而面板不该
@@ -41,5 +41,6 @@ export {
     refreshPromptWindow,
 } from './ui/prompt-window.js';
 export { initBadge } from './ui/badge.js';
+export { closeTeachWindow, initTeachWindow, isTeachWindowOpen, openTeachWindow } from './ui/teach-window.js';
 export { describeStatus } from './ui/status.js';
 export { bindCompressRefresh, refreshUI, refreshBadgeOnly } from './ui/refresh.js';

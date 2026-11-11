@@ -7,7 +7,7 @@
 /* ---------------------------------------------------------------- 状态徽章 */
 
 /*
- * 徽章现在只是一个方块图标：点一下开 / 关浮动面板，主动 / 被动两个开关都搬进面板了。
+ * 徽章现在只是一个方块图标：点一下开 / 关浮动面板，学习开关搬进面板了。
  *
  * 尺寸必须跟 ST 那一排图标一致（--bottomFormBlockSize / --bottomFormIconSize）：
  * #leftSendForm 是 flex 容器，之前那个胶囊用 `width: auto; height: auto`，
@@ -55,16 +55,10 @@
     outline-offset: -2px;
 }
 
-/* 主动开着：图标换成强调色，和"真在学"这件事对上号 */
+/* 学习模式开着：图标换成强调色，和"会自动学"这件事对上号 */
 #leftSendForm > .thrive-badge.thrive-badge--active {
     color: var(--SmartThemeQuoteColor);
     opacity: 1;
-}
-
-/* 只有被动开着：走 Em 色，和主动一眼能分开 */
-#leftSendForm > .thrive-badge.thrive-badge--passive:not(.thrive-badge--active) {
-    color: color-mix(in srgb, var(--SmartThemeEmColor) 45%, var(--SmartThemeBodyColor));
-    opacity: 0.95;
 }
 
 /* 三种"不可用"（没有可写模块 / 没有对话 / 工具调用不可用）共用一档置灰 */
@@ -78,11 +72,10 @@
 }
 
 /*
- * 待学：已经挂上一次临时学习，下一轮就会用掉。
- * 这是"被动学习真的触发了"的唯一常驻信号，所以让图标整体呼吸——
- * 扫一眼聊天区就能注意到，又不用额外画点。
+ * 学习中：一场学习会话正在跑。这是"它真的在干活"的唯一常驻信号，
+ * 所以让图标整体呼吸——扫一眼聊天区就能注意到，又不用额外画点。
  */
-.thrive-badge--armed .thrive-badge__icon {
+.thrive-badge--running .thrive-badge__icon {
     animation: thrive-armed 1.4s ease-in-out infinite;
 }
 
@@ -101,7 +94,7 @@
 
 /* 系统开了"减少动态效果"就别闪，改成常亮 */
 @media (prefers-reduced-motion: reduce) {
-    .thrive-badge--armed .thrive-badge__icon {
+    .thrive-badge--running .thrive-badge__icon {
         animation: none;
         text-shadow: 0 0 6px currentColor;
     }
@@ -502,141 +495,6 @@
     margin-bottom: 6px;
 }
 
-/* ------------------------------------------------------------ 工具清单 */
-
-/*
- * 一个与「提示词」并列的分组（不再嵌在它里面），只读：
- * 一组工具一段，每行「中文名 + 工具名 + 状态」，下面一行描述、一行宏。
- * 外框与折叠头沿用 .thrive-group，这里只管里面的排版。
- */
-.thrive-settings .thrive-tool-copy {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 4px 0 2px;
-}
-
-.thrive-settings .thrive-tool-copy .menu_button {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    width: auto;
-    white-space: nowrap;
-    font-size: calc(var(--mainFontSize, 15px) * 0.78);
-}
-
-.thrive-settings .thrive-tool-list {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    margin-top: 6px;
-}
-
-.thrive-settings .thrive-tool-group {
-    margin-top: 2px;
-    font-size: calc(var(--mainFontSize, 15px) * 0.72);
-    letter-spacing: 0.06em;
-    opacity: 0.5;
-}
-
-.thrive-settings .thrive-tool-row {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 5px 8px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-left-width: 3px;
-    border-radius: 6px;
-    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
-}
-
-.thrive-settings .thrive-tool-row__head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px;
-}
-
-.thrive-settings .thrive-tool-row__label {
-    font-size: calc(var(--mainFontSize, 15px) * 0.86);
-    font-weight: 600;
-}
-
-.thrive-settings .thrive-tool-row__name {
-    font-family: var(--monoFontFamily, monospace);
-    font-size: calc(var(--mainFontSize, 15px) * 0.74);
-    opacity: 0.55;
-}
-
-.thrive-settings .thrive-tool-row__state {
-    margin-left: auto;
-    font-size: calc(var(--mainFontSize, 15px) * 0.7);
-    white-space: nowrap;
-    opacity: 0.6;
-}
-
-.thrive-settings .thrive-tool-row__desc {
-    font-size: calc(var(--mainFontSize, 15px) * 0.74);
-    line-height: 1.5;
-    opacity: 0.65;
-}
-
-.thrive-settings .thrive-tool-row__macros {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-
-/* 宏：点一下就复制。虚线框表示"这是可以拿走的东西"，不是普通文字 */
-.thrive-settings .thrive-tool-macro {
-    padding: 0 5px;
-    border: 1px dashed var(--SmartThemeBorderColor);
-    border-radius: 4px;
-    font-family: var(--monoFontFamily, monospace);
-    font-size: calc(var(--mainFontSize, 15px) * 0.74);
-    line-height: 1.6;
-    opacity: 0.75;
-    cursor: pointer;
-    user-select: all;
-}
-
-.thrive-settings .thrive-tool-macro:hover {
-    border-color: var(--SmartThemeQuoteColor);
-    color: var(--SmartThemeQuoteColor);
-    opacity: 1;
-}
-
-.thrive-settings .thrive-tool-row__params {
-    font-size: calc(var(--mainFontSize, 15px) * 0.68);
-    opacity: 0.4;
-}
-
-/* 可用：强调色左边框；不可用：点线；没进请求：虚线 + 整行变淡 */
-.thrive-settings .thrive-tool-row[data-state="on"] {
-    border-left-color: var(--SmartThemeQuoteColor);
-}
-
-.thrive-settings .thrive-tool-row[data-state="on"] .thrive-tool-row__state {
-    color: var(--SmartThemeQuoteColor);
-    opacity: 1;
-}
-
-.thrive-settings .thrive-tool-row[data-state="off"] {
-    border-left-color: var(--SmartThemeEmColor, var(--SmartThemeBorderColor));
-    border-left-style: dotted;
-}
-
-.thrive-settings .thrive-tool-row[data-state="idle"] {
-    border-style: dashed;
-    border-left-style: solid;
-}
-
-.thrive-settings .thrive-tool-row[data-state="idle"] .thrive-tool-row__label,
-.thrive-settings .thrive-tool-row[data-state="idle"] .thrive-tool-row__desc {
-    opacity: 0.45;
-}
-
 /* ------------------------------------------------------------ 浮动面板 */
 
 /*
@@ -762,7 +620,7 @@ body.thrive-panel-dragging {
     border-bottom: 1px solid var(--SmartThemeBorderColor);
 }
 
-/* 两块横排、各占一半：窄屏下也不折行，一眼能看出"两个开关、谁开谁关" */
+/* 一行只放这一块（曾经是主动 / 被动两块并排）：现在整行都是学习模式 */
 .thrive-modes__row {
     display: flex;
     gap: 6px;
@@ -810,16 +668,6 @@ body.thrive-panel-dragging {
     background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 10%, transparent);
 }
 
-/*
- * 被动那一块的"开"不用 EmColor 铺底：这个主题里 EmColor 是深灰，
- * 铺在深色面板上等于没铺。改用正文色掺一点——浅色主题变深、深色主题变亮，
- * 两种主题下都和底色分得开。
- */
-.thrive-mode--passive.is-on {
-    border-color: color-mix(in srgb, var(--SmartThemeBodyColor) 38%, var(--SmartThemeBorderColor));
-    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
-}
-
 /* 不可用时整块压暗；点它不会动，原因写在下面那行 notice 里 */
 .thrive-mode.is-muted {
     opacity: 0.55;
@@ -842,9 +690,15 @@ body.thrive-panel-dragging {
     box-shadow: 0 0 5px var(--SmartThemeQuoteColor);
 }
 
-.thrive-mode--passive.is-on .thrive-mode__led {
-    border-color: color-mix(in srgb, var(--SmartThemeBodyColor) 70%, var(--SmartThemeEmColor));
-    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 70%, var(--SmartThemeEmColor));
+/* 学习中：灯跟着呼吸，和徽章同一个节奏 */
+.thrive-mode.is-running .thrive-mode__led {
+    animation: thrive-armed 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thrive-mode.is-running .thrive-mode__led {
+        animation: none;
+    }
 }
 
 .thrive-mode__title {
@@ -865,16 +719,51 @@ body.thrive-panel-dragging {
     text-overflow: ellipsis;
 }
 
-.thrive-mode__pending {
-    font-size: calc(var(--mainFontSize, 15px) * 0.74);
+/*
+ * 状态行 + 手动入口，一行摆平：左边一段结果摘要（"上次学习：3 次工具调用 · 2 轮"），
+ * 右边一颗按钮。摘要会变长，所以它占满剩余宽度并允许换行，按钮不收缩。
+ */
+.thrive-learn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* 状态行很长时让按钮换到下一行，而不是把它挤成一条缝 */
+    flex-wrap: wrap;
+}
+
+/* 两个入口（教授 / 立刻学一次）靠右并排：它们回答同一个问题，位置也该在一起 */
+.thrive-learn__actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.thrive-learn__status {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
     line-height: 1.35;
-    color: color-mix(in srgb, var(--SmartThemeEmColor) 35%, var(--SmartThemeBodyColor));
+    opacity: 0.72;
+}
+
+/* 正在学：这一行是当下最要紧的信息，压过旁边的按钮 */
+.thrive-learn.is-running .thrive-learn__status {
+    opacity: 0.95;
+    color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-learn__go {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
 }
 
 /* --------------------------------------------------- 面板里的「更多设置」 */
 
 /*
- * 这一块只剩"落点"：描述存哪儿、可写书、现在触发一次。块内平铺，不再套第二层折叠。
+ * 这一块只剩"落点"：描述存哪儿、可写书。块内平铺，不再套第二层折叠。
  * 面板窄，标签与下拉并排会挤成两行字，所以一律竖着排。
  */
 .thrive-more {
@@ -2057,11 +1946,6 @@ body.thrive-panel-dragging {
     white-space: nowrap;
 }
 
-.thrive-prompts__meta--off {
-    color: var(--SmartThemeQuoteColor);
-    opacity: 1;
-}
-
 .thrive-prompts__bar .menu_button {
     flex: 0 0 auto;
     width: auto;
@@ -2122,15 +2006,56 @@ body.thrive-panel-dragging {
     opacity: 0.5;
 }
 
-/* 分界线：底色略深、整条虚线，读起来像"这里不是一条提示词" */
-.thrive-prompts__item--anchor {
-    border-style: dashed;
-    border-left-color: transparent;
-    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 9%, transparent);
+/*
+ * 会话开场白：列表下面单独一段。
+ *
+ * 它不是"预设里的第 N 条"，所以没有抓手、没有启用开关、没有角色 chip——
+ * 固定是那一场会话的第一条 User 消息。视觉上也和上面那摞卡片分开：
+ * 一条上边线 + 一个小标题，读起来是"任务书之后的收尾要求"。
+ */
+.thrive-prompts__msgs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
 }
 
-.thrive-prompts__item--anchor .thrive-prompts__name {
+.thrive-prompts__msgs-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.thrive-prompts__msgs-title {
     font-weight: 600;
+}
+
+/* 说明会随窗口宽度换行；窄窗口里宁可两行，也不要截掉"这是开场白"这个事实 */
+.thrive-prompts__msgs-hint {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    line-height: 1.35;
+    opacity: 0.6;
+}
+
+.thrive-prompts__msg {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-left: 3px solid color-mix(in srgb, var(--SmartThemeQuoteColor) 45%, var(--SmartThemeBorderColor));
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 5%, transparent);
+}
+
+/* 展开时编辑区要独占一行，所以这一条不再垂直居中 */
+.thrive-prompts__msg--open {
+    align-items: flex-start;
 }
 
 .thrive-prompts__grip {
@@ -2582,4 +2507,221 @@ body.thrive-panel-dragging {
 
 .thrive-prompts__menu-list:empty {
     display: none;
+}
+
+/* ======================================================= 教授窗口 */
+
+/*
+ * 第五个独立窗口：写一段话（可附图）直接教模型一件事。
+ *
+ * 比压缩侧栏与虚拟世界书都窄——它只有一块输入区，宽了反而让一行字长得难读。
+ * 居中而不是贴边：这是一次"我要说点什么"的动作，说完就关，不用一直挂着。
+ */
+.thrive-teach {
+    position: absolute;
+    top: 10vh;
+    left: 50%;
+    z-index: 4360;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    box-sizing: border-box;
+    width: min(560px, 94vw);
+    max-height: 80vh;
+    padding: 10px 14px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 32%);
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+    line-height: 1.4;
+    transform: translateX(-50%);
+    animation: thrive-teach-in 0.14s ease-out;
+}
+
+@keyframes thrive-teach-in {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thrive-teach {
+        animation: none;
+    }
+}
+
+.thrive-teach__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.thrive-teach__icon {
+    flex: 0 0 auto;
+    opacity: 0.7;
+}
+
+.thrive-teach__title {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* 「与当前对话无关」：这一行是整件事的关键区别，但不必抢眼 */
+.thrive-teach__meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.5;
+}
+
+.thrive-teach__close {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+}
+
+.thrive-teach__body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+}
+
+/*
+ * 用正文字体而不是等宽：这里写的是人话（"这个人物说话习惯是…"），
+ * 不是提示词。等宽字体只会让人觉得自己在写代码。
+ */
+.thrive-teach__text {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 9em;
+    padding: 6px 8px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: calc(var(--mainFontSize, 15px) * 0.9);
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+
+.thrive-teach__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.thrive-teach__count {
+    flex: 1 1 auto;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    font-variant-numeric: tabular-nums;
+    opacity: 0.55;
+}
+
+/* 超过上限：只换颜色，不拦输入（用户可能只是想先写完再拆） */
+.thrive-teach__count.is-over {
+    opacity: 0.95;
+    color: var(--SmartThemeQuoteColor);
+}
+
+.thrive-teach__clear {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 1px 8px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.76);
+}
+
+.thrive-teach__images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.thrive-teach__images:empty {
+    display: none;
+}
+
+.thrive-teach__thumb {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    overflow: hidden;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+}
+
+.thrive-teach__thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* 移除按钮压在缩略图右上角：位置固定，不用为每张图多留一行 */
+.thrive-teach__thumb-x {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: rgb(0 0 0 / 55%);
+    color: #fff;
+    font-size: 12px;
+    line-height: 15px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.thrive-teach__thumb-x:hover {
+    background-color: rgb(0 0 0 / 78%);
+}
+
+.thrive-teach__foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.thrive-teach__pick {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 2px 10px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.8);
+}
+
+.thrive-teach__hint {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.7);
+    line-height: 1.3;
+    opacity: 0.5;
+}
+
+.thrive-teach__go {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 2px 12px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.82);
+}
+
+/* 读图 / 开始中：只关交互，不整体降透明度（用户可能调过面板不透明度） */
+.thrive-teach--busy {
+    pointer-events: none;
+}
+
+.thrive-teach--busy .thrive-teach__bar,
+.thrive-teach--busy .thrive-teach__body {
+    opacity: 0.6;
 }

@@ -1,13 +1,13 @@
 /**
  * ui/settings/limit-fields.js · 「数值与上限」组的输入框
  *
- * 14 个数字全部走 LIMIT_FIELDS 这张表：加一项只改表与模板，绑定与回填不用动。
+ * 全部数字走 LIMIT_FIELDS 这张表：加一项只改表与模板，绑定与回填不用动。
  *
  * min / max / step 也不写死在 HTML 里，绑定时从 LIMIT_SPECS 灌进去——范围只有一份
  * 定义，否则模板里改了一半、夹取逻辑还是老值，用户会看到"输入框允许填 5000、
  * 实际被夹到 2000"这种自相矛盾的界面。
  *
- * 这一组只有数字与一颗「全部恢复默认」；压缩面板的入口在「日志与面板」里，
+ * 这一组只有数字与一颗「全部恢复默认」；压缩面板的入口在「面板与窗口」里，
  * 那里和浮动面板挨着，两个"面板"的入口放一处。
  */
 
@@ -33,7 +33,8 @@ const LIMIT_FIELDS = Object.freeze([
     ['thrive_limit_pattern_chars', 'patternMaxChars'],
     ['thrive_limit_match_window', 'matchWindow'],
     ['thrive_limit_backup', 'loreBackupLimit'],
-    ['thrive_limit_trace_chars', 'traceMaxChars'],
+    ['thrive_limit_learn_chars', 'learnHistoryChars'],
+    ['thrive_limit_learn_rounds', 'learnRounds'],
 ]);
 
 /** 改这几个值会改变"哪些条目算超长"，要重算一次压缩面板的列表 */

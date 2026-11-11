@@ -1,13 +1,11 @@
 /**
- * tools.js · 工具注册与分发
+ * tools.js · 十个工具的定义与实现
  *
- * 关键设计（ADR-001）：工具在初始化时注册一次，之后永不增删。
- * 开关和模块切换只改 `shouldRegister` 的返回值 —— 如果反过来在切换时
- * register / unregister，`tools` 数组的顺序和内容会变，而 `tools` 位于请求头部，
- * 任何变化都会让整条前缀缓存失效。
+ * v0.33 起它们**不再注册给聊天**（ADR-050）。学习发生在独立会话里，会话自己
+ * 带着一份 tools 数组发请求；聊天请求里既没有插件提示词也没有插件工具。
  *
- * 因此 `shouldRegister` 必须是同步、廉价的，并且要现取 context：
- * 缓存的 ctx 会指向切换前的对话（chat_metadata 被整体替换过）。
+ * 所以这里只做一件事：维护一张定义表（名字 / 描述 / 参数 / 实现），
+ * 由 session-tools.js 取走。表在第一次被取时建一次，之后复用。
  *
  * 十个工具按"读得越少，能写的越少"分四级守卫（见 store.js 的 reads 键表）：
  *
@@ -19,6 +17,9 @@
  * 之所以不做一个万能 write：参数一多，模型就要在一个调用里同时决定"改哪条、
  * 怎么改、要不要新建"，错一步就是一次内容事故；拆开之后每个工具只回答一个问题，
  * 守卫也能按"它到底看到了多少"精确地放行。
+ *
+ * 工具只在学习会话跑着的时候可用（store.isLearningActive）。这既是"聊天里没有
+ * 这套工具"的自然结果，也挡住了会话结束后残留的调用。
  */
 
 import { getContext } from '../../../../extensions.js';
@@ -67,7 +68,6 @@ import { isReservedTitle } from './desc-entry.js';
 import { ensureDraft, layerFor, rollbackEmptyDraft } from './draft.js';
 import { compilePattern, replaceIn, scan } from './regex.js';
 import { TOOL_NAMES } from './tool-names.js';
-import { isToolAvailable, isToolRegistered } from './tool-state.js';
 import { hintFor } from './diagnostics.js';
 import { appendParagraph, fnv1a, isBlank, truncate } from './util.js';
 
@@ -75,33 +75,57 @@ const LOG = '[Thrive]';
 
 export { TOOL_NAMES };
 
-/** 注册是一次性的，重复调用直接忽略 */
-let registered = false;
+/** 工具定义表。`{ name, description, parameters, action }`，action 永不 throw */
+const DEFS = [];
+
+let built = false;
+
+function define(def) {
+    DEFS.push(def);
+}
 
 /**
- * 注册本插件全部工具。重复调用安全。
- * @param {object} [ctx] 仅用于首次注册，不参与后续判断
+ * 取全部工具定义。第一次调用时建表，之后原样复用。
+ *
+ * 每个 `action` 都返回 ST 形状的 `{ ok, error?, hint? }`；session-tools.js 负责把它
+ * 序列化成工具消息的正文（并保证非空——`role:'tool'` 的内容空掉会让整条消息消失）。
+ *
+ * @returns {Array<{ name: string, description: string, parameters: object, action: Function }>}
  */
-export function registerTools(ctx = getContext()) {
-    if (registered) {
-        return;
+export function getToolDefs() {
+    if (!built) {
+        buildLoreTools();
+        buildDescTools();
+        built = true;
+    }
+    return DEFS.slice();
+}
+
+/**
+ * 这组工具此刻可不可用。
+ *
+ * 两个条件：学习会话正在跑（否则连调用入口都没有），世界书工具还要求选了可写书。
+ * 描述工具两种存储模式都有，换的只是落点。
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isToolAvailable(name) {
+    if (!isLearningActive()) {
+        return false;
     }
 
-    if (typeof ctx?.registerFunctionTool !== 'function') {
-        console.error(`${LOG} 当前 ST 没有 registerFunctionTool，工具未注册`);
-        return;
+    const key = String(name ?? '');
+    if (key.startsWith('lore_')) {
+        return Boolean(getWritableBook(getContext()));
     }
-
-    registerLoreTools(ctx);
-    registerDescTools(ctx);
-
-    registered = true;
+    return true;
 }
 
 /* ------------------------------------------------------------ 世界书工具 */
 
-function registerLoreTools(ctx) {
-    ctx.registerFunctionTool({
+function buildLoreTools() {
+    define({
         name: TOOL_NAMES.LORE_LIST,
         displayName: '列出世界书条目',
         description: '列出当前可写世界书里已启用的条目，只给标题，不给正文。'
@@ -126,11 +150,9 @@ function registerLoreTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.LORE_LIST, handleLoreList),
         formatMessage: params => (isBlank(params?.pattern) ? '浏览世界书目录' : `筛选世界书：${params.pattern}`),
-        shouldRegister: () => shouldRegisterLore(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.LORE_READ,
         displayName: '读取世界书条目',
         description: '读取一条世界书条目的正文。给 pattern 则只返回命中的片段，不返回全文。'
@@ -155,11 +177,9 @@ function registerLoreTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.LORE_READ, handleLoreRead),
         formatMessage: params => `读取世界书条目：${params?.title ?? ''}`,
-        shouldRegister: () => shouldRegisterLore(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.LORE_ADD,
         displayName: '新建世界书条目',
         description: '新建一条世界书条目。标题已存在时返回 TITLE_EXISTS，不会覆盖。'
@@ -190,11 +210,9 @@ function registerLoreTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.LORE_ADD, handleLoreAdd),
         formatMessage: params => `新建世界书条目：${params?.title ?? ''}`,
-        shouldRegister: () => shouldRegisterLore(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.LORE_APPEND,
         displayName: '追加世界书条目',
         description: '在已有条目正文末尾追加内容，或追加触发关键词，原文一个字都不动。'
@@ -221,11 +239,9 @@ function registerLoreTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.LORE_APPEND, handleLoreAppend),
         formatMessage: params => `追加世界书条目：${params?.title ?? ''}`,
-        shouldRegister: () => shouldRegisterLore(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.LORE_REPLACE,
         displayName: '正则替换世界书正文',
         description: '用正则替换条目正文里的片段，未被匹配的部分原样保留。'
@@ -259,11 +275,9 @@ function registerLoreTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.LORE_REPLACE, handleLoreReplace),
         formatMessage: params => `替换世界书正文：${params?.title ?? ''}`,
-        shouldRegister: () => shouldRegisterLore(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.LORE_REWRITE,
         displayName: '整段重写世界书正文',
         description: '用新正文整段替换条目正文，用于压缩过长条目或重排结构。'
@@ -285,15 +299,13 @@ function registerLoreTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.LORE_REWRITE, handleLoreRewrite),
         formatMessage: params => `重写世界书正文：${params?.title ?? ''}`,
-        shouldRegister: () => shouldRegisterLore(),
-        stealth: false,
     });
 }
 
 /* ------------------------------------------------------------ 描述工具 */
 
-function registerDescTools(ctx) {
-    ctx.registerFunctionTool({
+function buildDescTools() {
+    define({
         name: TOOL_NAMES.DESC_READ,
         displayName: '读取角色描述',
         description: '读取当前角色的描述。省略 pattern 返回全文与字数；给 pattern 只返回命中片段。'
@@ -313,11 +325,9 @@ function registerDescTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.DESC_READ, handleDescRead),
         formatMessage: params => (isBlank(params?.pattern) ? '读取角色描述' : `检索角色描述：${params.pattern}`),
-        shouldRegister: () => shouldRegisterDescription(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.DESC_APPEND,
         displayName: '追加角色描述',
         description: '在角色描述末尾追加一段，原文不动。'
@@ -334,11 +344,9 @@ function registerDescTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.DESC_APPEND, handleDescAppend),
         formatMessage: () => '追加角色描述',
-        shouldRegister: () => shouldRegisterDescription(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.DESC_REPLACE,
         displayName: '正则替换角色描述',
         description: '用正则替换角色描述里的片段，未被匹配的部分原样保留。'
@@ -368,11 +376,9 @@ function registerDescTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.DESC_REPLACE, handleDescReplace),
         formatMessage: params => `替换角色描述：${params?.pattern ?? ''}`,
-        shouldRegister: () => shouldRegisterDescription(),
-        stealth: false,
     });
 
-    ctx.registerFunctionTool({
+    define({
         name: TOOL_NAMES.DESC_REWRITE,
         displayName: '整段重写角色描述',
         description: '用新文本整段重写角色描述，用于压缩或整体重排。'
@@ -389,48 +395,21 @@ function registerDescTools(ctx) {
         },
         action: guardAction(TOOL_NAMES.DESC_REWRITE, handleDescRewrite),
         formatMessage: () => '整段重写角色描述',
-        shouldRegister: () => shouldRegisterDescription(),
-        stealth: false,
     });
 }
 
 /**
- * 每次请求前由 ST 调用。必须同步返回、必须现取 context。
+ * 工具调用前的守卫：定义表里有不等于现在能用。
  *
- * 两种模式：
- *   · 默认（toolsResident = false）：学习模式没开就撤下工具，请求体与没装插件时一致，
- *     代价是 tools 数组随开关变化，前缀缓存从请求最前面就失效。
- *   · 常驻（toolsResident = true）：工具定义一直留着，可用性交给「工具指令」那段文字，
- *     调用由 guardAction 拦。模块/可写书这类结构性变化仍然会撤下工具——它们不随对话变。
- *
- * @returns {boolean}
- */
-export function shouldRegisterDescription() {
-    return isToolRegistered(getContext(), TOOL_NAMES.DESC_READ);
-}
-
-/**
- * 世界书工具的门控比描述多一条：没选可写书 = 模块未就绪，工具干脆不注册。
- * 注册了再报 NO_BOOK，模型会反复试 —— 看不见才是"未就绪"的正确表达。
- * 这条在常驻模式下同样成立：没选书是结构性缺失，不随对话开关变化。
- * @returns {boolean}
- */
-export function shouldRegisterLore() {
-    return isToolRegistered(getContext(), TOOL_NAMES.LORE_LIST);
-}
-
-/**
- * 工具调用前的守卫：注册着不等于现在能用。
- *
- * 常驻模式下工具一直在 tools 里，模型完全可能在学习模式关闭时调用它们。
- * 这里统一拒绝并给一句话，比让它反复试别的工具好。
+ * 会话结束后模型可能还留着一轮递归（或者别处误调），这里统一拒绝并给一句话，
+ * 比让它反复试别的工具好。
  *
  * @param {string} name
  * @param {(params: object) => Promise<object>} handler
  */
 function guardAction(name, handler) {
     return async params => {
-        if (!isToolAvailable(getContext(), name)) {
+        if (!isToolAvailable(name)) {
             return errorResult('TOOL_UNAVAILABLE');
         }
         return handler(params);
@@ -443,7 +422,7 @@ async function handleLoreList(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
     if (!getWritableBook(ctx)) {
@@ -529,7 +508,7 @@ async function handleLoreRead(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
     if (!getWritableBook(ctx)) {
@@ -633,7 +612,7 @@ async function handleLoreAdd(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
 
@@ -736,7 +715,7 @@ async function handleLoreAppend(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
 
@@ -839,7 +818,7 @@ async function handleLoreReplace(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
 
@@ -942,7 +921,7 @@ async function handleLoreRewrite(params) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
 
@@ -1033,7 +1012,7 @@ async function handleDescRead(params) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
 
@@ -1291,7 +1270,7 @@ async function handleDescRewrite(params) {
 function checkDescriptionWrite(ctx) {
     const settings = ensureSettings(ctx);
 
-    if (!isLearningActive(ctx)) {
+    if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
     }
 

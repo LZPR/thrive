@@ -1,25 +1,24 @@
 /**
  * ui/prompt-window.js · 提示词编辑器（独立窗口）
  *
- * 第四个独立窗口（面板 / 压缩侧栏 / 虚拟世界书之后），入口只有一处：设置页
- * 「提示词」折叠块里的按钮。标题栏也能拖，Esc 关闭。
+ * 入口只有一处：设置页「提示词」折叠块里的按钮。标题栏也能拖，Esc 关闭。
  *
- * 它替掉了设置页里那一列只能拖、只能改正文的卡片。这里能做的事：
- *   · 新增 / 删除 / 改名自建提示词（内置卡不能删，只能停用）
- *   · 逐条启用 / 停用（行尾的滑块；停用只影响注入，正文留着）
- *   · 逐条选角色（系统 / 用户 / 助手）——注入时按角色切成不同的段
- *   · 拖动排序；「其它提示词」是分界线，拖它等于把卡片整体送进系统区或尾部
+ * 这里编辑的是**一场学习会话的预设**（ADR-050）：
+ *   · 卡片 = 预设里的一条消息，按列表顺序发出（没有系统区 / 尾部之分）
+ *   · 内置卡两张：学习规则、目标内容（后者的正文由插件在触发时追加）
+ *   · 自建提示词：新增 / 删除 / 改名、逐条启用与角色、拖动排序
+ *   · 会话开场白：学习 / 压缩各一段，作为那一场会话的第一条 User 消息
  *   · 导入 SillyTavern 预设：可以从文件选，也可以直接从 ST 已装的预设里挑
  *
  * 为什么独立成窗口而不是加厚设置页：一张提示词动辄几百字，设置页那条 480px
  * 的栏里连正文都看不全；而且导入要预览"进来多少条、跳过了什么"，这需要一个
  * 能摊开的地方。设置页只留一个入口与一行摘要。
  *
- * 行上只留"看得出状态"的东西：名字、角色、状态、落点与字数。角色下拉与删除
- * 都收进编辑区——它们不是每眼都要看的，但会把每行右侧挤成参差不齐的按钮堆。
+ * 行上只留"看得出状态"的东西：名字、角色、状态与字数。角色下拉与删除都收进
+ * 编辑区——它们不是每眼都要看的，但会把每行右侧挤成参差不齐的按钮堆。
  *
- * 与压缩面板的编辑约法一致：同一时刻只展开一条，切走 / 关闭窗口就放弃未保存的
- * 内容（不弹二次确认），因为草稿从来没离开过这个窗口。
+ * 与压缩面板的编辑约法一致：同一时刻只展开一条（卡片或开场白），切走 / 关闭窗口
+ * 就放弃未保存的内容（不弹二次确认），因为草稿从来没离开过这个窗口。
  */
 
 import { getContext } from '../../../../../extensions.js';
@@ -27,8 +26,8 @@ import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../../../../../popup
 import {
     PROMPT_ROLE,
     PROMPT_CARD_META,
+    SESSION_MESSAGE_KINDS,
     addCustomPrompt,
-    buildInjection,
     countChars,
     deleteCustomPrompt,
     findCustomPrompt,
@@ -39,6 +38,9 @@ import {
     getPromptName,
     getPromptOrder,
     getPromptRole,
+    getSessionMessage,
+    getSessionMessageDefault,
+    getSessionMessageMeta,
     isCustomPrompt,
     isPromptEnabled,
     resetPromptText,
@@ -46,9 +48,9 @@ import {
     setPromptEnabled,
     setPromptRole,
     setPromptText,
-    syncFromContext,
+    setSessionMessage,
 } from '../prompt.js';
-import { CARD_ID, isHeadCard, normalizeOrder } from '../prompt-order.js';
+import { CARD_ID, DEFAULT_PROMPT_ORDER, normalizeOrder } from '../prompt-order.js';
 import { applyPresetImport, importErrorMessage, parseStPreset } from '../prompt-import.js';
 import { ensureSettings } from '../store.js';
 import { escapeHtml, fnv1a } from '../util.js';
@@ -57,6 +59,12 @@ import { LOG, PROMPT_WINDOW_ID, askConfirm, toast } from './shared.js';
 
 /** 当前展开编辑的那条：`{ id, name, text, role, isNew, dirty }`；null = 没在编辑 */
 let editing = null;
+
+/** 正在编辑开场白的那一种任务（learn / compact）；null = 没在编辑 */
+let msgEditing = null;
+
+/** 开场白草稿。只在 msgEditing 非空时有意义 */
+let msgDraft = '';
 
 /** 重绘签名：内容没变就不碰 DOM（重绘会把滚动位置弹回顶部） */
 let signature = null;
@@ -129,10 +137,14 @@ export function initPromptWindow() {
             closeImportMenu();
             return;
         }
-        if (editing) {
+        if (editing || msgEditing) {
             // 正在编辑时 Esc 先收编辑框，窗口留着——和"关掉整个窗口"分开
             event.stopPropagation();
-            cancelEditing();
+            if (msgEditing) {
+                cancelMsg();
+            } else {
+                cancelEditing();
+            }
             return;
         }
         closePromptWindow();
@@ -159,6 +171,7 @@ export function openPromptWindow(ctx = getContext()) {
     // 已经开着就只重画，别把手里那份没保存的草稿丢掉
     if (!isPromptWindowOpen()) {
         editing = null;
+        msgEditing = null;
         signature = null;
     }
 
@@ -177,6 +190,7 @@ export function closePromptWindow() {
     dropUnsavedNew();
     dropEditorFocus();
     editing = null;
+    msgEditing = null;
     signature = null;
     win.classList.add('displayNone');
     // 拖动留下的行内坐标一并清掉：下次打开回到默认落点
@@ -199,9 +213,7 @@ function dropUnsavedNew() {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
     if (deleteCustomPrompt(settings, editing.id)) {
-        ctx.saveSettingsDebounced?.();
-        syncFromContext(ctx);
-    }
+        ctx.saveSettingsDebounced?.();    }
 }
 
 /* ------------------------------------------------------------------ 重绘 */
@@ -226,7 +238,8 @@ function renderWindow(ctx, force = false) {
         return;
     }
 
-    if (editing && !force) {
+    // 编辑中不重绘：刷新随时可能发生（发消息、改设置），重建 DOM 会把光标一起扔掉
+    if ((editing || msgEditing) && !force) {
         return;
     }
 
@@ -248,7 +261,6 @@ function renderWindow(ctx, force = false) {
     const meta = win.querySelector('.thrive-prompts__meta');
     if (meta) {
         meta.textContent = view.meta;
-        meta.classList.toggle('thrive-prompts__meta--off', view.injectOff);
     }
 
     const hint = win.querySelector('.thrive-prompts__hint');
@@ -268,56 +280,69 @@ function renderWindow(ctx, force = false) {
  */
 function buildView(ctx, settings) {
     const order = getPromptOrder(settings);
-    const injection = buildInjection(ctx, settings);
     const items = order.map(id => {
-        const anchor = id === CARD_ID.ANCHOR;
         const custom = isCustomPrompt(settings, id);
         const meta = PROMPT_CARD_META[id];
-        const status = getCardState(ctx, settings, id);
+        const status = getCardState(settings, id);
         const text = getCardText(settings, id);
-        const chars = countChars(text);
-        const side = isHeadCard(order, id) ? 'head' : 'tail';
 
         return {
             id,
-            anchor,
             custom,
-            kind: anchor ? 'anchor' : (custom ? 'custom' : 'builtin'),
+            kind: custom ? 'custom' : 'builtin',
             name: getPromptName(settings, id),
-            hint: custom
-                ? '自建提示词 · 按列表顺序注入'
-                : (meta?.hint ?? ''),
-            // 行上只说"这是张什么卡"，不说"这一轮会不会进请求"：那个判断跟着
-            // 学习模式变，一屏全是「未生效」时反而看不出谁被谁关掉了。
-            // 它仍然留着，只是改成悬停才出现的一句解释（见 renderItem 的 title）。
-            note: id === CARD_ID.COMPACT ? '不参与注入' : '',
+            hint: custom ? '自建提示词 · 按列表顺序发出' : (meta?.hint ?? ''),
+            // 行上那截说明：“这是张什么卡”，不是“这一轮会不会生效”
+            note: id === CARD_ID.TARGET ? '正文随触发追加' : '',
             status: status.note,
             role: getPromptRole(settings, id),
             enabled: isPromptEnabled(settings, id),
-            editable: anchor ? false : (custom || Boolean(meta?.editable)),
+            // 目标内容卡可编辑的是那句描述行，正文由插件追加
+            editable: custom || Boolean(meta?.editable),
             deletable: custom,
             canReset: Boolean(getCardSettingKey(id)),
-            chars,
-            side,
+            chars: countChars(text),
             // 只在签名里用：正文变了要重算行尾的字数（同样的字数换了内容也要重画）
             digest: fnv1a(text),
         };
     });
 
-    const enabled = items.filter(item => !item.anchor && item.enabled).length;
-    const contentItems = items.filter(item => !item.anchor);
+    const enabled = items.filter(item => item.enabled).length;
 
-    const meta = settings.promptInject === false
-        ? `自动注入已关闭 · 共 ${contentItems.length} 条 · 启用 ${enabled} 条`
-        : `共 ${contentItems.length} 条 · 启用 ${enabled} 条 · `
-            + `系统区 ${countChars(injection.head)} 字 / 尾部 ${countChars(injection.tail)} 字`;
+    /*
+     * 开场白的草稿也要进视图：编辑中整块重绘是被挡住的，但"字数"这类
+     * 随手要看到的东西仍得跟着打字更新（走 onInput 就地改，不重绘）。
+     */
+    const messages = SESSION_MESSAGE_KINDS.map(kind => {
+        const meta = getSessionMessageMeta(kind);
+        const open = msgEditing === kind;
+        const text = open ? msgDraft : getSessionMessage(settings, kind);
+        return {
+            kind,
+            label: meta?.label ?? kind,
+            hint: meta?.hint ?? '',
+            open,
+            chars: countChars(text),
+            digest: fnv1a(text),
+            // 和默认文本一字不差：界面上不必说"你改过"
+            custom: !open && text !== getSessionMessageDefault(kind),
+        };
+    });
 
     const footHint = editing
         ? 'Ctrl+Enter 保存，Esc 取消；打字时输入 {{ 会弹出宏补全，右上角可全屏编辑。'
-        : '拖动左侧抓手调整顺序：分界线「其它提示词」上方进系统提示词区，下方进对话尾部。'
-            + '角色不同的相邻提示词会各自成段。宏（{{char}} / {{user}} / {{setvar::名::值}} / {{getvar::名}}）按列表顺序展开。';
+        : '列表从上到下就是这一场会话的消息顺序。宏（{{char}} / {{user}} / {{setvar::名::值}} / {{getvar::名}}）'
+            + '在发请求前按顺序展开。';
 
-    return { order, items, meta, footHint, injectOff: settings.promptInject === false, editingId: editing?.id ?? '' };
+    return {
+        order,
+        items,
+        messages,
+        meta: `共 ${items.length} 条 · 启用 ${enabled} 条 · 开场白 ${messages.length} 段`,
+        footHint,
+        editingId: editing?.id ?? '',
+        msgEditing,
+    };
 }
 
 function signatureOf(view) {
@@ -325,9 +350,11 @@ function signatureOf(view) {
         view.meta,
         view.footHint,
         view.editingId,
+        view.msgEditing,
         view.items.map(item => [
-            item.id, item.role, item.enabled, item.chars, item.digest, item.name, item.side,
+            item.id, item.role, item.enabled, item.chars, item.digest, item.name,
         ]),
+        view.messages.map(item => [item.kind, item.open, item.chars, item.digest]),
     ]);
 }
 
@@ -366,27 +393,14 @@ function dropStrayMacroList() {
 }
 
 function renderBody(view) {
-    if (view.items.length === 0) {
-        return '<div class="thrive-prompts__empty">这里还没有提示词。</div>';
-    }
+    const list = view.items.length === 0
+        ? '<div class="thrive-prompts__empty">这里还没有提示词。</div>'
+        : `<div class="thrive-prompts__list">${view.items.map(renderItem).join('')}</div>`;
 
-    return `<div class="thrive-prompts__list">${view.items.map(renderItem).join('')}</div>`;
+    return `${list}${renderMessages(view.messages)}`;
 }
 
 function renderItem(item) {
-    if (item.anchor) {
-        return `<article class="thrive-prompts__item thrive-prompts__item--anchor" data-prompt="${item.id}" data-kind="anchor">
-            <span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动换边：上方进系统区，下方进尾部"></span>
-            <div class="thrive-prompts__main">
-                <div class="thrive-prompts__head">
-                    <span class="thrive-prompts__name">其它提示词</span>
-                    <span class="thrive-prompts__chip thrive-prompts__chip--muted">分界线</span>
-                </div>
-                <div class="thrive-prompts__note">上方 → 系统提示词区 · 下方 → 对话尾部（这张本身不注入）</div>
-            </div>
-        </article>`;
-    }
-
     const open = editing?.id === item.id;
     const editButton = item.editable
         ? `<button type="button" class="menu_button thrive-prompts__act${open ? ' thrive-prompts__act--open' : ''}"
@@ -394,12 +408,11 @@ function renderItem(item) {
                 ${open ? '收起' : '编辑'}</button>`
         : '';
 
-    const sideLabel = item.side === 'head' ? '系统区' : '尾部';
-    const note = [sideLabel, item.note, `${item.chars} 字`].filter(Boolean).join(' · ');
+    const note = [item.note, `${item.chars} 字`].filter(Boolean).join(' · ');
 
     return `<article class="thrive-prompts__item" data-prompt="${item.id}"
         data-kind="${item.kind}" data-enabled="${item.enabled}">
-        <span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序与落点"></span>
+        <span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序"></span>
         <div class="thrive-prompts__main">
             <div class="thrive-prompts__head">
                 <span class="thrive-prompts__name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
@@ -410,6 +423,82 @@ function renderItem(item) {
         ${editButton}
         ${renderSwitch(item)}
         ${open ? renderEditor(item) : ''}
+    </article>`;
+}
+
+/**
+ * 会话开场白：两段，学习 / 压缩。
+ *
+ * 它们不是"预设里的一段"，所以不参与拖动排序、也没有角色：它们固定是那一场会话的
+ * 第一条 User 消息，在整份预设之后发出。放在列表下面，是因为"先有任务书、再有材料，
+ * 最后是这一次的要求"——和实际发出的顺序一致。
+ *
+ * @param {Array<object>} messages
+ */
+function renderMessages(messages) {
+    if (!messages.length) {
+        return '';
+    }
+
+    return `<section class="thrive-prompts__msgs">
+        <div class="thrive-prompts__msgs-head">
+            <span class="thrive-prompts__msgs-title">会话开场白</span>
+            <small class="thrive-prompts__msgs-hint">触发时作为这一场会话的第一条 User 消息发出</small>
+        </div>
+        ${messages.map(renderMessage).join('')}
+    </section>`;
+}
+
+function renderMessage(item) {
+    const open = item.open;
+    // 空 = 用默认文本（存空串，读取时回落到默认），所以不能说成"不会发送"
+    const note = [`${item.chars} 字`, item.custom ? '已改过默认' : '默认'].join(' · ');
+    const draftLabel = msgCountText(msgDraft);
+
+    if (!open) {
+        return `<article class="thrive-prompts__msg" data-msg="${item.kind}">
+            <div class="thrive-prompts__main">
+                <div class="thrive-prompts__head">
+                    <span class="thrive-prompts__name">${escapeHtml(item.label)}时发送</span>
+                    <span class="thrive-prompts__chip thrive-prompts__chip--muted">User</span>
+                </div>
+                <div class="thrive-prompts__note">${escapeHtml(note)}</div>
+            </div>
+            <button type="button" class="menu_button thrive-prompts__act" data-act="msg-edit"
+                title="展开编辑：这段就是模型收到的开场白">编辑</button>
+        </article>`;
+    }
+
+    return `<article class="thrive-prompts__msg thrive-prompts__msg--open" data-msg="${item.kind}">
+        <div class="thrive-prompts__main">
+            <div class="thrive-prompts__head">
+                <span class="thrive-prompts__name">${escapeHtml(item.label)}时发送</span>
+                <span class="thrive-prompts__chip thrive-prompts__chip--muted">User</span>
+            </div>
+            <div class="thrive-prompts__note">${escapeHtml(note)}</div>
+        </div>
+        <div class="thrive-prompts__editor">
+            <div class="thrive-prompts__editor-head">
+                <span class="thrive-prompts__field thrive-prompts__field--static">
+                    <span>内容</span>
+                    <b>作为开场白发出</b>
+                </span>
+                <span class="thrive-prompts__count">${draftLabel}</span>
+            </div>
+            <div class="thrive-prompts__area">
+                <textarea class="text_pole thrive-block-text" data-field="msg" rows="6" spellcheck="false"
+                    data-macros="true" data-macros-autocomplete="always" data-macros-autocomplete-style="small"
+                    placeholder="告诉模型这一次要它做什么。支持 {{char}}、{{user}} 等 ST 宏。"
+                >${escapeHtml(msgDraft)}</textarea>
+            </div>
+            <div class="thrive-prompts__editor-foot">
+                <small>${escapeHtml(item.hint)}</small>
+                <button type="button" class="menu_button thrive-prompts__ghost" data-act="msg-reset"
+                    title="用回内置的默认文本">恢复默认</button>
+                <button type="button" class="menu_button thrive-prompts__ghost" data-act="msg-cancel">取消</button>
+                <button type="button" class="menu_button thrive-prompts__save" data-act="msg-save">保存</button>
+            </div>
+        </div>
     </article>`;
 }
 
@@ -452,9 +541,6 @@ function renderEditor(item) {
         [PROMPT_ROLE.ASSISTANT, '助手'],
     ].map(([value, label]) => `<option value="${value}"${value === item.role ? ' selected' : ''}>${label}</option>`).join('');
 
-    const roleDisabled = item.id === CARD_ID.COMPACT;
-    const roleNote = roleDisabled ? '压缩指令不注入，角色无意义' : '注入时这条提示词用的角色';
-
     const reset = item.canReset
         ? '<button type="button" class="menu_button thrive-prompts__ghost" data-act="reset-text" '
             + 'title="用回内置的默认文本">恢复默认</button>'
@@ -470,8 +556,8 @@ function renderEditor(item) {
             ${nameField}
             <label class="thrive-prompts__field thrive-prompts__field--role">
                 <span>角色</span>
-                <select class="thrive-prompts__role" data-act="role" title="${roleNote}"
-                    aria-label="${escapeHtml(item.name)} 的注入角色"${roleDisabled ? ' disabled' : ''}>${roleOptions}</select>
+                <select class="thrive-prompts__role" data-act="role" title="这条消息在会话里用的角色"
+                    aria-label="${escapeHtml(item.name)} 的角色">${roleOptions}</select>
             </label>
             <span class="thrive-prompts__count">${countText(editing.text)}</span>
         </div>
@@ -497,11 +583,17 @@ function renderEditor(item) {
 
 function countText(text) {
     const chars = countChars(text);
-    return chars > 0 ? `${chars} 字` : '0 字 · 不会注入';
+    return chars > 0 ? `${chars} 字` : '0 字 · 不会发送';
+}
+
+/** 开场白的字数小字：空 = 用默认文本，不能说成"不会发送" */
+function msgCountText(text) {
+    const value = String(text ?? '');
+    return value.trim() ? `${countChars(value)} 字` : '空 · 用默认文本';
 }
 
 /**
- * 只刷这一行的外观（亮/暗、角色 chip、落点与字数）。
+ * 只刷这一行的外观（亮/暗、角色 chip、字数）。
  *
  * 展开着编辑框时不能整块重绘——光标、选区、滚动位置都会没。但开关与角色又是
  * 随时能改的，所以这两处改完就地补一下这一行，别让界面和状态对不上。
@@ -525,10 +617,9 @@ function refreshRowChrome(ctx, settings, id) {
 
     const note = row.querySelector('.thrive-prompts__note');
     if (note) {
-        const side = isHeadCard(getPromptOrder(settings), id) ? '系统区' : '尾部';
-        const extra = id === CARD_ID.COMPACT ? '不参与注入' : '';
-        note.textContent = [side, extra, `${countChars(getCardText(settings, id))} 字`].filter(Boolean).join(' · ');
-        note.title = getCardState(ctx, settings, id).note;
+        const extra = id === CARD_ID.TARGET ? '正文随触发追加' : '';
+        note.textContent = [extra, `${countChars(getCardText(settings, id))} 字`].filter(Boolean).join(' · ');
+        note.title = getCardState(settings, id).note;
     }
 }
 
@@ -543,6 +634,7 @@ function onClick(event) {
 
     const item = trigger.closest('[data-prompt]');
     const id = item?.dataset.prompt ?? '';
+    const kind = trigger.closest('[data-msg]')?.dataset.msg ?? '';
 
     switch (action) {
         case 'close':
@@ -580,6 +672,18 @@ function onClick(event) {
         case 'reset-text':
             resetEditingText();
             break;
+        case 'msg-edit':
+            beginMsgEdit(kind);
+            break;
+        case 'msg-save':
+            saveMsg();
+            break;
+        case 'msg-cancel':
+            cancelMsg();
+            break;
+        case 'msg-reset':
+            resetMsg();
+            break;
         default:
             break;
     }
@@ -587,11 +691,21 @@ function onClick(event) {
 
 /** 编辑框里打字：只更新草稿与字数，不重绘 */
 function onInput(event) {
+    const field = event.target?.dataset?.field;
+
+    if (field === 'msg' && msgEditing) {
+        msgDraft = event.target.value;
+        const count = event.target.closest('[data-msg]')?.querySelector('.thrive-prompts__count');
+        if (count) {
+            count.textContent = msgCountText(msgDraft);
+        }
+        return;
+    }
+
     if (!editing) {
         return;
     }
 
-    const field = event.target?.dataset?.field;
     if (field === 'text') {
         editing.text = event.target.value;
         editing.dirty = true;
@@ -640,26 +754,34 @@ function onChange(event) {
 
 /** 编辑框里的键盘：Ctrl/Cmd+Enter 保存，Esc 取消（不让它冒到窗口层） */
 function onKeyDown(event) {
-    if (!editing) {
+    if (!editing && !msgEditing) {
         return;
     }
 
     if (event.key === 'Escape') {
         event.stopPropagation();
-        cancelEditing();
+        if (msgEditing) {
+            cancelMsg();
+        } else {
+            cancelEditing();
+        }
         return;
     }
 
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
-        saveEditing();
+        if (msgEditing) {
+            saveMsg();
+        } else {
+            saveEditing();
+        }
     }
 }
 
 /* ------------------------------------------------------------ 增删改查 */
 
 function beginAdd() {
-    if (editing) {
+    if (editing || msgEditing) {
         toast('先把正在编辑的那条保存或取消');
         return;
     }
@@ -669,7 +791,6 @@ function beginAdd() {
     const prompt = addCustomPrompt(settings, { content: '' });
 
     ctx.saveSettingsDebounced?.();
-    syncFromContext(ctx);
 
     editing = {
         id: prompt.id,
@@ -696,6 +817,11 @@ async function beginEdit(id) {
         return;
     }
 
+    if (msgEditing) {
+        toast('先把正在编辑的开场白保存或取消');
+        return;
+    }
+
     if (editing) {
         if (editing.dirty) {
             const confirmed = await askConfirm('正在编辑的那条还没保存，切过去会丢掉这些改动。确定吗？');
@@ -708,7 +834,7 @@ async function beginEdit(id) {
 
     const ctx = getContext();
     const settings = ensureSettings(ctx);
-    if (id !== CARD_ID.ANCHOR && !isCustomPrompt(settings, id) && !PROMPT_CARD_META[id]) {
+    if (!isCustomPrompt(settings, id) && !PROMPT_CARD_META[id]) {
         return;
     }
 
@@ -772,7 +898,6 @@ function saveEditing() {
     signature = null;
 
     ctx.saveSettingsDebounced?.();
-    syncFromContext(ctx);
     // refreshUI 会经登记表重画这个窗口（此刻 editing 已经是 null）
     refreshUI(ctx);
 
@@ -794,9 +919,7 @@ function cancelEditing() {
     if (wasNew) {
         const settings = ensureSettings(ctx);
         deleteCustomPrompt(settings, id);
-        ctx.saveSettingsDebounced?.();
-        syncFromContext(ctx);
-        refreshUI(ctx);
+        ctx.saveSettingsDebounced?.();        refreshUI(ctx);
     }
 
     renderWindow(ctx, true);
@@ -824,6 +947,103 @@ function resetEditingText() {
     const label = win?.querySelector(`[data-prompt="${attrEscape(editing.id)}"] .thrive-prompts__count`);
     if (label) {
         label.textContent = countText(editing.text);
+    }
+}
+
+/* ------------------------------------------------------------ 会话开场白 */
+
+/**
+ * 开始编辑某一种开场白。
+ *
+ * 和卡片编辑互斥：两处同时开着，草稿就得各存一份、还得判断谁的刷新该被挡住，
+ * 而它们回答的是同一个问题（"这一场会话说什么"），同时改没有意义。
+ *
+ * @param {string} kind learn / compact
+ */
+function beginMsgEdit(kind) {
+    if (!kind || !getSessionMessageMeta(kind)) {
+        return;
+    }
+
+    if (editing) {
+        toast('先把正在编辑的那条提示词保存或取消');
+        return;
+    }
+
+    if (msgEditing === kind) {
+        return;
+    }
+
+    const ctx = getContext();
+    const settings = ensureSettings(ctx);
+    msgEditing = kind;
+    msgDraft = getSessionMessage(settings, kind);
+
+    signature = null;
+    renderWindow(ctx, true);
+
+    // 打开就把光标放进去：这一段通常是想整体改写，不是补一个词
+    const win = document.getElementById(PROMPT_WINDOW_ID);
+    const area = win?.querySelector(`[data-msg="${attrEscape(kind)}"] [data-field="msg"]`);
+    area?.focus();
+    area?.setSelectionRange(area.value.length, area.value.length);
+    area?.closest('[data-msg]')?.scrollIntoView({ block: 'nearest' });
+}
+
+function saveMsg() {
+    if (!msgEditing) {
+        return;
+    }
+
+    const ctx = getContext();
+    const settings = ensureSettings(ctx);
+    const kind = msgEditing;
+
+    if (!setSessionMessage(settings, kind, msgDraft)) {
+        return;
+    }
+
+    msgEditing = null;
+    msgDraft = '';
+    signature = null;
+
+    ctx.saveSettingsDebounced?.();
+    // refreshUI 会经登记表重画这个窗口（此刻两处编辑都关着）
+    refreshUI(ctx);
+
+    const meta = getSessionMessageMeta(kind);
+    toast(`「${meta?.label ?? kind}时发送」的开场白已保存`);
+}
+
+function cancelMsg() {
+    if (!msgEditing) {
+        return;
+    }
+
+    const ctx = getContext();
+    msgEditing = null;
+    msgDraft = '';
+    signature = null;
+    renderWindow(ctx, true);
+}
+
+/** 把草稿换成默认文本（不落盘，等用户点保存） */
+function resetMsg() {
+    if (!msgEditing) {
+        return;
+    }
+
+    msgDraft = getSessionMessageDefault(msgEditing);
+
+    const win = document.getElementById(PROMPT_WINDOW_ID);
+    const row = win?.querySelector(`[data-msg="${attrEscape(msgEditing)}"]`);
+    const area = row?.querySelector('[data-field="msg"]');
+    if (area) {
+        area.value = msgDraft;
+    }
+    const count = row?.querySelector('.thrive-prompts__count');
+    if (count) {
+        count.textContent = msgCountText(msgDraft);
     }
 }
 
@@ -952,7 +1172,6 @@ async function confirmDelete(id) {
 
     signature = null;
     ctx.saveSettingsDebounced?.();
-    syncFromContext(ctx);
     refreshUI(ctx);
     // 删的是别的条目、手里还开着编辑框：这一行得从 DOM 里拿掉，草稿本身还在
     renderWindow(ctx, Boolean(editing));
@@ -973,7 +1192,6 @@ function togglePrompt(id, enabled) {
 
     signature = null;
     ctx.saveSettingsDebounced?.();
-    syncFromContext(ctx);
     refreshUI(ctx);
     if (editing) {
         refreshRowChrome(ctx, settings, id);
@@ -1003,7 +1221,6 @@ function changeRole(id, role) {
      */
     signature = null;
     ctx.saveSettingsDebounced?.();
-    syncFromContext(ctx);
     refreshUI(ctx);
     if (editing) {
         refreshRowChrome(ctx, settings, id);
@@ -1015,12 +1232,11 @@ function resetOrder() {
     const settings = ensureSettings(ctx);
     const extra = getCustomPrompts(settings).map(item => item.id);
 
-    // 分界线在最前，内置卡按默认顺序接在后面，自建提示词收在尾部
-    settings.promptOrder = normalizeOrder([CARD_ID.ANCHOR], extra);
+    // 学习规则在最前、目标内容在最后，自建提示词按默认规则夹在中间
+    settings.promptOrder = normalizeOrder(DEFAULT_PROMPT_ORDER, extra);
 
     signature = null;
     ctx.saveSettingsDebounced?.();
-    syncFromContext(ctx);
     refreshUI(ctx);
     if (editing) {
         renderWindow(ctx, true);
@@ -1214,13 +1430,13 @@ async function importPreset(sourceName, text) {
         const result = applyPresetImport(settings, parsed);
 
         editing = null;
+        msgEditing = null;
         signature = null;
 
         ctx.saveSettingsDebounced?.();
-        syncFromContext(ctx);
         refreshUI(ctx);
 
-        toast(`已从「${sourceName}」导入 ${result.prompts.length} 条提示词（系统区 ${result.head} / 尾部 ${result.tail}）`);
+        toast(`已从「${sourceName}」导入 ${result.prompts.length} 条提示词`);
     } finally {
         importBusy = false;
         win?.classList.remove('thrive-prompts--busy');
@@ -1244,17 +1460,17 @@ function buildImportMessage(sourceName, counts) {
 
     const notes = [];
     if (counts.triggered > 0) {
-        notes.push(`${counts.triggered} 条带触发器，触发器会被忽略（启用即总是注入）`);
+        notes.push(`${counts.triggered} 条带触发器，触发器会被忽略（启用即总是带上）`);
     }
     if (counts.core > 0) {
-        notes.push(`${counts.core} 条核心系统提示词（主提示词 / 越狱等）；如果当前预设也在用，注意会在请求里出现两次`);
+        notes.push(`${counts.core} 条核心系统提示词（主提示词 / 越狱等）；它们是 ST 聊天用的，放在学习会话里可能重复交代同一件事`);
     }
 
     return `从「${sourceName}」导入 ${counts.imported} 条提示词：`
-        + `启用 ${counts.enabled} / 停用 ${counts.disabled}，系统区 ${counts.head} / 尾部 ${counts.tail}。`
+        + `启用 ${counts.enabled} / 停用 ${counts.disabled}，按预设里的顺序夹在「学习规则」与「目标内容」之间。`
         + (skipped.length ? `跳过 ${skipped.join('、')}。` : '')
         + (notes.length ? `${notes.join('；')}。` : '')
-        + '导入会替换当前所有自建提示词；学习块等内置卡保留并恢复启用。继续吗？';
+        + '导入会替换当前所有自建提示词；学习规则与目标内容保留并恢复启用。继续吗？';
 }
 
 /* ------------------------------------------------------------------ 拖动 */
@@ -1302,8 +1518,6 @@ function initSortable() {
 
             settings.promptOrder = normalizeOrder(ids, extra);
             ctx.saveSettingsDebounced?.();
-            syncFromContext(ctx);
-
             /*
              * 等这一轮 sortable 的收尾跑完再重绘：在 update 里直接换掉列表节点，
              * jQuery UI 手里的 helper / placeholder 会指向孤儿节点。
