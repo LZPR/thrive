@@ -2097,11 +2097,21 @@ body.thrive-panel-dragging {
 /*
  * 一行两个。工具卡片的正文是一句说明，单列会让这块变成一条很长的竖线；
  * 两列刚好把窗口宽度用满，数量再多也只是往下长。
+ *
+ * 固定两列而不是 auto-fill：窗口本身就是 min(780px, 96vw)，auto-fill 在宽窗口里
+ * 会自己排到三列，卡片窄到一行放不下那句用途。
  */
 .thrive-prompts__tools {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+}
+
+/* 手机竖屏：两列只剩 180px 左右，说明会被截成一条条短句，不如单列 */
+@media (max-width: 560px) {
+    .thrive-prompts__tools {
+        grid-template-columns: 1fr;
+    }
 }
 
 .thrive-prompts__tool {
