@@ -28,6 +28,7 @@ const modules = new Map();
 const hostExports = {
     'extensions.js': { getContext: () => { throw new Error('Host context accessed during import'); } },
     'popup.js': { POPUP_RESULT: {}, POPUP_TYPE: {}, callGenericPopup: () => {} },
+    'preset-manager.js': { getPresetManager: () => null },
 };
 
 async function load(path) {

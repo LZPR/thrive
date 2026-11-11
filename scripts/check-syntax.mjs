@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const ignored = new Set(['.git', '.workbuddy', 'node_modules', 'test-results', 'playwright-report', 'coverage']);
+const ignored = new Set(['.git', '.workbuddy', '.test-sandbox', 'node_modules', 'test-results', 'playwright-report', 'coverage']);
 
 async function collect(directory) {
     const entries = await readdir(directory, { withFileTypes: true });

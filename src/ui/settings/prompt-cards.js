@@ -9,7 +9,7 @@
  * 而新增 / 删除 / 改角色 / 导入预设又都需要横向空间。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import {
     countChars,
     getCardText,

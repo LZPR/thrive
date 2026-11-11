@@ -8,7 +8,7 @@
  * 各写一套迟早会打架，谁也不知道该以谁为准。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { DEFAULT_SETTINGS, ensureSettings } from '../store.js';
 import { PANEL_ID } from './shared.js';
 

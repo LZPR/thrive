@@ -27,7 +27,7 @@
  * 并在下面两处各加一行。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import { refreshUI, registerSurfaces } from '../refresh.js';
 import { LOG } from '../shared.js';
 import { bindAppearanceControls, syncAppearanceControls } from './appearance.js';

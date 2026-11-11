@@ -9,7 +9,7 @@
  * 反过来 refreshUI 又要调它们的刷新函数，直接互相 import 就是环。用一张登记表打平。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { getCompressSnapshot, requestCompressScan } from '../compress.js';
 import { COMPRESS_EVENT } from '../events.js';
 import { ensureSettings, isChatAvailable } from '../store.js';

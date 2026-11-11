@@ -22,7 +22,7 @@
  * 这套工具"的自然结果，也挡住了会话结束后残留的调用。
  */
 
-import { getContext } from '../../../../extensions.js';
+import { getContext } from './platform/sillytavern/context.js';
 import {
     BOOK_SEEN,
     bookReadKey,

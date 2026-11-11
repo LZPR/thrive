@@ -5,7 +5,7 @@
  * 但不占设置页的位置——设置页只放跨对话一致的设置（ADR-043）。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { TRIGGER, intervalProgress, parseKeywords } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { summarizeDraft } from '../draft.js';

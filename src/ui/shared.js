@@ -5,8 +5,8 @@
  * 那是 settings / panel / badge / status 各自的活。
  */
 
-import { getContext } from '../../../../../extensions.js';
-import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../../../../../popup.js';
+import { getContext } from '../platform/sillytavern/context.js';
+import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../platform/sillytavern/popup.js';
 
 export const LOG = '[Thrive]';
 export const BADGE_ID = 'thrive_badge';

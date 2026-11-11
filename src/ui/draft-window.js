@@ -15,7 +15,7 @@
  * order、position、probability 这些工具从来不碰，摆出来只会让人以为它们可能变。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { buildDiffRows } from '../diff.js';
 import { PANEL_EVENT } from '../events.js';
 import { summarizeDraft } from '../draft.js';

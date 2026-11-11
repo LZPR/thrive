@@ -8,7 +8,7 @@
  * 「把旧日志移出上下文」这件事已经没有对象可作用（ADR-050）。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import { ensureSettings, DEFAULT_SETTINGS } from '../../store.js';
 import { openCompressPanel } from '../compress-panel.js';
 import { applyPanelLayout } from '../panel-layout.js';

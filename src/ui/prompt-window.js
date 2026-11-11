@@ -22,8 +22,8 @@
  * 就放弃未保存的内容（不弹二次确认），因为草稿从来没离开过这个窗口。
  */
 
-import { getContext } from '../../../../../extensions.js';
-import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../../../../../popup.js';
+import { getContext } from '../platform/sillytavern/context.js';
+import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../platform/sillytavern/popup.js';
 import {
     PROMPT_ROLE,
     PROMPT_CARD_META,
@@ -1509,7 +1509,7 @@ function closeImportMenu() {
  */
 async function listStPresets() {
     try {
-        const { getPresetManager } = await import('../../../../../preset-manager.js');
+        const { getPresetManager } = await import('../platform/sillytavern/presets.js');
         const manager = getPresetManager('openai');
         const list = manager?.getPresetList?.();
         if (!list?.presets || !list?.preset_names) {

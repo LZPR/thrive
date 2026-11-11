@@ -17,7 +17,7 @@
  * 文件太大或尺寸太大时先缩一遍，否则一张图就能吃掉半个上下文。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { TEACH_MAX_CHARS, TEACH_MAX_IMAGES, startLearning } from '../learning.js';
 import { escapeHtml } from '../util.js';
 import { TEACH_ID, LOG, toast } from './shared.js';

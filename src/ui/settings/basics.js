@@ -5,7 +5,7 @@
  * 当前对话的开 / 关在浮动面板里（ADR-043 / ADR-044）。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import { refreshUI } from '../refresh.js';
 import { ensureSettings } from '../../store.js';
 import { byId, syncCheckbox } from './common.js';

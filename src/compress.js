@@ -22,7 +22,7 @@
  * 通过 events.js 广播出去。
  */
 
-import { getContext } from '../../../../extensions.js';
+import { getContext } from './platform/sillytavern/context.js';
 import { getCompactMessage } from './prompt.js';
 import { isWorldbookDesc, readDesc, writeDesc } from './desc.js';
 import { isReservedEntry } from './desc-entry.js';

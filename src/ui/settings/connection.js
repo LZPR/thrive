@@ -11,7 +11,7 @@
  * 中途换路会让同一场里的前后两轮跑到不同模型上。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import { listConnectionProfiles } from '../../session-transport.js';
 import { ensureSettings } from '../../store.js';
 import { byId, paintHint } from './common.js';

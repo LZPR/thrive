@@ -11,7 +11,7 @@
  * 那里和浮动面板挨着，两个"面板"的入口放一处。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import { requestCompressScan } from '../../compress.js';
 import { LIMIT_SPECS, clampLimit, readLimits } from '../../limits.js';
 import { ensureSettings } from '../../store.js';

@@ -19,7 +19,7 @@
  * （徽章也要读它）。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { TRIGGER, describeTrigger } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { getDescTargetSnapshot, isWorldbookDesc } from '../desc.js';

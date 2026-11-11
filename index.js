@@ -1,3 +1,4 @@
+import { loadSlashCommands } from './src/platform/sillytavern/slash-commands.js';
 /**
  * Thrive · 学习模式 —— 入口
  *
@@ -19,7 +20,7 @@
  *   · 一次性会话框架：独立消息栈 + 直连传输 + 会话私有工具（src/session*.js，ADR-049）
  */
 
-import { getContext } from '../../../extensions.js';
+import { getContext } from './src/platform/sillytavern/context.js';
 import { evaluateAuto, describeTrigger } from './src/auto-learn.js';
 import { requestCompressScan } from './src/compress.js';
 import { clearLearningQueue, startLearning, stopLearning } from './src/learning.js';
@@ -104,11 +105,7 @@ async function init() {
  */
 async function initSlashCommand() {
     try {
-        const [{ SlashCommandParser }, { SlashCommand }, { ARGUMENT_TYPE, SlashCommandArgument }] = await Promise.all([
-            import('../../../slash-commands/SlashCommandParser.js'),
-            import('../../../slash-commands/SlashCommand.js'),
-            import('../../../slash-commands/SlashCommandArgument.js'),
-        ]);
+        const [{ SlashCommandParser }, { SlashCommand }, { ARGUMENT_TYPE, SlashCommandArgument }] = await loadSlashCommands();
 
         if (typeof SlashCommandParser?.addCommandObject !== 'function'
             || typeof SlashCommand?.fromProps !== 'function') {

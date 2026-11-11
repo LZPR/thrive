@@ -15,7 +15,7 @@
  * 开关在面板里，点一下徽章就看见。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import { TRIGGER, describeTrigger, intervalProgress, parseKeywords } from '../auto-learn.js';
 import { getCompressSnapshot } from '../compress.js';
 import { LEARNING_EVENT, notifyPanelToggle } from '../events.js';

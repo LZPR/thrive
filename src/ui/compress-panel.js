@@ -17,7 +17,7 @@
  * 组的按钮上，两处都调 openCompressPanel。
  */
 
-import { getContext } from '../../../../../extensions.js';
+import { getContext } from '../platform/sillytavern/context.js';
 import {
     getCompressSnapshot,
     refreshCompressState,

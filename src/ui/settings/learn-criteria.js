@@ -9,7 +9,7 @@
  * 面板只**读**这两个值来算"还差几条"，没有写入口（ADR-045）。
  */
 
-import { getContext } from '../../../../../../extensions.js';
+import { getContext } from '../../platform/sillytavern/context.js';
 import { LEARN_INTERVAL_MAX, clampInterval, parseKeywords } from '../../auto-learn.js';
 import { ensureSettings } from '../../store.js';
 import { refreshUI } from '../refresh.js';
