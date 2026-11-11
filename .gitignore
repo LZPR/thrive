@@ -1,6 +1,10 @@
 # 工作区本地文件（不入库）
 .workbuddy/
 node_modules/
+coverage/
+test-results/
+playwright-report/
+.test-sandbox/
 
 # 编辑器 / 系统
 .vscode/
