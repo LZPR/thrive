@@ -65,7 +65,8 @@ export function updatePromptStats(ctx, settings) {
     const order = getPromptOrder(settings);
     const cards = order.filter(id => isPromptEnabled(settings, id));
     if (cards.length === 0) {
-        el.textContent = '所有卡片都停用了：触发学习会因为预设为空而失败。';
+        // 注入位永远在、永远启用，正常走不到这里；走到说明设置被手改坏了
+        el.textContent = '预设里一条都没有：触发学习会因为预设为空而失败。';
         return;
     }
 
@@ -75,5 +76,5 @@ export function updatePromptStats(ctx, settings) {
 
     el.textContent = `每次学习约 ${presetChars + learnChars} 字（预设 ${presetChars} + 开场白 ${learnChars}）`
         + '，目标内容里的对话记录另外算。'
-        + `压缩开场白 ${compactChars} 字。`;
+        + `压缩用的开场白 ${compactChars} 字。`;
 }

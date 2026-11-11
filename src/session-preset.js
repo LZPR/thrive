@@ -51,7 +51,7 @@ export function compilePreset(ctx, preset = null) {
     }
 
     if (runs.length === 0) {
-        return { ok: false, error: 'SESSION_NO_PRESET', detail: '预设编译完是空的：检查学习规则与目标内容是不是都被停用了' };
+        return { ok: false, error: 'SESSION_NO_PRESET', detail: '预设编译完是空的：目标内容没有内容可发，其余卡片也都没启用' };
     }
 
     return {

@@ -508,8 +508,8 @@ function locateByUid(data, uid) {
  * 摘要而不是它自己的记忆（见 compact.js 的注释）。
  *
  * 区别只在触发方式：从"工具返回里自动附一句"改成"用户在面板里勾选后手动发起"，
- * 所以压缩指令仍然可编辑——它就是提示词编辑器里那段「压缩时发送的 User 消息」
- * （settings.compactUserMessage，见 prompt.js 的 getCompactMessage）。
+ * 所以压缩指令仍然可编辑——它就是提示词编辑器「会话开场白」里那一段压缩指令
+ * （settings.compactTask，见 prompt.js 的 getCompactMessage；它后面才是素材）。
  *
  * 还没接线，缺的是三件事：调模型的入口、结果预览、逐条确认后才写回。在那之前
  * 这里只返回 NOT_IMPLEMENTED，界面据此说明"还没实现"，绝不假装压过。

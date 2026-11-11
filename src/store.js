@@ -12,7 +12,8 @@
 import { DESC_STORAGE } from './desc-entry.js';
 import { notifyPanel } from './events.js';
 import { LIMIT_DEFAULTS, readLimit } from './limits.js';
-import { CARD_ID } from './prompt-order.js';
+import { CARD_ID, isPinnedCard } from './prompt-order.js';
+import { splitLegacySessionMessage } from './prompt.js';
 import { fnv1a } from './util.js';
 
 export const MODULE_NAME = 'thrive';
@@ -63,23 +64,18 @@ export const DEFAULT_SETTINGS = Object.freeze({
     promptRoles: {},
 
     /**
-     * 学习会话的两段通用提示词。
-     *
-     *   learnPrompt   系统规则（会话里做什么、产出方式、守什么规矩）
-     *   targetPrompt  目标内容卡的描述行（默认「以下是目标内容：」），
-     *                 真正的内容由 learning.js 在发请求前追加在后面
-     *
+     * 学习会话用到的几段文字。`targetPrompt` 是目标内容描述行（默认
+     * 「以下是目标内容：」），真正的内容由 learning.js 在发请求前追加在后面。
      * 空串 = 使用 prompt.js 里对应的 DEFAULT_*（默认文本随版本更新时老用户也能拿到新版）。
-     * 两段都由学习与压缩共用，所以不带任何"这一轮学多少"之类的一次性说法。
+     *
+     * 另外三段是「会话开场白」那一组（ADR-053）：`sessionRules` 是学习、压缩以及
+     * 以后别的任务共用的一套规则，`learningTask` / `compactTask` 才是各场自己的指令。
+     * 拆开是因为规则改一次就该全体生效，不该在两段开场白里各抄一份。
      */
-    learnPrompt: '',
     targetPrompt: '',
-    /**
-     * 两类会话各自的 User 消息（开场白）。空串 = 用 prompt.js 的默认文本。
-     * 它们不是提示词卡片：卡片是"模型该知道的"，这一条是"这一次要它做什么"。
-     */
-    learningUserMessage: '',
-    compactUserMessage: '',
+    sessionRules: '',
+    learningTask: '',
+    compactTask: '',
     /*
      * 「角色描述存哪儿」（descStorage）与「可写书」（writableBook）不在这里：
      * 它们按对话保存（ADR-044），见 createChatState。老版本留在全局的旧值只当
@@ -276,13 +272,18 @@ function normalizeCustomPrompts(raw) {
     return same ? raw : out;
 }
 
-/** 停用的内置卡：只认认识的 id，去重 */
+/**
+ * 停用的内置卡：只认认识的 id、去重，并且丢掉注入位。
+ *
+ * 注入位不能停用（`setPromptEnabled` 会拒），所以老设置里万一带了它，这里顺手
+ * 清掉——留着一条永远不生效的停用记录，只会让人以为它真的被关了。
+ */
 function normalizeDisabledCards(raw) {
     if (!Array.isArray(raw)) {
         return [];
     }
 
-    const known = new Set(Object.values(CARD_ID));
+    const known = new Set(Object.values(CARD_ID).filter(id => !isPinnedCard(id)));
     const source = raw;
     const out = [];
 
@@ -295,15 +296,16 @@ function normalizeDisabledCards(raw) {
     return out.length === source.length && out.every((id, index) => id === source[index]) ? raw : out;
 }
 
-/** 内置卡的角色覆盖：只留 1/2（0 是默认值，存不存一样），非法值当没写 */
+/** 内置卡的角色覆盖：只留认识的、可改角色的卡，值只留 1/2（0 是默认，存不存一样） */
 function normalizePromptRoles(raw) {
     if (!isPlainObject(raw)) {
         return {};
     }
 
+    const known = new Set(Object.values(CARD_ID).filter(id => !isPinnedCard(id)));
     const out = {};
     for (const [id, role] of Object.entries(raw)) {
-        if (role === 1 || role === 2) {
+        if (known.has(id) && (role === 1 || role === 2)) {
             out[id] = role;
         }
     }
@@ -335,10 +337,10 @@ export function ensureSettings(ctx) {
      * 学习一律发生在独立会话里，聊天请求里不再出现任何插件提示词与工具。
      * 因此这一版要搬的东西比较多，全部只搬一次：
      *
-     *   blockText / blockCommon / blockActive / blockPassive → learnPrompt
+     *   blockText / blockCommon / blockActive / blockPassive → sessionRules
      *   passiveInterval / passiveKeywords                  → learnInterval / learnKeywords
      *   passiveByDefault                                   → enabledByDefault（取或）
-     *   compactPrompt                                      → compactUserMessage
+     *   compactPrompt                                      → compactTask
      *   blockPosition / promptInject / toolsResident / toolPrompt → 丢掉
      *
      * 主动段与被动段不再存在，只保留通用段：它原本写的就是"和这一轮学多少无关"的规则。
@@ -354,8 +356,8 @@ export function ensureSettings(ctx) {
 
     if (Object.hasOwn(settings, 'blockCommon')) {
         const legacy = typeof settings.blockCommon === 'string' ? settings.blockCommon : '';
-        if (!String(settings.learnPrompt ?? '').trim() && legacy.trim()) {
-            settings.learnPrompt = legacy;
+        if (!String(settings.sessionRules ?? '').trim() && legacy.trim()) {
+            settings.sessionRules = legacy;
         }
         delete settings.blockCommon;
         dirty = true;
@@ -413,10 +415,54 @@ export function ensureSettings(ctx) {
 
     if (Object.hasOwn(settings, 'compactPrompt')) {
         const legacy = typeof settings.compactPrompt === 'string' ? settings.compactPrompt : '';
-        if (!String(settings.compactUserMessage ?? '').trim() && legacy.trim()) {
-            settings.compactUserMessage = legacy;
+        /*
+         * v0.33 起这一项改叫 compactUserMessage。两个键同时还在时以后者为准：
+         * 它是后来那一版真正给用户编辑的，compactPrompt 只是更早的一份残影。
+         */
+        const newer = typeof settings.compactUserMessage === 'string' ? settings.compactUserMessage.trim() : '';
+        if (!String(settings.compactTask ?? '').trim() && !newer && legacy.trim()) {
+            settings.compactTask = legacy;
         }
         delete settings.compactPrompt;
+        dirty = true;
+    }
+
+    /*
+     * v0.36：预设换成"描述行 + 注入位"，开场白换成"通用规则 + 本场指令"（ADR-053）。
+     *
+     *   learnPrompt                               → sessionRules
+     *   learningUserMessage / compactUserMessage  → 拆成 sessionRules + learningTask / compactTask
+     *
+     * 老的两段开场白里本来就抄着当时的规则原文，`splitLegacySessionMessage` 把开头
+     * 那段剥出来还给规则、剩下的留给本场指令——拼起来和用户当初看到的一字不差。
+     * 认不出开头（用户整段改写过）就整段当指令，规则仍是默认文本。
+     */
+    if (Object.hasOwn(settings, 'learnPrompt')) {
+        const legacy = typeof settings.learnPrompt === 'string' ? settings.learnPrompt : '';
+        if (!String(settings.sessionRules ?? '').trim() && legacy.trim()) {
+            settings.sessionRules = legacy;
+        }
+        delete settings.learnPrompt;
+        dirty = true;
+    }
+
+    for (const [legacyKey, taskKey] of [
+        ['learningUserMessage', 'learningTask'],
+        ['compactUserMessage', 'compactTask'],
+    ]) {
+        if (!Object.hasOwn(settings, legacyKey)) {
+            continue;
+        }
+
+        const legacy = typeof settings[legacyKey] === 'string' ? settings[legacyKey] : '';
+        const split = splitLegacySessionMessage(legacy);
+        if (split.rules && !String(settings.sessionRules ?? '').trim()) {
+            settings.sessionRules = split.rules;
+        }
+        if (split.task && !String(settings[taskKey] ?? '').trim()) {
+            settings[taskKey] = split.task;
+        }
+        delete settings[legacyKey];
         dirty = true;
     }
 

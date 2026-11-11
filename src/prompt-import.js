@@ -18,9 +18,9 @@
  *   · 注入位置与深度：新架构里预设就是一列消息，没有系统区 / 尾部之分
  *   · 采样参数、正则、脚本、世界书绑定等预设里的其它所有东西
  *
- * 顺序怎么排：**学习规则在最前、目标内容在最后**，导入的条目按 ST 的顺序夹在中间。
- * 学习规则是这个会话的"任务书"，模型得先读到它；目标内容是待处理的材料，放在最后
- * 紧挨着开场白，模型的注意力才对得准。
+ * 顺序怎么排：**描述行在最前、注入位在最后**，导入的条目按 ST 的顺序夹在中间。
+ * 描述行是"下面是这次要看的东西"的引子，得先读到；导入的条目是规则，排在材料
+ * 前面；注入位是待处理的材料，放在最后紧挨着开场白，模型的注意力才对得准。
  */
 
 import { CARD_ID } from './prompt-order.js';
@@ -36,8 +36,8 @@ const ROLE_BY_NAME = Object.freeze({
 /** 全局顺序表用的 character_id（ST 的 PromptManager.configuration.promptOrder.dummyId） */
 const GLOBAL_ORDER_ID = 100000;
 
-/** 导入后两头必须留着的内置卡 */
-const REQUIRED_HEAD = CARD_ID.LEARNING;
+/** 导入后两头必须留着的内置卡：描述行在最前，注入位在最后 */
+const REQUIRED_HEAD = CARD_ID.TARGET_DESC;
 const REQUIRED_TAIL = CARD_ID.TARGET;
 
 /**
@@ -202,7 +202,7 @@ export function parseStPreset(raw) {
 /**
  * 把解析结果写进设置。
  *
- * 顺序表：`[学习规则] [导入的条目…] [目标内容]`
+ * 顺序表：`[描述行] [导入的条目…] [注入位]`
  * 内置卡一律恢复启用、角色回到系统：它们是"必须的部分"，导入不该把它们带走。
  * 原有的自建提示词会被整批替换——只保留一份预设，不做多份管理。
  *

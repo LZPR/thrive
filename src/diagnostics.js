@@ -82,8 +82,8 @@ export const ERROR_HINTS = Object.freeze({
         + '多半是 ST 升级改了实现，需要按新版本重新核对。',
     SESSION_BUSY: '已经有一场学习会话在跑。等它结束，或用 `/thrive stop` 中止它。',
     SESSION_QUEUE_FULL: '排队的学习任务已经满了。等几场跑完再触发，或先 `/thrive stop` 清掉正在跑的那场。',
-    SESSION_NO_PRESET: '这一场没有可发送的预设：学习规则与目标内容都被停用了，'
-        + '或者目标内容为空。到设置页的「提示词」里至少启用一条。',
+    SESSION_NO_PRESET: '这一场没有可发送的预设：目标内容是空的，'
+        + '或者描述行与自建提示词全被停用了。目标内容来自对话记录——对话里没有可见消息时就是空的。',
     SESSION_NO_MESSAGE: '这一场没有开场白：学习用的 User 消息是空的。'
         + '到设置页的「提示词」里填一句，或点「恢复默认」。',
     SESSION_PROFILE_UNAVAILABLE: '选中的连接配置用不了：Connection Manager 扩展不在或被停用了。'

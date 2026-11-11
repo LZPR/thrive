@@ -65,7 +65,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.35.0 · 连接配置 · 串行排队 · 撤掉环境诊断`);
+    console.log(`${LOG} 启动 v0.36.0 · 目标内容拆描述/注入 · 规则共用 · 工具列表`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

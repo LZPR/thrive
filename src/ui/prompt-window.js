@@ -3,11 +3,12 @@
  *
  * 入口只有一处：设置页「提示词」折叠块里的按钮。标题栏也能拖，Esc 关闭。
  *
- * 这里编辑的是**一场学习会话的预设**（ADR-050）：
+ * 这里编辑的是**一场学习会话的预设**（ADR-050、ADR-053）：
  *   · 卡片 = 预设里的一条消息，按列表顺序发出（没有系统区 / 尾部之分）
- *   · 内置卡两张：学习规则、目标内容（后者的正文由插件在触发时追加）
+ *   · 目标内容拆成两条：可改可删的**描述行**，和没有正文、只在运行时被填内容的**注入位**
  *   · 自建提示词：新增 / 删除 / 改名、逐条启用与角色、拖动排序
- *   · 会话开场白：学习 / 压缩各一段，作为那一场会话的第一条 User 消息
+ *   · 折叠块「会话开场白」：通用规则一段（学习 / 压缩共用）+ 各场自己的指令
+ *   · 折叠块「工具列表」：这一版带出去的全部工具，名字、用途与激活状态
  *   · 导入 SillyTavern 预设：可以从文件选，也可以直接从 ST 已装的预设里挑
  *
  * 为什么独立成窗口而不是加厚设置页：一张提示词动辄几百字，设置页那条 480px
@@ -29,7 +30,6 @@ import {
     SESSION_MESSAGE_KINDS,
     addCustomPrompt,
     countChars,
-    deleteCustomPrompt,
     findCustomPrompt,
     getCardSettingKey,
     getCardState,
@@ -43,6 +43,7 @@ import {
     getSessionMessageMeta,
     isCustomPrompt,
     isPromptEnabled,
+    removePromptCard,
     resetPromptText,
     roleLabel,
     setPromptEnabled,
@@ -50,9 +51,10 @@ import {
     setPromptText,
     setSessionMessage,
 } from '../prompt.js';
-import { CARD_ID, DEFAULT_PROMPT_ORDER, normalizeOrder } from '../prompt-order.js';
+import { DEFAULT_PROMPT_ORDER, isPinnedCard, normalizeOrder } from '../prompt-order.js';
 import { applyPresetImport, importErrorMessage, parseStPreset } from '../prompt-import.js';
 import { ensureSettings } from '../store.js';
+import { getToolDefs } from '../tools.js';
 import { escapeHtml, fnv1a } from '../util.js';
 import { refreshUI, registerSurfaces } from './refresh.js';
 import { LOG, PROMPT_WINDOW_ID, askConfirm, toast } from './shared.js';
@@ -77,6 +79,14 @@ let importBusy = false;
 
 /** 拖动窗口的状态 */
 let drag = null;
+
+/**
+ * 折叠块的展开状态。
+ *
+ * 整块重绘会把 `<details>` 的展开状态一起冲掉——保存一条提示词之后「工具列表」
+ * 自己合上，会让人以为点错了。所以状态存在这里，渲染时照着写回 open。
+ */
+const folds = new Set();
 
 /* ------------------------------------------------------------------ 挂载 */
 
@@ -121,6 +131,8 @@ export function initPromptWindow() {
     win.addEventListener('change', onChange);
     win.addEventListener('keydown', onKeyDown);
     win.addEventListener('pointerdown', onPointerDown);
+    // toggle 不冒泡，用捕获阶段接：details 自己开合时把状态记下来，重绘时照原样写回
+    win.addEventListener('toggle', onFoldToggle, true);
     win.querySelector('#thrive_prompts_file')?.addEventListener('change', onFilePicked);
 
     document.addEventListener('pointermove', onPointerMove);
@@ -212,8 +224,23 @@ function dropUnsavedNew() {
 
     const ctx = getContext();
     const settings = ensureSettings(ctx);
-    if (deleteCustomPrompt(settings, editing.id)) {
+    if (removePromptCard(settings, editing.id)) {
         ctx.saveSettingsDebounced?.();    }
+}
+
+/** 折叠块开合：记下来，重绘时还原（不然保存一条提示词就把折叠块全合上了） */
+function onFoldToggle(event) {
+    const fold = event.target;
+    const key = fold?.dataset?.fold;
+    if (!key) {
+        return;
+    }
+
+    if (fold.open) {
+        folds.add(key);
+    } else {
+        folds.delete(key);
+    }
 }
 
 /* ------------------------------------------------------------------ 重绘 */
@@ -285,23 +312,23 @@ function buildView(ctx, settings) {
         const meta = PROMPT_CARD_META[id];
         const status = getCardState(settings, id);
         const text = getCardText(settings, id);
+        // 注入位没有正文：它的内容是触发那一刻才有的，界面上不显示"0 字"
+        const pinned = isPinnedCard(id);
 
         return {
             id,
             custom,
+            pinned,
             kind: custom ? 'custom' : 'builtin',
             name: getPromptName(settings, id),
             hint: custom ? '自建提示词 · 按列表顺序发出' : (meta?.hint ?? ''),
-            // 行上那截说明：“这是张什么卡”，不是“这一轮会不会生效”
-            note: id === CARD_ID.TARGET ? '正文随触发追加' : '',
-            status: status.note,
             role: getPromptRole(settings, id),
             enabled: isPromptEnabled(settings, id),
-            // 目标内容卡可编辑的是那句描述行，正文由插件追加
-            editable: custom || Boolean(meta?.editable),
-            deletable: custom,
+            editable: !pinned && (custom || Boolean(meta?.editable)),
+            deletable: !pinned && (custom || Boolean(meta?.removable)),
             canReset: Boolean(getCardSettingKey(id)),
-            chars: countChars(text),
+            status: status.note,
+            chars: pinned ? null : countChars(text),
             // 只在签名里用：正文变了要重算行尾的字数（同样的字数换了内容也要重画）
             digest: fnv1a(text),
         };
@@ -321,6 +348,7 @@ function buildView(ctx, settings) {
             kind,
             label: meta?.label ?? kind,
             hint: meta?.hint ?? '',
+            shared: meta?.shared === true,
             open,
             chars: countChars(text),
             digest: fnv1a(text),
@@ -328,6 +356,8 @@ function buildView(ctx, settings) {
             custom: !open && text !== getSessionMessageDefault(kind),
         };
     });
+
+    const tools = getToolsView();
 
     const footHint = editing
         ? 'Ctrl+Enter 保存，Esc 取消；打字时输入 {{ 会弹出宏补全，右上角可全屏编辑。'
@@ -338,11 +368,33 @@ function buildView(ctx, settings) {
         order,
         items,
         messages,
-        meta: `共 ${items.length} 条 · 启用 ${enabled} 条 · 开场白 ${messages.length} 段`,
+        tools,
+        meta: `共 ${items.length} 条 · 启用 ${enabled} 条 · 开场白 ${messages.length} 段 · 工具 ${tools.length} 个`,
         footHint,
         editingId: editing?.id ?? '',
         msgEditing,
     };
+}
+
+/**
+ * 工具列表的视图。
+ *
+ * 「忽略对话」是用户给的口径：这一栏回答"这一版插件带出去哪些工具"，不回答
+ * "这一场对话能不能用"——后者要看有没有选可写书，那个条件在浮动面板里说。
+ * 所以这里一律显示激活，只把作用域写在小字里。
+ */
+function getToolsView() {
+    try {
+        return getToolDefs().map(def => ({
+            name: String(def.name ?? ''),
+            label: String(def.displayName ?? def.name ?? ''),
+            description: String(def.description ?? ''),
+            active: true,
+        }));
+    } catch (err) {
+        console.warn(`${LOG} 读不到工具列表`, err);
+        return [];
+    }
 }
 
 function signatureOf(view) {
@@ -397,22 +449,52 @@ function renderBody(view) {
         ? '<div class="thrive-prompts__empty">这里还没有提示词。</div>'
         : `<div class="thrive-prompts__list">${view.items.map(renderItem).join('')}</div>`;
 
-    return `${list}${renderMessages(view.messages)}`;
+    return `${list}${renderMessages(view.messages)}${renderTools(view.tools)}`;
+}
+
+/**
+ * 折叠块的外壳。
+ *
+ * 用原生 `<details>` 而不是自己做一套：键盘可操作、`open` 是属性可以直接写进
+ * 字符串、也不需要在重绘之后重新绑事件。状态另存在 `folds` 里，重绘时照着写回。
+ *
+ * @param {string} key 折叠块标识（msgs / tools）
+ * @param {string} title
+ * @param {string} note 标题右侧那行小字
+ * @param {string} inner
+ */
+function renderFold(key, title, note, inner) {
+    const open = folds.has(key) ? ' open' : '';
+    return `<details class="thrive-prompts__fold" data-fold="${key}"${open}>
+        <summary class="thrive-prompts__fold-head">
+            <span class="thrive-prompts__fold-title">${escapeHtml(title)}</span>
+            <small class="thrive-prompts__fold-note">${escapeHtml(note)}</small>
+        </summary>
+        <div class="thrive-prompts__fold-body">${inner}</div>
+    </details>`;
 }
 
 function renderItem(item) {
     const open = editing?.id === item.id;
+
     const editButton = item.editable
         ? `<button type="button" class="menu_button thrive-prompts__act${open ? ' thrive-prompts__act--open' : ''}"
                 data-act="edit" title="${open ? '收起编辑区' : '展开编辑：改名称、角色、正文与删除'}">
                 ${open ? '收起' : '编辑'}</button>`
         : '';
 
-    const note = [item.note, `${item.chars} 字`].filter(Boolean).join(' · ');
+    // 注入位没有抓手也没有开关：它不参与排序，也不能被停用
+    const grip = item.pinned
+        ? '<span class="thrive-prompts__grip thrive-prompts__grip--locked fa-solid fa-lock" title="固定位置：始终在最后，代表这一场要看的内容"></span>'
+        : '<span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序"></span>';
+
+    const note = item.pinned
+        ? '运行时注入 · 内容随触发生成'
+        : `${item.chars} 字`;
 
     return `<article class="thrive-prompts__item" data-prompt="${item.id}"
-        data-kind="${item.kind}" data-enabled="${item.enabled}">
-        <span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序"></span>
+        data-kind="${item.kind}" data-enabled="${item.enabled}" data-pinned="${item.pinned}">
+        ${grip}
         <div class="thrive-prompts__main">
             <div class="thrive-prompts__head">
                 <span class="thrive-prompts__name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
@@ -421,17 +503,18 @@ function renderItem(item) {
             <div class="thrive-prompts__note" title="${escapeHtml(item.status)}">${note}</div>
         </div>
         ${editButton}
-        ${renderSwitch(item)}
+        ${item.pinned ? '' : renderSwitch(item)}
         ${open ? renderEditor(item) : ''}
     </article>`;
 }
 
 /**
- * 会话开场白：两段，学习 / 压缩。
+ * 会话开场白：规则一段 + 每种任务一段，放在列表下面的折叠块里。
  *
- * 它们不是"预设里的一段"，所以不参与拖动排序、也没有角色：它们固定是那一场会话的
- * 第一条 User 消息，在整份预设之后发出。放在列表下面，是因为"先有任务书、再有材料，
- * 最后是这一次的要求"——和实际发出的顺序一致。
+ * 它们不是"预设里的一段"，所以不参与拖动排序。发出的顺序是：整份预设 → 开场白，
+ * 而开场白自己又是"规则在上、本场指令在下"——和用户读到的顺序一致。
+ *
+ * 收进折叠块是因为它平时不用改：改一次规则能用很久，却和每张卡一样占一屏。
  *
  * @param {Array<object>} messages
  */
@@ -440,13 +523,8 @@ function renderMessages(messages) {
         return '';
     }
 
-    return `<section class="thrive-prompts__msgs">
-        <div class="thrive-prompts__msgs-head">
-            <span class="thrive-prompts__msgs-title">会话开场白</span>
-            <small class="thrive-prompts__msgs-hint">触发时作为这一场会话的第一条 User 消息发出</small>
-        </div>
-        ${messages.map(renderMessage).join('')}
-    </section>`;
+    const note = '规则共用 · 每场指令各一段 · 收起来不影响发送';
+    return renderFold('msgs', '会话开场白', note, messages.map(renderMessage).join(''));
 }
 
 function renderMessage(item) {
@@ -454,26 +532,32 @@ function renderMessage(item) {
     // 空 = 用默认文本（存空串，读取时回落到默认），所以不能说成"不会发送"
     const note = [`${item.chars} 字`, item.custom ? '已改过默认' : '默认'].join(' · ');
     const draftLabel = msgCountText(msgDraft);
+    // 规则那一行叫「通用规则」，任务那几行叫「学习时发送」——它们回答的问题不同
+    const title = item.shared ? item.label : `${item.label}时发送`;
+    const chip = item.shared ? '共用' : 'User';
+    const chipClass = item.shared
+        ? 'thrive-prompts__chip thrive-prompts__chip--shared'
+        : 'thrive-prompts__chip thrive-prompts__chip--muted';
 
     if (!open) {
-        return `<article class="thrive-prompts__msg" data-msg="${item.kind}">
+        return `<article class="thrive-prompts__msg" data-msg="${item.kind}" data-shared="${item.shared}">
             <div class="thrive-prompts__main">
                 <div class="thrive-prompts__head">
-                    <span class="thrive-prompts__name">${escapeHtml(item.label)}时发送</span>
-                    <span class="thrive-prompts__chip thrive-prompts__chip--muted">User</span>
+                    <span class="thrive-prompts__name">${escapeHtml(title)}</span>
+                    <span class="${chipClass}">${chip}</span>
                 </div>
                 <div class="thrive-prompts__note">${escapeHtml(note)}</div>
             </div>
             <button type="button" class="menu_button thrive-prompts__act" data-act="msg-edit"
-                title="展开编辑：这段就是模型收到的开场白">编辑</button>
+                title="展开编辑这一段的正文">编辑</button>
         </article>`;
     }
 
-    return `<article class="thrive-prompts__msg thrive-prompts__msg--open" data-msg="${item.kind}">
+    return `<article class="thrive-prompts__msg thrive-prompts__msg--open" data-msg="${item.kind}" data-shared="${item.shared}">
         <div class="thrive-prompts__main">
             <div class="thrive-prompts__head">
-                <span class="thrive-prompts__name">${escapeHtml(item.label)}时发送</span>
-                <span class="thrive-prompts__chip thrive-prompts__chip--muted">User</span>
+                <span class="thrive-prompts__name">${escapeHtml(title)}</span>
+                <span class="${chipClass}">${chip}</span>
             </div>
             <div class="thrive-prompts__note">${escapeHtml(note)}</div>
         </div>
@@ -481,14 +565,16 @@ function renderMessage(item) {
             <div class="thrive-prompts__editor-head">
                 <span class="thrive-prompts__field thrive-prompts__field--static">
                     <span>内容</span>
-                    <b>作为开场白发出</b>
+                    <b>${item.shared ? '所有任务共用' : '接在规则后面发出'}</b>
                 </span>
                 <span class="thrive-prompts__count">${draftLabel}</span>
             </div>
             <div class="thrive-prompts__area">
-                <textarea class="text_pole thrive-block-text" data-field="msg" rows="6" spellcheck="false"
+                <textarea class="text_pole thrive-block-text" data-field="msg" rows="8" spellcheck="false"
                     data-macros="true" data-macros-autocomplete="always" data-macros-autocomplete-style="small"
-                    placeholder="告诉模型这一次要它做什么。支持 {{char}}、{{user}} 等 ST 宏。"
+                    placeholder="${item.shared
+                        ? '学习与压缩都从这段开始：这一场是什么、产出走哪里、写到哪、怎么写。支持 {{char}}、{{user}} 等 ST 宏。'
+                        : '接在上面那段规则后面，写这一次要它做什么。支持 {{char}}、{{user}} 等 ST 宏。'}"
                 >${escapeHtml(msgDraft)}</textarea>
             </div>
             <div class="thrive-prompts__editor-foot">
@@ -500,6 +586,39 @@ function renderMessage(item) {
             </div>
         </div>
     </article>`;
+}
+
+/**
+ * 工具列表：这一版插件带出去的全部工具，一行两个卡片。
+ *
+ * 只读——工具是写死的实现，用户能调的是"写多少、读多少"（在设置页「数值与上限」），
+ * 不是"带不带这个工具"。所以这里不放开与关，只把名字、用途和激活状态摆出来，
+ * 让人知道模型手里到底有什么。
+ *
+ * @param {Array<{ name: string, label: string, description: string, active: boolean }>} tools
+ */
+function renderTools(tools) {
+    if (!tools.length) {
+        return renderFold('tools', '工具列表', '没有工具', '<div class="thrive-prompts__empty">读不到工具定义。</div>');
+    }
+
+    const inner = `<div class="thrive-prompts__tools">${tools.map(tool => `
+        <article class="thrive-prompts__tool" data-tool="${escapeHtml(tool.name)}">
+            <div class="thrive-prompts__tool-head">
+                <span class="thrive-prompts__tool-name">${escapeHtml(tool.label)}</span>
+                <span class="thrive-prompts__chip${tool.active ? ' thrive-prompts__chip--on' : ' thrive-prompts__chip--muted'}">
+                    ${tool.active ? '激活' : '停用'}
+                </span>
+            </div>
+            <code class="thrive-prompts__tool-id">${escapeHtml(tool.name)}</code>
+            <p class="thrive-prompts__tool-desc">${escapeHtml(tool.description)}</p>
+        </article>`).join('')}</div>
+        <small class="thrive-prompts__fold-hint">
+            学习会话里这些工具全部带上。世界书那几个还要求这一场对话里选好了可写书——
+            没选的时候它们会拒绝调用，不是没带。
+        </small>`;
+
+    return renderFold('tools', '工具列表', `${tools.length} 个 · 全部激活`, inner);
 }
 
 /**
@@ -546,9 +665,12 @@ function renderEditor(item) {
             + 'title="用回内置的默认文本">恢复默认</button>'
         : '';
 
+    // 自建卡的删除是真删；可移除的内置卡只是从列表里拿掉，正文留着（「默认顺序」能拿回来）
     const remove = item.deletable
-        ? '<button type="button" class="menu_button thrive-prompts__ghost thrive-prompts__act--danger" '
-            + 'data-act="delete" title="删除这条自建提示词（正文一起删掉）">删除</button>'
+        ? `<button type="button" class="menu_button thrive-prompts__ghost thrive-prompts__act--danger" `
+            + `data-act="delete" title="${item.custom
+                ? '删除这条自建提示词（正文一起删掉）'
+                : '从列表里拿掉（正文留着，「默认顺序」能让它回来）'}">删除</button>`
         : '';
 
     return `<div class="thrive-prompts__editor">
@@ -617,8 +739,10 @@ function refreshRowChrome(ctx, settings, id) {
 
     const note = row.querySelector('.thrive-prompts__note');
     if (note) {
-        const extra = id === CARD_ID.TARGET ? '正文随触发追加' : '';
-        note.textContent = [extra, `${countChars(getCardText(settings, id))} 字`].filter(Boolean).join(' · ');
+        const pinned = isPinnedCard(id);
+        note.textContent = pinned
+            ? '运行时注入 · 内容随触发生成'
+            : `${countChars(getCardText(settings, id))} 字`;
         note.title = getCardState(settings, id).note;
     }
 }
@@ -918,7 +1042,7 @@ function cancelEditing() {
     // 新增时直接取消 = 什么都没发生：把刚建出来的空条目收掉，不留一条占位
     if (wasNew) {
         const settings = ensureSettings(ctx);
-        deleteCustomPrompt(settings, id);
+        removePromptCard(settings, id);
         ctx.saveSettingsDebounced?.();        refreshUI(ctx);
     }
 
@@ -1012,7 +1136,9 @@ function saveMsg() {
     refreshUI(ctx);
 
     const meta = getSessionMessageMeta(kind);
-    toast(`「${meta?.label ?? kind}时发送」的开场白已保存`);
+    toast(meta?.shared
+        ? `「${meta.label}」已保存：学习和压缩都会用这一段`
+        : `「${meta?.label ?? kind}时发送」已保存`);
 }
 
 function cancelMsg() {
@@ -1155,8 +1281,17 @@ async function confirmDelete(id) {
     const ctx = getContext();
     const settings = ensureSettings(ctx);
     const name = getPromptName(settings, id);
+    const custom = isCustomPrompt(settings, id);
 
-    const confirmed = await askConfirm(`删除「${name}」？正文会一起删掉，不能撤销。`, { okButton: '删除' });
+    /*
+     * 两种"删除"要说清楚差别：自建卡连正文一起没，内置的描述行只是从列表里
+     * 挪开——用户点删除时通常想的是"这一场不要这句"，不该顺带毁掉他写的话。
+     */
+    const question = custom
+        ? `删除「${name}」？正文会一起删掉，不能撤销。`
+        : `把「${name}」从列表里拿掉？正文会留着，「默认顺序」能让它带着原话回来。`;
+
+    const confirmed = await askConfirm(question, { okButton: custom ? '删除' : '拿掉' });
     if (!confirmed) {
         return;
     }
@@ -1165,8 +1300,8 @@ async function confirmDelete(id) {
         editing = null;
     }
 
-    if (!deleteCustomPrompt(ensureSettings(ctx), id)) {
-        toast('这条提示词已经不在了');
+    if (!removePromptCard(ensureSettings(ctx), id)) {
+        toast('这张卡已经不在了');
         return;
     }
 
@@ -1176,7 +1311,7 @@ async function confirmDelete(id) {
     // 删的是别的条目、手里还开着编辑框：这一行得从 DOM 里拿掉，草稿本身还在
     renderWindow(ctx, Boolean(editing));
 
-    toast(`已删除「${name}」`);
+    toast(custom ? `已删除「${name}」` : `已拿掉「${name}」（正文留着）`);
 }
 
 function togglePrompt(id, enabled) {
@@ -1232,7 +1367,7 @@ function resetOrder() {
     const settings = ensureSettings(ctx);
     const extra = getCustomPrompts(settings).map(item => item.id);
 
-    // 学习规则在最前、目标内容在最后，自建提示词按默认规则夹在中间
+    // 描述行回到最前、注入位固定在最后，自建提示词按默认规则夹在中间
     settings.promptOrder = normalizeOrder(DEFAULT_PROMPT_ORDER, extra);
 
     signature = null;
@@ -1467,10 +1602,10 @@ function buildImportMessage(sourceName, counts) {
     }
 
     return `从「${sourceName}」导入 ${counts.imported} 条提示词：`
-        + `启用 ${counts.enabled} / 停用 ${counts.disabled}，按预设里的顺序夹在「学习规则」与「目标内容」之间。`
+        + `启用 ${counts.enabled} / 停用 ${counts.disabled}，按预设里的顺序夹在「描述行」与「目标内容」之间。`
         + (skipped.length ? `跳过 ${skipped.join('、')}。` : '')
         + (notes.length ? `${notes.join('；')}。` : '')
-        + '导入会替换当前所有自建提示词；学习规则与目标内容保留并恢复启用。继续吗？';
+        + '导入会替换当前所有自建提示词；目标内容的两条与开场白保留。继续吗？';
 }
 
 /* ------------------------------------------------------------------ 拖动 */
@@ -1498,7 +1633,8 @@ function initSortable() {
         items: '.thrive-prompts__item',
         // 整卡可拖会让编辑框里的选区没法用；只认抓手
         handle: '.thrive-prompts__grip',
-        cancel: '.thrive-prompts__editor, [data-act]',
+        // 注入位既没有抓手也不接受被拖到它后面：它代表这一场要看的东西，位置是固定的
+        cancel: '.thrive-prompts__editor, [data-act], [data-pinned="true"]',
         placeholder: 'thrive-prompts__placeholder',
         forcePlaceholderSize: true,
         axis: 'y',

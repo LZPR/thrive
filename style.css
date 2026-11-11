@@ -1976,37 +1976,67 @@ body.thrive-panel-dragging {
 }
 
 /*
- * 会话开场白：列表下面单独一段。
+ * 折叠块：会话开场白、工具列表。
  *
- * 它不是"预设里的第 N 条"，所以没有抓手、没有启用开关、没有角色 chip——
- * 固定是那一场会话的第一条 User 消息。视觉上也和上面那摞卡片分开：
- * 一条上边线 + 一个小标题，读起来是"任务书之后的收尾要求"。
+ * 它们不是"预设里的第 N 条"——开场白在整份预设之后发出，工具则是会话带着的一份
+ * 能力清单——所以视觉上也和上面那摞卡片分开：一条上边线 + 可点开的标题。平时收起，
+ * 因为改一次能用很久，却和每张卡一样占一屏。
  */
-.thrive-prompts__msgs {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+.thrive-prompts__fold {
     margin-top: 4px;
-    padding-top: 8px;
     border-top: 1px solid var(--SmartThemeBorderColor);
 }
 
-.thrive-prompts__msgs-head {
+.thrive-prompts__fold-head {
     display: flex;
     align-items: baseline;
     gap: 8px;
+    padding: 8px 2px;
+    cursor: pointer;
+    /* 收起时的三角形交给我们自己的 ::marker 处理，各家浏览器默认值差太多 */
+    list-style: none;
 }
 
-.thrive-prompts__msgs-title {
+.thrive-prompts__fold-head::-webkit-details-marker {
+    display: none;
+}
+
+.thrive-prompts__fold-head::before {
+    content: '\25B8';
+    flex: 0 0 auto;
+    font-size: 0.85em;
+    opacity: 0.6;
+    transition: transform 0.12s ease;
+}
+
+.thrive-prompts__fold[open] > .thrive-prompts__fold-head::before {
+    transform: rotate(90deg);
+}
+
+.thrive-prompts__fold-title {
+    flex: 0 0 auto;
     font-weight: 600;
 }
 
-/* 说明会随窗口宽度换行；窄窗口里宁可两行，也不要截掉"这是开场白"这个事实 */
-.thrive-prompts__msgs-hint {
+/* 说明会随窗口宽度换行；窄窗口里宁可两行，也不要截掉"这里面是什么" */
+.thrive-prompts__fold-note {
     flex: 1 1 auto;
     min-width: 0;
     font-size: calc(var(--mainFontSize, 15px) * 0.75);
     line-height: 1.35;
+    opacity: 0.6;
+}
+
+.thrive-prompts__fold-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-bottom: 6px;
+}
+
+.thrive-prompts__fold-hint {
+    font-size: calc(var(--mainFontSize, 15px) * 0.75);
+    line-height: 1.4;
     opacity: 0.6;
 }
 
@@ -2036,6 +2066,85 @@ body.thrive-panel-dragging {
 
 .thrive-prompts__grip:active {
     cursor: grabbing;
+}
+
+/* 注入位没有抓手：位置固定，锁的图标只用来解释"为什么这一行拖不动" */
+.thrive-prompts__grip--locked {
+    cursor: default;
+    font-size: 0.8em;
+    opacity: 0.3;
+}
+
+.thrive-prompts__grip--locked:active {
+    cursor: default;
+}
+
+/*
+ * 注入位这一行：没有开关、没有正文，只有名字和"内容是运行时来的"。
+ *
+ * 它的边框用虚线而不用强调色竖线——竖线是"启用中"的意思，而这一行无所谓启用，
+ * 它一定在。
+ */
+.thrive-prompts__item[data-pinned="true"] {
+    border-style: dashed;
+    border-left-style: dashed;
+    background-color: transparent;
+    opacity: 0.8;
+}
+
+/* ------------------------------------------------------------ 工具列表 */
+
+/*
+ * 一行两个。工具卡片的正文是一句说明，单列会让这块变成一条很长的竖线；
+ * 两列刚好把窗口宽度用满，数量再多也只是往下长。
+ */
+.thrive-prompts__tools {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 6px;
+}
+
+.thrive-prompts__tool {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    background-color: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+}
+
+.thrive-prompts__tool-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+
+.thrive-prompts__tool-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 工具名是给模型看的（也是报错里出现的那个），用等宽字体和中文名分开 */
+.thrive-prompts__tool-id {
+    overflow: hidden;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    opacity: 0.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thrive-prompts__tool-desc {
+    margin: 2px 0 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    line-height: 1.4;
+    opacity: 0.7;
 }
 
 /*
@@ -2149,6 +2258,18 @@ body.thrive-panel-dragging {
 .thrive-prompts__chip--muted {
     border-style: dashed;
     opacity: 0.55;
+}
+
+/* 「共用」：说明这一段被所有任务引用，改它等于改全部的规则 */
+.thrive-prompts__chip--shared {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    opacity: 0.85;
+}
+
+/* 「激活」：工具卡片上的状态。现在全都带，所以只是把事实标出来 */
+.thrive-prompts__chip--on {
+    border-color: color-mix(in srgb, var(--SmartThemeQuoteColor) 55%, var(--SmartThemeBorderColor));
+    opacity: 0.85;
 }
 
 .thrive-prompts__note {
