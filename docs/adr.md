@@ -832,3 +832,24 @@ ADR-053 的另外两节（目标内容拆描述行 / 注入位、工具列表回
 
 **验证**：`tests/integration/session-startup.test.js` 延迟连接体检，连续学习、停止后再放行；
 确认第二次进队、停止清队列、请求次数为零、运行状态清空。浏览器测试另验正在请求时切换聊天。
+
+## ADR-056 · npm 开发工具、分层回归与按功能组织模块
+
+**状态**：已实施，2026-11-11；补充 ADR-030 的 UI 组织约定。
+
+**决定**：插件继续由 SillyTavern 直接加载 ESM。npm 与锁文件管理开发依赖，
+Vitest 负责单元/模块集成，Playwright 负责真实浏览器中的离线宿主验收。
+Vite 只参与测试转换，不产出生产包；保持 JavaScript，先在纯算法和排序模块开启 JSDoc/checkJs。
+
+业务按 learning、session、prompts、settings、memory、tools 分组；底层逻辑放 core/shared，
+宿主内部模块路径和 I/O 放 platform/sillytavern，UI 按界面分组。
+settings、memory target 和 tools 保留旧导入兼容入口；面板与提示词编辑器分离渲染和交互。
+ESLint 同时检查静态错误和依赖方向，根 smoke 固定验证全部 ESM 导出能链接。
+
+**历史处理**：`.workbuddy/` 是只读历史，保留原文件；将仍有效的行为迁入 `tests/`，
+不把废弃的主动/被动、全局工具注册和 trace 语义搬回产品。
+
+**代价与范围**：离线宿主替身不能证明真实 ST 1.19.0 的私有接口兼容，
+仍需真实宿主验收。暂不拆多个 workspace、不全面转 TypeScript、不引入运行时 npm 依赖；
+计时器和日志没有第二个生产实现，保留原生能力。后续在具体修改时逐步扩大类型检查与场景覆盖。
+开发命令、当前目录和验收步骤统一维护在 `docs/development.md`。

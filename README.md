@@ -185,32 +185,25 @@ mklink /J "<SillyTavern>\public\scripts\extensions\third-party\thrive" "<本仓�
 | [`docs/user_stories.md`](docs/user_stories.md) | 用户故事：作为…我想…以便… |
 | [`docs/research_oneoff_session.md`](docs/research_oneoff_session.md) | 调研记录：一次性内部会话在 ST 1.19.0 里的能力边界、可复用件与坑，带行号；不含设计 |
 
-**代码即文档**：默认提示词、设置项与默认值、工具参数与返回字段、错误码、写入上限、条目模板字段——这些只在源码里存在一份，文档不抄第二遍（抄了必漂）。各模块职责写在文件头注释里，从 `index.js` 进，或直接看 `src/`：
+**代码即文档**：提示词、设置默认值、工具字段、错误码和上限以源码为准。
+入口仍是根级 `index.js`，实际初始化位于 `src/app/bootstrap.js`。
+业务按 `src/features/` 下的 learning、session、prompts、settings、memory、tools 分组；
+宿主适配集中在 `src/platform/sillytavern/`，UI 按界面分组，纯算法在 `src/core/`。
 
+## 开发
+
+维护者使用 Node 24 LTS（24.15.0+）与 npm；插件使用者无需安装开发依赖，也没有打包步骤。
+
+```sh
+npm ci
+npm run check
+npm test
+npx playwright install chromium
+npm run test:e2e
 ```
-index.js             入口：初始化、事件绑定、判据评估、斜杠命令
-src/store.js         设置与对话状态（含学习状态与设置迁移）
-src/learning.js      学习编排：拼目标内容（对话记录 / 教授内容）→ 编译预设 → 跑一场 → 写回摘要
-src/auto-learn.js    什么时候该学一次（纯函数：条数 / 关键词）
-src/prompt.js        卡片、默认文本、预设编译
-src/prompt-order.js  卡片 id 与线性顺序
-src/prompt-import.js 有损导入 ST 预设
-src/tools.js         工具定义表（只在学习会话里可用）
-src/targets.js       世界书 / 角色描述的读写
-src/draft.js         虚拟世界书（缓冲区）    src/diff.js      行级 diff
-src/regex.js         正则编译、命中与替换     src/limits.js    所有可调数值上限
-src/patch.js         描述改动的暂存与确认     src/compress.js  超长内容的收集与写回
-src/diagnostics.js   错误码 → 一句能照做的 hint（不再做环境诊断）
-src/desc.js          统一模式：描述条目读写   src/desc-entry.js 保留条目标识
-src/session.js       内部会话门面（五步 + 组合体）
-src/session-messages.js  会话自己的消息栈（工厂 / 序列化 / 估算 / 协议自检）
-src/session-preset.js    预设 → 带角色的段（内含宏展开）
-src/session-tools.js     会话私有工具表（真实工具的执行包装）
-src/session-provider.js  回复形状识别与解析
-src/session-transport.js 唯一 ST 耦合层：造 payload、发请求、超时；指定连接配置时改走 ST 的 Connection Manager
-src/ui/*.js          浮动面板、压缩面板、虚拟世界书窗口、提示词窗口、教授窗口、徽章、刷新编排
-src/ui/settings/*.js 设置页（一组设置一个文件，入口 index.js）
-```
+
+完整目录、历史脚本迁移、测试替身、覆盖率、CI 和真实 SillyTavern 验收步骤见
+[开发与测试](docs/development.md)。
 
 ## 许可
 
