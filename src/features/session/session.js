@@ -63,8 +63,8 @@ const DEFAULT_SAMPLING = Object.freeze({ temperature: 0.3 });
 /** 正在跑的那一场（用于互斥与中止） */
 let active = null;
 
-/** 已经过了互斥检查、但还没建完对象的那一小段窗口 */
-let starting = false;
+/** 连接初始化同样占用会话槽位；取消标记在初始化完成后、发请求前检查。 */
+let starting = null;
 
 /** 最近跑完的那一场（`/thrive session log` 用） */
 let last = null;
@@ -386,12 +386,13 @@ export async function runSession({
     }
 
     // 体检要 await（惰性 import），这段窗口也必须在互斥里，否则连点两次会建出两场
-    starting = true;
+    const opening = { cancelled: false };
+    starting = opening;
     let opened;
     try {
         opened = await openSession({ ctx, deps, preset, maxRounds, tools, profileId });
     } finally {
-        starting = false;
+        starting = null;
     }
 
     if (!opened.ok) {
@@ -411,6 +412,9 @@ export async function runSession({
     active = session;
 
     try {
+        if (opening.cancelled) {
+            return stop(session, 'aborted', 'SESSION_ABORTED');
+        }
         const prepared = applyPreset(session, preset);
         if (!prepared.ok) {
             return stop(session, 'error', prepared.error, prepared.detail);
@@ -438,6 +442,10 @@ export async function runSession({
  */
 export function abortActiveSession() {
     if (!active) {
+        if (starting) {
+            starting.cancelled = true;
+            return true;
+        }
         return false;
     }
 
@@ -460,7 +468,7 @@ export function abortActiveSession() {
 
 /** 有没有正在跑的会话 */
 export function isSessionRunning() {
-    return Boolean(active);
+    return Boolean(active || starting);
 }
 
 /* ------------------------------------------------------------ 观察 */
