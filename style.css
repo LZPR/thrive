@@ -429,11 +429,6 @@
 }
 
 /* 这个标题直接跟在复选框后面、不在 .thrive-field 里，自己带一点上间距 */
-.thrive-settings .thrive-prompt-entry-title {
-    margin-top: 10px;
-    opacity: 1;
-}
-
 .thrive-settings .thrive-prompt-entry__open {
     display: inline-flex;
     align-items: center;

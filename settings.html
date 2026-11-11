@@ -13,7 +13,7 @@
                 <div class="inline-drawer-toggle inline-drawer-header">
                     <div class="thrive-group__title">
                         <b>基本设置</b>
-                        <small class="thrive-group__hint">默认状态 · 徽章</small>
+                        <small class="thrive-group__hint">默认状态 · 徽章 · 连接 · 提示词</small>
                     </div>
                     <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                 </div>
@@ -50,24 +50,15 @@
                         置灰 = 现在切了也没用（没打开对话），
                         右上角数字 = 待确认的描述改动。
                     </div>
-                </div>
-            </div>
 
-            <!-- API 连接：会话走哪个后端。只影响之后新开的会话，已经跑着的那一场不变 -->
-            <div class="inline-drawer thrive-group" id="thrive_connection_group">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <div class="thrive-group__title">
-                        <b>API 连接</b>
-                        <small class="thrive-group__hint">会话走后端 · 全局</small>
-                    </div>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
+                    <!-- 连接：会话走哪个后端。只影响之后新开的会话，已经跑着的那一场不变 -->
+                    <span class="thrive-limit-title">
+                        API 连接
+                        <button type="button" class="thrive-help" data-help="thrive_help_connection"
+                            aria-expanded="false" aria-controls="thrive_help_connection" title="说明">?</button>
+                    </span>
                     <div class="thrive-row">
-                        <label for="thrive_connection_profile">学习会话使用
-                            <button type="button" class="thrive-help" data-help="thrive_help_connection"
-                                aria-expanded="false" aria-controls="thrive_help_connection" title="说明">?</button>
-                        </label>
+                        <label for="thrive_connection_profile">学习会话使用</label>
                         <select id="thrive_connection_profile" class="text_pole thrive-select"></select>
                     </div>
                     <div id="thrive_help_connection" class="thrive-help__body">
@@ -79,6 +70,38 @@
                         改动只影响之后新开的会话，正在跑的那一场不会中途换路。
                     </div>
                     <small id="thrive_connection_hint" class="thrive-hint displayNone"></small>
+
+                    <!-- 提示词：编辑器正文太长，所以只留一个入口 -->
+                    <span class="thrive-limit-title">
+                        提示词
+                        <button type="button" class="thrive-help" data-help="thrive_help_cards"
+                            aria-expanded="false" aria-controls="thrive_help_cards" title="说明">?</button>
+                    </span>
+                    <div id="thrive_help_cards" class="thrive-help__body">
+                        这些提示词只进学习会话，聊天请求里没有它们（所以也不会污染前缀缓存）。
+                        独立窗口里编辑：内置的「学习规则」与「目标内容」，加上你可以自由增删的自建提示词；
+                        逐条启用与角色、拖动排序。列表从上到下就是这一场会话的消息顺序。
+                        目标内容卡的正文不在卡片里——学习时由插件把当前对话记录追加在描述行下面。
+                        窗口最下面是「会话开场白」：学习 / 压缩各一段，作为那一场会话的第一条 User 消息。
+                        也可以导入 SillyTavern 预设（有损：保留正文、角色、启用状态与顺序，
+                        忽略触发器与注入位置，丢弃世界书、角色卡这类无法发送的标记块）。
+                        支持 &#123;&#123;char&#125;&#125; / &#123;&#123;user&#125;&#125; /
+                        &#123;&#123;setvar::名::值&#125;&#125; / &#123;&#123;getvar::名&#125;&#125; 等 ST 宏。
+                    </div>
+                    <div class="thrive-prompt-entry">
+                        <div id="thrive_prompt_open" class="menu_button thrive-prompt-entry__open"
+                            title="打开独立窗口：卡片增删改、启用 / 停用、角色、排序、开场白、导入预设">
+                            <i class="fa-solid fa-table-list"></i>
+                            <span>打开提示词编辑器</span>
+                        </div>
+                        <small id="thrive_prompt_entry_meta" class="thrive-hint">—</small>
+                    </div>
+                    <div class="thrive-prompt-stats">
+                        <span id="thrive_prompt_stats" class="thrive-count">—</span>
+                    </div>
+                    <small id="thrive_prompt_macro_hint" class="thrive-hint">
+                        宏按列表顺序在发请求前展开；开场白最后发。
+                    </small>
                 </div>
             </div>
 
@@ -280,56 +303,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- 提示词 -->
-            <div class="inline-drawer thrive-group">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <div class="thrive-group__title">
-                        <b>提示词</b>
-                        <small class="thrive-group__hint">预设 · 会话开场白</small>
-                    </div>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <small class="thrive-hint thrive-hint--moved">
-                        这些提示词只进学习会话，聊天请求里没有它们（所以也不会污染前缀缓存）。
-                    </small>
-
-                    <span class="thrive-field-title thrive-prompt-entry-title">
-                        提示词编辑器
-                        <button type="button" class="thrive-help" data-help="thrive_help_cards"
-                            aria-expanded="false" aria-controls="thrive_help_cards" title="说明">?</button>
-                    </span>
-                    <div id="thrive_help_cards" class="thrive-help__body">
-                        独立窗口里编辑：内置的「学习规则」与「目标内容」，加上你可以自由增删的自建提示词；
-                        逐条启用与角色、拖动排序。列表从上到下就是这一场会话的消息顺序。
-                        目标内容卡的正文不在卡片里——学习时由插件把当前对话记录追加在描述行下面。
-                        窗口最下面是「会话开场白」：学习 / 压缩各一段，作为那一场会话的第一条 User 消息。
-                        也可以导入 SillyTavern 预设（有损：保留正文、角色、启用状态与顺序，
-                        忽略触发器与注入位置，丢弃世界书、角色卡这类无法发送的标记块）。
-                        支持 &#123;&#123;char&#125;&#125; / &#123;&#123;user&#125;&#125; /
-                        &#123;&#123;setvar::名::值&#125;&#125; / &#123;&#123;getvar::名&#125;&#125; 等 ST 宏。
-                    </div>
-
-                    <div class="thrive-prompt-entry">
-                        <div id="thrive_prompt_open" class="menu_button thrive-prompt-entry__open"
-                            title="打开独立窗口：卡片增删改、启用 / 停用、角色、排序、开场白、导入预设">
-                            <i class="fa-solid fa-table-list"></i>
-                            <span>打开提示词编辑器</span>
-                        </div>
-                        <small id="thrive_prompt_entry_meta" class="thrive-hint">—</small>
-                    </div>
-
-                    <div class="thrive-prompt-stats">
-                        <span id="thrive_prompt_stats" class="thrive-count">—</span>
-                    </div>
-
-                    <small id="thrive_prompt_macro_hint" class="thrive-hint">
-                        宏按列表顺序在发请求前展开；开场白最后发。
-                    </small>
-                </div>
-            </div>
-
             <!-- 面板与窗口 -->
             <div class="inline-drawer thrive-group" id="thrive_appearance_group">
                 <div class="inline-drawer-toggle inline-drawer-header">
