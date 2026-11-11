@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "checkJs": true,
+        "noEmit": true,
+        "strict": true,
+        "noImplicitAny": false,
+        "useUnknownInCatchVariables": false,
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "target": "ES2022",
+        "lib": ["ES2022", "DOM"],
+        "types": [],
+        "skipLibCheck": true
+    },
+    "include": [
+        "src/shared/util.js",
+        "src/core/**/*.js",
+        "src/features/prompts/prompt-order.js"
+    ],
+    "exclude": ["node_modules", ".workbuddy", ".test-sandbox"]
+}

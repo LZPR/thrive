@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>Thrive browser regression fixture</title>
+    <link rel="stylesheet" href="/scripts/extensions/third-party/thrive/style.css">
+    <style>
+        :root {
+            --SmartThemeBodyColor: #eee;
+            --SmartThemeEmColor: #aaa;
+            --SmartThemeQuoteColor: #8bd;
+            --SmartThemeBorderColor: #666;
+            --SmartThemeBlurTintColor: #222;
+            --SmartThemeShadowColor: #111;
+        }
+        body { background: #222; color: #eee; font: 14px sans-serif; margin: 16px; }
+        .displayNone { display: none !important; }
+        .menu_button, button { cursor: pointer; }
+        .text_pole { background: #333; color: #eee; }
+        #extensions_settings2 { max-width: 440px; }
+        #leftSendForm { position: fixed; bottom: 12px; left: 12px; }
+    </style>
+</head>
+<body>
+    <main id="extensions_settings2"></main>
+    <div id="leftSendForm"></div>
+    <input id="character_name_pole" value="测试角色">
+    <textarea id="description_textarea">原始描述</textarea>
+    <script type="module">
+        import * as host from '/extensions.js';
+        window.__host = host;
+        window.jQuery = callback => {
+            if (typeof callback === 'function') {
+                Promise.resolve().then(callback).then(() => { window.__thriveReady = true; });
+            }
+        };
+        await import('/scripts/extensions/third-party/thrive/index.js');
+    </script>
+</body>
+</html>

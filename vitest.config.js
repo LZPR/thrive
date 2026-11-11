@@ -19,7 +19,7 @@ export default defineConfig({
         coverage: {
             provider: 'v8',
             include: ['src/**/*.js'],
-            exclude: ['src/ui/**', 'src/ui.js', 'src/platform/**'],
+            exclude: ['src/ui/**', 'src/platform/**', 'src/app/**', 'src/store.js', 'src/targets.js', 'src/tools.js'],
             reporter: ['text', 'html'],
         },
     },

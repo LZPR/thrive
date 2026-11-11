@@ -1,10 +1,10 @@
 {
     "name": "sillytavern-thrive",
-    "version": "0.37.0",
+    "version": "0.37.1",
     "private": true,
     "type": "module",
     "engines": {
-        "node": ">=22.12.0"
+        "node": "^24.15.0 || >=26.0.0"
     },
     "scripts": {
         "check:syntax": "node scripts/check-syntax.mjs",
@@ -12,7 +12,11 @@
         "test": "vitest run",
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
-        "check": "npm run check:syntax && npm run test:smoke && npm test"
+        "check": "npm run check:syntax && npm run lint && npm run typecheck && npm run test:smoke",
+        "lint": "eslint .",
+        "typecheck": "tsc -p jsconfig.json",
+        "test:e2e": "playwright test",
+        "test:all": "npm run check && npm test && npm run test:e2e"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
