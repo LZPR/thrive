@@ -1,6 +1,6 @@
 /** lore-directory.js · Internal memory module; public entry: index.js. */
 
-import { isReservedEntry, isReservedTitle } from '../../desc-entry.js';
+import { isReservedEntry, isReservedTitle } from './desc-entry.js';
 
 import { getWritableBook } from './target-selection.js';
 

@@ -1,8 +1,6 @@
 import { migrateSettings } from './migrations.js';
 /** settings-store.js · Internal settings module; public entry: index.js. */
 
-import { CARD_ID, DEFAULT_PROMPT_ORDER } from '../../prompt-order.js';
-
 import { DEFAULT_SETTINGS, MODULE_NAME } from './defaults.js';
 
 import { isPlainObject, normalizeCustomPrompts, normalizeDisabledCards, normalizePromptRoles } from './normalization.js';

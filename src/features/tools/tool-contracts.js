@@ -1,12 +1,12 @@
 /** tool-contracts.js · Internal tools module; public entry: index.js. */
 
-import { BOOK_SEEN, bookReadKey, clearReadHash, clearReadKeysByPrefix, getReadHash, getState, lorePatternPrefix, loreReadKey, loreSeenKey, setReadHash } from '../../store.js';
+import { BOOK_SEEN, bookReadKey, clearReadHash, clearReadKeysByPrefix, getReadHash, getState, lorePatternPrefix, loreReadKey, loreSeenKey, setReadHash } from '../settings/index.js';
 
-import { isBookScanned } from '../../targets.js';
+import { isBookScanned } from '../memory/index.js';
 
-import { hintFor } from '../../diagnostics.js';
+import { hintFor } from '../../shared/diagnostics.js';
 
-import { fnv1a } from '../../util.js';
+import { fnv1a } from '../../shared/util.js';
 
 const LOG = '[Thrive]';
 

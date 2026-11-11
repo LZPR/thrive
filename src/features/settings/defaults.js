@@ -1,6 +1,6 @@
 /** defaults.js · Internal settings module; public entry: index.js. */
 
-import { LIMIT_DEFAULTS } from '../../limits.js';
+import { LIMIT_DEFAULTS } from '../../core/limits.js';
 
 const MODULE_NAME = 'thrive';
 

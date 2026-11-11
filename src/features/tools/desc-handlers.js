@@ -2,19 +2,19 @@
 
 import { getContext } from '../../platform/sillytavern/context.js';
 
-import { BOOK_SEEN, DESC_SEEN, READ_KEY_DESC, clearReadHash, clearReadKeysByPrefix, descPatternKey, descPatternPrefix, ensureSettings, getReadHash, isLearningActive, saveChat, setReadHash } from '../../store.js';
+import { BOOK_SEEN, DESC_SEEN, READ_KEY_DESC, clearReadHash, clearReadKeysByPrefix, descPatternKey, descPatternPrefix, ensureSettings, getReadHash, isLearningActive, saveChat, setReadHash } from '../settings/index.js';
 
-import { readLimits } from '../../limits.js';
+import { readLimits } from '../../core/limits.js';
 
-import { getActiveCharacter } from '../../targets.js';
+import { getActiveCharacter } from '../memory/index.js';
 
-import { PATCH_STATUS, diskDescription, getPatch, stagePatch } from '../../patch.js';
+import { PATCH_STATUS, diskDescription, getPatch, stagePatch } from '../memory/patch.js';
 
-import { isWorldbookDesc, readDescription, writeDesc } from '../../desc.js';
+import { isWorldbookDesc, readDescription, writeDesc } from '../memory/desc.js';
 
-import { compilePattern, replaceIn, scan } from '../../regex.js';
+import { compilePattern, replaceIn, scan } from '../../core/regex.js';
 
-import { appendParagraph, fnv1a, isBlank } from '../../util.js';
+import { appendParagraph, fnv1a, isBlank } from '../../shared/util.js';
 
 import { LOG, canReplace, errorResult } from './tool-contracts.js';
 
@@ -280,7 +280,7 @@ async function handleDescRewrite(params) {
  * 反过来的话，模型会因为参数错误而一直发现不了自己漏了读取。
  */
 function checkDescriptionWrite(ctx) {
-    const settings = ensureSettings(ctx);
+    ensureSettings(ctx);
 
     if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');

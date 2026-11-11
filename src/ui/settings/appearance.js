@@ -9,10 +9,10 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { ensureSettings, DEFAULT_SETTINGS } from '../../store.js';
-import { openCompressPanel } from '../compress-panel.js';
-import { applyPanelLayout } from '../panel-layout.js';
-import { toast } from '../shared.js';
+import { ensureSettings, DEFAULT_SETTINGS } from '../../features/settings/index.js';
+import { openCompressPanel } from '../compress/index.js';
+import { applyPanelLayout } from '../panel/layout.js';
+import { toast } from '../shared/common.js';
 import { byId } from './common.js';
 
 export function bindAppearanceControls() {

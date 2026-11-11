@@ -1,6 +1,6 @@
 /** read-tracker.js · Internal settings module; public entry: index.js. */
 
-import { fnv1a } from '../../util.js';
+import { fnv1a } from '../../shared/util.js';
 
 import { getState } from './chat-store.js';
 

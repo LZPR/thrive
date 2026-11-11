@@ -1,8 +1,8 @@
 /** tool-catalog.js · Internal tools module; public entry: index.js. */
 
-import { TOOL_NAMES } from '../../tool-names.js';
+import { TOOL_NAMES } from './tool-names.js';
 
-import { isBlank } from '../../util.js';
+import { isBlank } from '../../shared/util.js';
 
 import { guardAction } from './tool-availability.js';
 

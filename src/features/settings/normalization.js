@@ -1,10 +1,10 @@
 /** normalization.js · Internal settings module; public entry: index.js. */
 
-import { DESC_STORAGE } from '../../desc-entry.js';
+import { DESC_STORAGE } from '../memory/desc-entry.js';
 
-import { readLimit } from '../../limits.js';
+import { readLimit } from '../../core/limits.js';
 
-import { CARD_ID, isPinnedCard } from '../../prompt-order.js';
+import { CARD_ID, isPinnedCard } from '../prompts/prompt-order.js';
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

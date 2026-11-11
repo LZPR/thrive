@@ -2,9 +2,9 @@
 
 import { getContext } from '../../platform/sillytavern/context.js';
 
-import { isLearningActive } from '../../store.js';
+import { isLearningActive } from '../settings/index.js';
 
-import { getWritableBook } from '../../targets.js';
+import { getWritableBook } from '../memory/index.js';
 
 import { errorResult } from './tool-contracts.js';
 

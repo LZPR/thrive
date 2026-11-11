@@ -28,8 +28,8 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { refreshUI, registerSurfaces } from '../refresh.js';
-import { LOG } from '../shared.js';
+import { refreshUI, registerSurfaces } from '../shared/refresh.js';
+import { LOG } from '../shared/common.js';
 import { bindAppearanceControls, syncAppearanceControls } from './appearance.js';
 import { bindBasicsControls, syncBasicsControls } from './basics.js';
 import { bindConnectionControls, syncConnectionControls } from './connection.js';
@@ -53,7 +53,7 @@ export async function initSettingsPanel(ctx = getContext()) {
         return;
     }
 
-    let html = '';
+    let html;
     try {
         html = await ctx.renderExtensionTemplateAsync('third-party/thrive', 'settings');
     } catch (err) {

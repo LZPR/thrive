@@ -1,8 +1,8 @@
 /** target-selection.js · Internal memory module; public entry: index.js. */
 
-import { descBookName } from '../../desc-entry.js';
+import { descBookName } from './desc-entry.js';
 
-import { getWritableBookSetting, isWorldbookDesc } from '../../store.js';
+import { getWritableBookSetting, isWorldbookDesc } from '../settings/index.js';
 
 import { getActiveCharacter } from './character-target.js';
 

@@ -12,8 +12,8 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { listConnectionProfiles } from '../../session-transport.js';
-import { ensureSettings } from '../../store.js';
+import { listConnectionProfiles } from '../../platform/sillytavern/transport.js';
+import { ensureSettings } from '../../features/settings/index.js';
 import { byId, paintHint } from './common.js';
 
 const SELECT_ID = 'thrive_connection_profile';

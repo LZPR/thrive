@@ -1,8 +1,5 @@
-/** target-errors.js · Internal memory module; public entry: index.js. */
+import { noBook } from '../../platform/sillytavern/worldbook.js';
 
-function noBook(hint) {
-    return { ok: false, error: 'NO_BOOK', hint };
-}
 
 /**
  * 「这是插件保留给角色描述的条目」的统一错误码。

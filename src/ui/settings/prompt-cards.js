@@ -17,8 +17,8 @@ import {
     getLearningMessage,
     getPromptOrder,
     isPromptEnabled,
-} from '../../prompt.js';
-import { openPromptWindow } from '../prompt-window.js';
+} from '../../features/prompts/prompt.js';
+import { openPromptWindow } from '../prompt-editor/index.js';
 import { byId } from './common.js';
 
 export function bindPromptControls() {

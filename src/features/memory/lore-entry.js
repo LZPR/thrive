@@ -1,6 +1,6 @@
 /** lore-entry.js · Internal memory module; public entry: index.js. */
 
-import { isReservedEntry } from '../../desc-entry.js';
+import { isReservedEntry } from './desc-entry.js';
 
 function uidOf(entry) {
     const uid = Number(entry?.uid);

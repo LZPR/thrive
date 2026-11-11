@@ -29,7 +29,7 @@
  */
 
 const OPENAI_MODULE = '../../../../../../openai.js';
-const SCRIPT_MODULE = '../../../../../../../script.js';
+const SCRIPT_MODULE = '../../../../../../script.js';
 
 /** ST 的聊天补全端点。quiet 走的就是它 */
 const ENDPOINT = '/api/backends/chat-completions/generate';
@@ -160,7 +160,7 @@ function probeProfile(ctx, profileId) {
         };
     }
 
-    let supported = true;
+    let supported;
     try {
         supported = typeof service.isProfileSupported === 'function' ? service.isProfileSupported(profile) : true;
     } catch {

@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import {
     ensureSettings, getState, setWritableBookSetting, setDescStorageMode,
     isLearningActive, markLearningRunning, isEnabled,
-} from '../../src/store.js';
+} from '../../src/features/settings/index.js';
 import { createContext } from '../helpers/context.js';
 
 it('migrates obsolete settings once, deletes migrated keys and preserves prompt order', () => {

@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, it, expect } from 'vitest';
-import { getToolDefs } from '../../src/tools.js';
-import { markLearningRunning, getState, ensureSettings } from '../../src/store.js';
+import { getToolDefs } from '../../src/features/tools/index.js';
+import { markLearningRunning, getState, ensureSettings } from '../../src/features/settings/index.js';
 import { setContext } from '../helpers/host.js';
 import { createContext } from '../helpers/context.js';
 

@@ -1,6 +1,6 @@
 /** Ordered historical migrations. Mutates settings, returns whether persistence is needed. */
 import { DEFAULT_SETTINGS } from './defaults.js';
-import { CARD_ID, DEFAULT_PROMPT_ORDER } from '../../prompt-order.js';
+import { CARD_ID, DEFAULT_PROMPT_ORDER } from '../prompts/prompt-order.js';
 
 export function migrateSettings(settings) {
     let dirty = false;

@@ -1,6 +1,6 @@
 /** backup-store.js · Internal settings module; public entry: index.js. */
 
-import { notifyPanel } from '../../events.js';
+import { notifyPanel } from '../../shared/events.js';
 
 import { loreBackupLimit, normalizeLoreBackup } from './normalization.js';
 

@@ -1,10 +1,10 @@
 /** draft-commit.js · Internal memory module; public entry: index.js. */
 
-import { DRAFT_LAYER, clearDraft, cloneEntries, getDraft, hashEntries } from '../../draft.js';
+import { DRAFT_LAYER, clearDraft, cloneEntries, getDraft, hashEntries } from './draft.js';
 
-import { notifyPanel } from '../../events.js';
+import { notifyPanel } from '../../shared/events.js';
 
-import { dropDraftBackups, rememberLoreBackup, saveChat } from '../../store.js';
+import { dropDraftBackups, rememberLoreBackup, saveChat } from '../settings/index.js';
 
 import { getWritableBook } from './target-selection.js';
 

@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest';
-import { LIMIT_SPECS, clampLimit, readLimits } from '../../src/limits.js';
-import { compilePattern, replaceIn, scan } from '../../src/regex.js';
-import { buildDiffRows } from '../../src/diff.js';
+import { LIMIT_SPECS, clampLimit, readLimits } from '../../src/core/limits.js';
+import { compilePattern, replaceIn, scan } from '../../src/core/regex.js';
+import { buildDiffRows } from '../../src/core/diff.js';
 
 it('clamps every setting and never lets a soft limit exceed its hard limit', () => {
     for (const [key, spec] of Object.entries(LIMIT_SPECS)) {

@@ -2,19 +2,19 @@
 
 import { getContext } from '../../platform/sillytavern/context.js';
 
-import { BOOK_SEEN, bookReadKey, ensureSettings, getReadHash, isLearningActive, lorePatternKey, loreReadKey, loreSeenKey, rememberLoreBackup, saveChat, setReadHash } from '../../store.js';
+import { BOOK_SEEN, bookReadKey, ensureSettings, getReadHash, isLearningActive, lorePatternKey, loreReadKey, loreSeenKey, rememberLoreBackup, saveChat, setReadHash } from '../settings/index.js';
 
-import { readLimits } from '../../limits.js';
+import { readLimits } from '../../core/limits.js';
 
-import { appendLoreEntry, createLoreEntry, findLoreEntry, getWritableBook, listLore, loadWritableBook, locateLoreEntry, replaceLoreEntry } from '../../targets.js';
+import { appendLoreEntry, createLoreEntry, findLoreEntry, getWritableBook, listLore, loadWritableBook, locateLoreEntry, replaceLoreEntry } from '../memory/index.js';
 
-import { isReservedTitle } from '../../desc-entry.js';
+import { isReservedTitle } from '../memory/desc-entry.js';
 
-import { ensureDraft, layerFor, rollbackEmptyDraft } from '../../draft.js';
+import { ensureDraft, layerFor, rollbackEmptyDraft } from '../memory/draft.js';
 
-import { compilePattern, replaceIn, scan } from '../../regex.js';
+import { compilePattern, replaceIn, scan } from '../../core/regex.js';
 
-import { fnv1a, isBlank, truncate } from '../../util.js';
+import { fnv1a, isBlank, truncate } from '../../shared/util.js';
 
 import { LOG, applyBookNotes, applyReadNotes, bookNote, canReplace, errorResult, normalizeKeys, normalizeLogic, registerLoreWrite } from './tool-contracts.js';
 

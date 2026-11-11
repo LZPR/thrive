@@ -10,9 +10,9 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { LEARN_INTERVAL_MAX, clampInterval, parseKeywords } from '../../auto-learn.js';
-import { ensureSettings } from '../../store.js';
-import { refreshUI } from '../refresh.js';
+import { LEARN_INTERVAL_MAX, clampInterval, parseKeywords } from '../../features/learning/auto-learn.js';
+import { ensureSettings } from '../../features/settings/index.js';
+import { refreshUI } from '../shared/refresh.js';
 import { byId, paintHint, scheduleSave } from './common.js';
 
 export function bindLearnCriteria() {

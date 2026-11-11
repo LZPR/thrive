@@ -2,10 +2,10 @@
 import { describe, it, expect } from 'vitest';
 import {
     assertProtocol, systemText, userText, userWithImages, assistantReply, toolResult, toChat, estimateTokens,
-} from '../../src/session-messages.js';
-import { detectShape, readReply } from '../../src/session-provider.js';
-import { compilePreset } from '../../src/session-preset.js';
-import { createSessionTools, executeTool } from '../../src/session-tools.js';
+} from '../../src/features/session/session-messages.js';
+import { detectShape, readReply } from '../../src/features/session/session-provider.js';
+import { compilePreset } from '../../src/features/session/session-preset.js';
+import { createSessionTools, executeTool } from '../../src/features/session/session-tools.js';
 
 describe('session message protocol', () => {
     it('preserves system/user messages and pairs each tool result with its normalized call id', () => {

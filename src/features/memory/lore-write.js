@@ -1,8 +1,8 @@
 /** lore-write.js · Internal memory module; public entry: index.js. */
 
-import { DRAFT_LAYER, isDraftBook } from '../../draft.js';
+import { DRAFT_LAYER, isDraftBook } from './draft.js';
 
-import { appendParagraph } from '../../util.js';
+import { appendParagraph } from '../../shared/util.js';
 
 import { noSaveApi } from './target-errors.js';
 

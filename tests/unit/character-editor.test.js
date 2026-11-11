@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, it, expect } from 'vitest';
-import { applyDescriptionLocally, refreshDescriptionEditor } from '../../src/targets.js';
+import { applyDescriptionLocally, refreshDescriptionEditor } from '../../src/features/memory/index.js';
 
 beforeEach(() => {
     document.body.innerHTML = '<input id="character_name_pole" value="角色"><textarea id="description_textarea">旧描述</textarea>';

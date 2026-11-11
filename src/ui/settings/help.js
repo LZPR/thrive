@@ -9,7 +9,7 @@
  * 顺带勾上勾选框、或者把整组收起来。
  */
 
-import { LOG } from '../shared.js';
+import { LOG } from '../shared/common.js';
 
 /**
  * @param {Element|null} [root] 设置页根节点

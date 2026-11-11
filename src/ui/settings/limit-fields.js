@@ -12,10 +12,10 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { requestCompressScan } from '../../compress.js';
-import { LIMIT_SPECS, clampLimit, readLimits } from '../../limits.js';
-import { ensureSettings } from '../../store.js';
-import { toast } from '../shared.js';
+import { requestCompressScan } from '../../features/memory/compress.js';
+import { LIMIT_SPECS, clampLimit, readLimits } from '../../core/limits.js';
+import { ensureSettings } from '../../features/settings/index.js';
+import { toast } from '../shared/common.js';
 import { byId, paintHint } from './common.js';
 
 /** 设置页里的输入框 → limits.js 的键 */

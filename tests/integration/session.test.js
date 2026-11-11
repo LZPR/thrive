@@ -2,7 +2,7 @@ import { it, expect, vi } from 'vitest';
 import {
     openSession, applyPreset, sendUserMessage, runLoop, closeSession,
     runSession, isSessionRunning, abortActiveSession,
-} from '../../src/session.js';
+} from '../../src/features/session/session.js';
 import { createContext } from '../helpers/context.js';
 
 const preset = { id: 'test', runs: [{ role: 'system', text: '隔离会话' }] };

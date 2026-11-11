@@ -1,6 +1,6 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { createContext } from '../helpers/context.js';
-import { ensureSettings, getLearn } from '../../src/store.js';
+import { ensureSettings, getLearn } from '../../src/features/settings/index.js';
 
 const runner = vi.hoisted(() => ({
     busy: false,
@@ -9,13 +9,13 @@ const runner = vi.hoisted(() => ({
     abortActiveSession: vi.fn(),
 }));
 
-vi.mock('../../src/session.js', () => ({
+vi.mock('../../src/features/session/session.js', () => ({
     isSessionRunning: () => runner.busy,
     runSession: runner.runSession,
     abortActiveSession: runner.abortActiveSession,
 }));
 
-import { startLearning, stopLearning, clearLearningQueue, getLearningQueue, MAX_QUEUE } from '../../src/learning.js';
+import { startLearning, stopLearning, clearLearningQueue, getLearningQueue, MAX_QUEUE } from '../../src/features/learning/learning.js';
 
 beforeEach(() => {
     clearLearningQueue();

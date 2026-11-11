@@ -4,10 +4,9 @@ import { it as check } from 'vitest';
 
 globalThis.document = { getElementById: () => null, dispatchEvent: () => {} };
 
-const SRC = '../../src/';
-const store = await import(`${SRC}store.js`);
-const draft = await import(`${SRC}draft.js`);
-const targets = await import(`${SRC}targets.js`);
+const store = await import('../../src/features/settings/index.js');
+const draft = await import('../../src/features/memory/draft.js');
+const targets = await import('../../src/features/memory/index.js');
 
 const BOOK = '测试书';
 const OTHER = '另一本书';

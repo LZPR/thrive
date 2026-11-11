@@ -1,8 +1,8 @@
 import { it, expect } from 'vitest';
-import { normalizeOrder } from '../../src/prompt-order.js';
-import { parseStPreset, applyPresetImport } from '../../src/prompt-import.js';
-import { buildPreset } from '../../src/prompt.js';
-import { ensureSettings } from '../../src/store.js';
+import { normalizeOrder } from '../../src/features/prompts/prompt-order.js';
+import { parseStPreset, applyPresetImport } from '../../src/features/prompts/prompt-import.js';
+import { buildPreset } from '../../src/features/prompts/prompt.js';
+import { ensureSettings } from '../../src/features/settings/index.js';
 import { createContext } from '../helpers/context.js';
 
 it('keeps explicit order, removes duplicates and deleted cards, and pins the target last', () => {

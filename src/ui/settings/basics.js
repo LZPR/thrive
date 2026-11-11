@@ -6,8 +6,8 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { refreshUI } from '../refresh.js';
-import { ensureSettings } from '../../store.js';
+import { refreshUI } from '../shared/refresh.js';
+import { ensureSettings } from '../../features/settings/index.js';
 import { byId, syncCheckbox } from './common.js';
 
 export function bindBasicsControls() {
