@@ -21,6 +21,23 @@
  * 真要改就得连带写迁移，所以把它当格式常量看待。
  */
 export const DESC_ENTRY_TITLE = '【角色描述】';
+export const DESC_FORMAT = Object.freeze({
+    TEXT: 'text',
+    PLIST: 'plist',
+    ALI_CHAT: 'alichat',
+});
+export const DESC_ENTRY_TITLES = Object.freeze({
+    [DESC_FORMAT.TEXT]: DESC_ENTRY_TITLE,
+    [DESC_FORMAT.PLIST]: '【角色描述 · PLists】',
+    [DESC_FORMAT.ALI_CHAT]: '【角色描述 · Ali:Chat】',
+});
+
+/** 缺字段沿用自然文本；显式空数组表示不使用任何描述工具。 */
+export function normalizeDescFormats(value) {
+    return Array.isArray(value)
+        ? Object.values(DESC_FORMAT).filter(format => value.includes(format))
+        : [DESC_FORMAT.TEXT];
+}
 
 /** 存储模式：'card'（角色卡，默认）/ 'worldbook'（世界书条目） */
 export const DESC_STORAGE = Object.freeze({
@@ -56,7 +73,7 @@ export function descBookName(character) {
  * @returns {boolean}
  */
 export function isReservedTitle(title) {
-    return String(title ?? '').trim() === DESC_ENTRY_TITLE;
+    return Object.values(DESC_ENTRY_TITLES).includes(String(title ?? '').trim());
 }
 
 /**

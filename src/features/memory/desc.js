@@ -21,7 +21,7 @@
  * 读取登记都在 tools.js）。
  */
 
-import { DESC_ENTRY_TITLE, DESC_STORAGE, descBookName } from './desc-entry.js';
+import { DESC_ENTRY_TITLE, DESC_ENTRY_TITLES, DESC_FORMAT, DESC_STORAGE, descBookName, isReservedEntry } from './desc-entry.js';
 import { ensureDraft, layerFor, rollbackEmptyDraft } from './draft.js';
 import { descriptionView } from './patch.js';
 import {
@@ -120,7 +120,7 @@ export async function resolveDescTarget(ctx, options = {}) {
         ok: true,
         book: book.book,
         data: book.data,
-        found: findLoreEntry(book.data, DESC_ENTRY_TITLE, { includeReserved: true }),
+        found: findLoreEntry(book.data, descriptionTitle(options.format), { includeReserved: true }),
         createdBook: book.created,
     };
 }
@@ -135,7 +135,7 @@ async function resolveBook(ctx, character, create) {
     const cached = cachedBook(character);
     if (cached) {
         const loaded = await loadBook(ctx, cached);
-        if (loaded.ok && findLoreEntry(loaded.data, DESC_ENTRY_TITLE, { includeReserved: true })) {
+        if (loaded.ok && Object.values(loaded.data.entries ?? {}).some(isReservedEntry)) {
             return { ok: true, book: loaded.book, data: loaded.data, created: false };
         }
     }
@@ -144,7 +144,7 @@ async function resolveBook(ctx, character, create) {
     const bound = boundBookName(character);
     if (bound) {
         const loaded = await loadBook(ctx, bound);
-        if (loaded.ok && findLoreEntry(loaded.data, DESC_ENTRY_TITLE, { includeReserved: true })) {
+        if (loaded.ok && Object.values(loaded.data.entries ?? {}).some(isReservedEntry)) {
             return { ok: true, book: loaded.book, data: loaded.data, created: false };
         }
     }
@@ -283,8 +283,8 @@ function normalizeName(name) {
  * @param {object} ctx
  * @returns {Promise<{ ok: true, book: string, created: boolean } | { ok: false, error: string, hint?: string }>}
  */
-export async function ensureDescEntry(ctx) {
-    const target = await resolveDescTarget(ctx, { create: true });
+export async function ensureDescEntry(ctx, format = DESC_FORMAT.TEXT) {
+    const target = await resolveDescTarget(ctx, { create: true, format });
     if (!target.ok) {
         return target;
     }
@@ -296,6 +296,7 @@ export async function ensureDescEntry(ctx) {
     const entry = buildDescEntry(ensureSettings(ctx), {
         uid: nextLoreUid(target.data),
         content: '',
+        title: descriptionTitle(format),
     });
     target.data.entries[String(entry.uid)] = entry;
 
@@ -317,8 +318,8 @@ export async function ensureDescEntry(ctx) {
  * @returns {Promise<{ ok: true, book: string, text: string, missing: boolean }
  *          | { ok: false, error: string, hint?: string, text: string }>}
  */
-export async function readDesc(ctx) {
-    const target = await resolveDescTarget(ctx, { create: false });
+export async function readDesc(ctx, format = DESC_FORMAT.TEXT) {
+    const target = await resolveDescTarget(ctx, { create: false, format });
     if (!target.ok) {
         return { ...target, text: '' };
     }
@@ -381,10 +382,11 @@ export async function readDescription(ctx) {
  * @returns {Promise<{ ok: true, book: string, chars: number, beforeChars: number, action: 'created'|'rewritten' }
  *          | { ok: false, error: string, hint?: string }>}
  */
-export async function writeDesc(ctx, text) {
+export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT) {
     const next = normalizeEol(String(text ?? ''));
 
-    const target = await resolveDescTarget(ctx, { create: true });
+    const title = descriptionTitle(format);
+    const target = await resolveDescTarget(ctx, { create: true, format });
     if (!target.ok) {
         return target;
     }
@@ -406,13 +408,14 @@ export async function writeDesc(ctx, text) {
         return drafted;
     }
 
-    let found = findLoreEntry(loaded.data, DESC_ENTRY_TITLE, { includeReserved: true });
+    let found = findLoreEntry(loaded.data, title, { includeReserved: true });
     let action = 'rewritten';
 
     if (!found) {
         const entry = buildDescEntry(ensureSettings(ctx), {
             uid: nextLoreUid(loaded.data),
             content: '',
+            title,
         });
         loaded.data.entries[String(entry.uid)] = entry;
         found = { key: String(entry.uid), uid: entry.uid, entry };
@@ -444,7 +447,7 @@ export async function writeDesc(ctx, text) {
      */
     rememberLoreBackup(ctx, {
         book: target.book,
-        title: DESC_ENTRY_TITLE,
+        title,
         action,
         layer: layerFor(ctx, target.book),
         before,
@@ -471,8 +474,8 @@ export async function writeDesc(ctx, text) {
  * @param {boolean} enabled
  * @returns {Promise<{ ok: true, changed: boolean, book?: string } | { ok: false, error: string, hint?: string }>}
  */
-export async function setDescEntryEnabled(ctx, enabled) {
-    const target = await resolveDescTarget(ctx, { create: false });
+export async function setDescEntryEnabled(ctx, enabled, format = DESC_FORMAT.TEXT) {
+    const target = await resolveDescTarget(ctx, { create: false, format });
     // 书都还没建：停用是空操作，不该把切换流程卡住
     if (!target.ok || !target.found) {
         return { ok: true, changed: false };
@@ -483,7 +486,7 @@ export async function setDescEntryEnabled(ctx, enabled) {
         return { ok: true, changed: false };
     }
 
-    const found = findLoreEntry(loaded.data, DESC_ENTRY_TITLE, { includeReserved: true });
+    const found = findLoreEntry(loaded.data, descriptionTitle(format), { includeReserved: true });
     if (!found) {
         return { ok: true, changed: false };
     }
@@ -537,7 +540,7 @@ function buildDescEntry(settings, fields) {
         // 常驻条目不需要关键词；显式给空数组，避免"缺 key 字段"被别的工具当成异常
         key: [],
         keysecondary: [],
-        comment: DESC_ENTRY_TITLE,
+        comment: fields.title ?? DESC_ENTRY_TITLE,
         content: String(fields.content ?? ''),
         constant: true,
         vectorized: false,
@@ -575,4 +578,24 @@ function buildDescEntry(settings, fields) {
         ignoreBudget: false,
         triggers: [],
     };
+}
+
+function descriptionTitle(format = DESC_FORMAT.TEXT) {
+    const title = DESC_ENTRY_TITLES[format];
+    if (!title) throw new Error(`Unknown description format: ${format}`);
+    return title;
+}
+
+/** 仅为启用的方式创建条目；切换方式/落点时保留已有正文并同步常驻状态。 */
+export async function syncDescEntries(ctx, formats) {
+    for (const format of Object.values(DESC_FORMAT)) {
+        const enabled = formats.includes(format);
+        if (enabled) {
+            const ensured = await ensureDescEntry(ctx, format);
+            if (!ensured.ok) return ensured;
+        }
+        const result = await setDescEntryEnabled(ctx, enabled, format);
+        if (!result.ok) return result;
+    }
+    return { ok: true };
 }

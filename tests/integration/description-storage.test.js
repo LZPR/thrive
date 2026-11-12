@@ -1,11 +1,11 @@
 // Current storage scenarios from .workbuddy/desc-tests: no legacy global tool registration.
 import { it, expect } from 'vitest';
 import { createContext } from '../helpers/context.js';
-import { ensureSettings, getState } from '../../src/features/settings/index.js';
-import { ensureDescEntry, readDescription, writeDesc } from '../../src/features/memory/desc.js';
+import { ensureSettings, getState, getDescFormats, getActiveDescFormats, setDescFormats, setDescStorageMode } from '../../src/features/settings/index.js';
+import { ensureDescEntry, readDesc, readDescription, syncDescEntries, writeDesc } from '../../src/features/memory/desc.js';
 import { commitDraft, listLore, findLoreEntry } from '../../src/features/memory/index.js';
 import { scanCompressTargets, saveManualEdit } from '../../src/features/memory/compress.js';
-import { DESC_ENTRY_TITLE } from '../../src/features/memory/desc-entry.js';
+import { DESC_ENTRY_TITLE, DESC_ENTRY_TITLES } from '../../src/features/memory/desc-entry.js';
 
 function host() {
     const ctx = createContext({ metadata: { thrive: { descStorage: 'worldbook' } } });
@@ -33,6 +33,40 @@ it('creates the reserved description entry, stages edits and hides it from lore 
     expect(await commitDraft(ctx)).toMatchObject({ ok: true });
     expect(Object.values(books.get('测试角色').entries)[0].content).toBe('喜欢喝茶');
     expect(ctx.characters[0].description).toBe('原始描述');
+});
+
+it('stores each format in its own reserved entry and preserves draft/disk separation', async () => {
+    const { ctx, books } = host();
+    ctx.characters[0].avatar = 'formats.png';
+    await syncDescEntries(ctx, ['text', 'plist', 'alichat']);
+    expect(Object.values(books.get('测试角色').entries).map(entry => entry.comment)).toEqual(Object.values(DESC_ENTRY_TITLES));
+    await writeDesc(ctx, '[persona: kind]', 'plist');
+    await writeDesc(ctx, '<START>\n{{user}}: Name?\n{{char}}: Eden.', 'alichat');
+    expect((await readDesc(ctx)).text).toBe('');
+    expect((await readDesc(ctx, 'plist')).text).toBe('[persona: kind]');
+    expect((await listLore(ctx)).items).toEqual([]);
+    expect(Object.values(books.get('测试角色').entries).every(entry => entry.content === '')).toBe(true);
+    await commitDraft(ctx);
+    await syncDescEntries(ctx, ['alichat']);
+    const entries = Object.values(books.get('测试角色').entries);
+    expect(entries.map(entry => entry.disable)).toEqual([true, true, false]);
+    expect(entries[1].content).toBe('[persona: kind]');
+    await syncDescEntries(ctx, ['plist', 'alichat']);
+    expect((await readDesc(ctx, 'plist')).text).toBe('[persona: kind]');
+});
+
+it('normalizes selections per chat and only activates structured formats in worldbook mode', () => {
+    const ctx = createContext();
+    expect(getDescFormats(ctx)).toEqual(['text']);
+    setDescFormats(ctx, ['alichat', 'plist', 'plist', 'unknown']);
+    expect(getDescFormats(ctx)).toEqual(['plist', 'alichat']);
+    expect(getActiveDescFormats(ctx)).toEqual([]);
+    setDescStorageMode(ctx, 'worldbook');
+    expect(getActiveDescFormats(ctx)).toEqual(['plist', 'alichat']);
+    ctx.chatMetadata = {};
+    expect(getDescFormats(ctx)).toEqual(['text']);
+    setDescFormats(ctx, []);
+    expect(getDescFormats(ctx)).toEqual([]);
 });
 
 it('continues using a renamed character’s bound description book', async () => {

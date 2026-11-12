@@ -1,7 +1,7 @@
 import { isChatAvailable, saveChat } from '../../platform/sillytavern/storage.js';
 /** chat-store.js · Internal settings module; public entry: index.js. */
 
-import { DESC_STORAGE } from '../memory/desc-entry.js';
+import { DESC_FORMAT, DESC_STORAGE, normalizeDescFormats } from '../memory/desc-entry.js';
 
 import { MODULE_NAME } from './defaults.js';
 
@@ -61,6 +61,7 @@ function createChatState(settings) {
          * 换个对话就换个角色，本来就不该共用。
          */
         descStorage: normalizeDescStorage(legacyChatValue(settings, 'descStorage')),
+        descFormats: [DESC_FORMAT.TEXT],
         /** 可写世界书；空 = 这一场对话还没选书（世界书工具不注册） */
         writableBook: typeof legacyBook === 'string' ? legacyBook.trim() : '',
         /**
@@ -110,6 +111,7 @@ function getState(ctx) {
     state.descStorage = normalizeDescStorage(
         state.descStorage ?? legacyChatValue(settings, 'descStorage'),
     );
+    state.descFormats = normalizeDescFormats(state.descFormats);
     if (typeof state.writableBook !== 'string') {
         const legacyBook = legacyChatValue(settings, 'writableBook');
         state.writableBook = typeof legacyBook === 'string' ? legacyBook.trim() : '';
@@ -211,6 +213,24 @@ function setDescStorageMode(ctx, mode) {
     dropLegacyChatValue(ctx, 'descStorage');
     saveChat(ctx);
     return state.descStorage;
+}
+
+/** 用户选择保留在对话中；结构化格式在角色卡模式下暂时不生效。 */
+export function getDescFormats(ctx) {
+    return normalizeDescFormats(getState(ctx).descFormats);
+}
+
+export function getActiveDescFormats(ctx) {
+    return getDescFormats(ctx).filter(format => format === DESC_FORMAT.TEXT || isWorldbookDesc(ctx));
+}
+
+export function setDescFormats(ctx, formats) {
+    const state = getState(ctx);
+    state.descFormats = normalizeDescFormats(formats);
+    // 更换访问方式后必须重新读取，不能沿用另一种方式/落点的旧登记。
+    state.reads = {};
+    saveChat(ctx);
+    return state.descFormats;
 }
 
 /** 这一场对话选的可写世界书；空串 = 还没选 */
