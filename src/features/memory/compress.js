@@ -23,7 +23,8 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { getCompactMessage } from '../prompts/prompt.js';
+import { buildPreset, getCompactMessage } from '../prompts/prompt.js';
+import { isSessionRunning, runSession } from '../session/session.js';
 import { isWorldbookDesc, readDesc, writeDesc } from './desc.js';
 import { isReservedEntry } from './desc-entry.js';
 import { COMPRESS_EVENT } from '../../shared/events.js';
@@ -85,6 +86,7 @@ function emptySnapshot() {
 }
 
 let snapshot = emptySnapshot();
+const compressCandidates = new Map();
 
 /** 扫描代次：连发几次扫描时只让最后那次的结果落地 */
 let scanToken = 0;
@@ -370,6 +372,9 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
     }
 
     const before = String(found.entry.content ?? '');
+    if (before !== String(item.text ?? '')) {
+        return { ok: false, error: 'STALE_CONTENT', hint: '这条内容在生成候选后已被修改，请重新扫描并重新生成。' };
+    }
     if (before === text) {
         return { ok: false, error: 'NO_CHANGE', hint: '内容和现在一样，没有需要保存的改动。' };
     }
@@ -430,6 +435,9 @@ async function writeDescription(ctx, item, text) {
         if (!live.ok) {
             return live;
         }
+        if (live.text !== String(item.text ?? '')) {
+            return { ok: false, error: 'STALE_CONTENT', hint: '角色描述在生成候选后已被修改，请重新扫描并重新生成。' };
+        }
         if (live.text === text) {
             return { ok: false, error: 'NO_CHANGE', hint: '内容和条目里的一样，没有需要保存的改动。' };
         }
@@ -461,6 +469,9 @@ async function writeDescription(ctx, item, text) {
     }
 
     const before = diskDescription(ctx);
+    if (before !== String(item.text ?? '')) {
+        return { ok: false, error: 'STALE_CONTENT', hint: '角色描述在生成候选后已被修改，请重新扫描并重新生成。' };
+    }
     if (before === text) {
         return { ok: false, error: 'NO_CHANGE', hint: '内容和角色卡上的一样，没有需要保存的改动。' };
     }
@@ -519,33 +530,70 @@ function locateByUid(data, uid) {
  * @param {Array<object>} items 被勾选的条目
  * @returns {{ ok: false, error: string, hint: string, requests?: Array<{ id: string, prompt: string }> }}
  */
-export function smartCompress(ctx, settings, items) {
+export async function smartCompress(ctx, settings, items) {
     const picked = Array.isArray(items) ? items.filter(Boolean) : [];
 
     if (picked.length === 0) {
-        return {
-            ok: false,
-            error: 'NO_SELECTION',
-            hint: '先在列表里勾选要压缩的条目。',
-        };
+        return { ok: false, generated: 0, failed: 0, hint: '先在列表里勾选要压缩的条目。' };
+    }
+
+    if (isSessionRunning()) return { ok: false, generated: 0, failed: picked.length, hint: '已有学习或会话正在运行，请稍后再试。' };
+
+    let generated = 0;
+    let failed = 0;
+    for (const item of picked) {
+        let previous = compressCandidates.get(item.id);
+        if (previous && previous.source !== String(item.text ?? '')) {
+            compressCandidates.delete(item.id);
+            previous = null;
+        }
+        const source = previous?.source ?? item.text;
+        const preset = buildPreset(settings ?? {}, { target: `${factFor(item)}\n\n${source}` });
+        const result = await runSession({
+            ctx,
+            preset: { id: 'compact', name: '压缩', runs: preset.runs },
+            userMessage: getCompactMessage(settings ?? {}),
+            maxRounds: readLimits(settings ?? {}).learnRounds,
+            tools: [],
+            profileId: String(settings?.connectionProfile ?? ''),
+        });
+        const text = String(result?.reply ?? '').trim();
+        if (!result?.ok || !text) {
+            failed++;
+            continue;
+        }
+
+        const candidate = previous ?? { source, versions: [], index: -1, status: 'pending' };
+        candidate.versions.push(text);
+        if (candidate.versions.length > 10) candidate.versions.shift();
+        candidate.index = candidate.versions.length - 1;
+        candidate.status = 'pending';
+        compressCandidates.set(item.id, candidate);
+        generated++;
     }
 
     return {
-        ok: false,
-        error: 'NOT_IMPLEMENTED',
-        hint: `智能压缩还没接线：勾选的 ${picked.length} 条不会被改动，先用手动编辑。`,
-        /*
-         * 接线时按这份请求发出去。放在返回值里而不是直接调用模型，
-         * 是为了让"还没实现"这一版也能验证提示词拼得对不对。
-         */
-        requests: picked.map(item => ({
-            id: item.id,
-            // 事实在前、指令在后：模型先知道"这条现在多少字、超了多少"，再决定怎么压
-            prompt: [factFor(item), String(getCompactMessage(settings ?? {})).trim()]
-                .filter(Boolean)
-                .join('\n'),
-        })),
+        ok: failed === 0,
+        generated,
+        failed,
+        hint: failed ? `已生成 ${generated} 条，${failed} 条未生成。` : `已为 ${generated} 条生成候选，请检查后决定是否接受。`,
     };
+}
+
+export function getCompressCandidate(id) {
+    const candidate = compressCandidates.get(String(id));
+    return candidate ? { ...candidate, versions: [...candidate.versions] } : null;
+}
+
+export function moveCompressCandidate(id, delta) {
+    const candidate = compressCandidates.get(String(id));
+    if (!candidate) return null;
+    candidate.index = Math.max(0, Math.min(candidate.versions.length - 1, candidate.index + delta));
+    return getCompressCandidate(id);
+}
+
+export function rejectCompressCandidate(id) {
+    return compressCandidates.delete(String(id));
 }
 
 /** 给模型看的事实句：多少字、超了哪个阈值、硬上限在哪 */

@@ -20,7 +20,10 @@
 import { getContext } from '../../platform/sillytavern/context.js';
 import {
     getCompressSnapshot,
+    getCompressCandidate,
+    moveCompressCandidate,
     refreshCompressState,
+    rejectCompressCandidate,
     saveManualEdit,
     smartCompress,
 } from '../../features/memory/compress.js';
@@ -190,14 +193,14 @@ function renderPanel(snapshot) {
             <div class="menu_button thrive-compress__ghost" data-act="pick-all"
                 title="全部勾选 / 全部取消">全选</div>
             <span class="thrive-compress__picked">${escapeHtml(pickedText())}</span>
-            <div class="menu_button thrive-compress__smart" data-act="smart" data-state="todo"
-                title="智能压缩还没接线：点它只会说明原因，不会改动内容">智能压缩所选（待实现）</div>
+            <div class="menu_button thrive-compress__smart" data-act="smart"
+                title="为选中条目生成候选；已有候选会追加一个版本">智能压缩所选</div>
+            <div class="menu_button thrive-compress__ghost" data-act="accept-picked">接受候选</div>
+            <div class="menu_button thrive-compress__ghost" data-act="reject-picked">拒绝候选</div>
             <div class="menu_button thrive-compress__ghost" data-act="rescan"
                 title="重新读一遍世界书与角色描述，按当前上限重算">重新扫描</div>
         </div>
-        <div class="thrive-compress__tip">
-            勾选目前只是标记，方便你分几批处理；真正改内容要靠每行的「编辑」。
-        </div>`;
+        <div class="thrive-compress__tip">候选只暂存在当前页面；接受后才写入对应内容。</div>`;
 }
 
 /**
@@ -273,6 +276,8 @@ function renderItem(item) {
         : `世界书「${item.book}」 · ${item.chars} 字（软 ${item.soft} / 硬 ${item.hard}）`;
 
     const tag = item.level === 'hard' ? '超硬上限' : '超软提醒';
+    const candidate = getCompressCandidate(item.id);
+    const candidateText = candidate?.versions[candidate.index] ?? '';
 
     return `
         <article class="thrive-compress__item thrive-compress__item--${item.level}${checked ? ' is-picked' : ''}"
@@ -289,6 +294,15 @@ function renderItem(item) {
             </div>
             <div class="thrive-compress__item-meta">${escapeHtml(meta)}</div>
             ${editing ? '' : `<div class="thrive-compress__preview">${escapeHtml(previewOf(item.text))}</div>`}
+            ${candidate ? `<div class="thrive-compress__candidate">
+                <div class="thrive-compress__candidate-head">候选 ${candidate.index + 1} / ${candidate.versions.length} · ${candidateText.length} 字</div>
+                <div class="thrive-compress__candidate-text">${escapeHtml(candidateText)}</div>
+                <button type="button" class="menu_button thrive-compress__ghost" data-act="version-prev" ${candidate.index <= 0 ? 'disabled' : ''}>前一版</button>
+                <button type="button" class="menu_button thrive-compress__ghost" data-act="version-next" ${candidate.index >= candidate.versions.length - 1 ? 'disabled' : ''}>后一版</button>
+                <button type="button" class="menu_button thrive-compress__ghost" data-act="smart-one">重新生成</button>
+                <button type="button" class="menu_button thrive-compress__ghost" data-act="accept-one">接受</button>
+                <button type="button" class="menu_button thrive-compress__ghost" data-act="reject-one">拒绝</button>
+            </div>` : ''}
             <div class="thrive-compress__editor${editing ? '' : ' displayNone'}"
                 data-hard="${item.hard}" data-soft="${item.soft}">
                 <textarea class="text_pole thrive-block-text" rows="10" spellcheck="false"
@@ -360,7 +374,34 @@ function onClick(event) {
             break;
 
         case 'smart':
-            reportSmartCompress();
+            void reportSmartCompress();
+            break;
+
+        case 'smart-one':
+            void reportSmartCompress([id]);
+            break;
+
+        case 'accept-one':
+            void processPicked('accept', panel, [id]);
+            break;
+
+        case 'reject-one':
+            processPicked('reject', panel, [id]);
+            break;
+
+        case 'version-prev':
+        case 'version-next':
+            moveCompressCandidate(id, action === 'version-prev' ? -1 : 1);
+            signature = null;
+            refreshCompressPanel(getContext(), true);
+            break;
+
+        case 'accept-picked':
+            void processPicked('accept', panel);
+            break;
+
+        case 'reject-picked':
+            processPicked('reject', panel);
             break;
 
         case 'rescan':
@@ -526,11 +567,65 @@ async function save(id, panel) {
  * 智能压缩（占位）。真正接线之前，这里只把"为什么不能点"说清楚，
  * 以及说明勾选目前只影响标记。
  */
-function reportSmartCompress() {
+async function reportSmartCompress(ids = null) {
     const ctx = getContext();
-    const items = getCompressSnapshot().items.filter(item => picked.has(item.id));
-    const result = smartCompress(ctx, ensureSettings(ctx), items);
-    toast(result.hint);
+    const selected = ids ? new Set(ids) : picked;
+    const items = getCompressSnapshot().items.filter(item => selected.has(item.id));
+    const panel = document.getElementById(COMPRESS_ID);
+    panel?.classList.add('thrive-compress--busy');
+    try {
+        const result = await smartCompress(ctx, ensureSettings(ctx), items);
+        toast(result.hint);
+        signature = null;
+        refreshCompressPanel(ctx, true);
+    } finally {
+        panel?.classList.remove('thrive-compress--busy');
+    }
+}
+
+async function processPicked(action, panel, selectedIds = null) {
+    const ids = selectedIds ?? [...picked];
+    if (!ids.length) {
+        toast('先勾选要处理的条目。');
+        return;
+    }
+    if (action === 'reject') {
+        const removed = ids.filter(id => rejectCompressCandidate(id)).length;
+        toast(removed ? `已拒绝 ${removed} 条候选。` : '选中的条目没有候选版本。');
+        signature = null;
+        refreshCompressPanel(getContext(), true);
+        return;
+    }
+
+    const ctx = getContext();
+    const items = getCompressSnapshot().items;
+    panel?.classList.add('thrive-compress--busy');
+    let accepted = 0;
+    let failed = 0;
+    try {
+        for (const id of ids) {
+            const item = items.find(row => row.id === id);
+            const candidate = getCompressCandidate(id);
+            if (!item || !candidate) continue;
+            const result = await saveManualEdit(ctx, item, candidate.versions[candidate.index]);
+            if (result.ok) {
+                rejectCompressCandidate(id);
+                picked.delete(id);
+                accepted++;
+            } else {
+                failed++;
+            }
+        }
+        toast(failed ? `已接受 ${accepted} 条，${failed} 条未能写入。` : `已接受 ${accepted} 条候选。`);
+        if (accepted) {
+            await refreshCompressState(ctx);
+            refreshCompressEntry();
+        }
+        signature = null;
+        refreshCompressPanel(ctx, true);
+    } finally {
+        panel?.classList.remove('thrive-compress--busy');
+    }
 }
 
 /** id 里可能带引号、竖线、空格——拼进选择器前先转义 */

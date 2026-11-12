@@ -1320,6 +1320,28 @@ body.thrive-panel-dragging {
     white-space: pre-wrap;
 }
 
+.thrive-compress__candidate {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.35));
+}
+
+.thrive-compress__candidate-head {
+    margin-bottom: 5px;
+    font-size: calc(var(--mainFontSize, 15px) * 0.78);
+    font-weight: 600;
+}
+
+.thrive-compress__candidate-text {
+    max-height: 18em;
+    overflow: auto;
+    margin-bottom: 6px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: calc(var(--mainFontSize, 15px) * 0.82);
+    line-height: 1.5;
+}
+
 .thrive-compress__editor {
     display: flex;
     flex-direction: column;
