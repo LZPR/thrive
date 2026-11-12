@@ -10,7 +10,7 @@ import { getActiveCharacter } from '../memory/index.js';
 
 import { PATCH_STATUS, diskDescription, getPatch, stagePatch } from '../memory/patch.js';
 
-import { isWorldbookDesc, readDescription, writeDesc } from '../memory/desc.js';
+import { ensureDescEntry, isWorldbookDesc, readDescription, writeDesc } from '../memory/desc.js';
 
 import { compilePattern, replaceIn, scan } from '../../core/regex.js';
 
@@ -26,6 +26,10 @@ async function handleDescRead(params) {
 
     if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
+    }
+    if (isWorldbookDesc(ctx)) {
+        const ensured = await ensureDescEntry(ctx);
+        if (!ensured.ok) return errorResult(ensured.error, ensured.hint);
     }
 
     const limits = readLimits(settings);

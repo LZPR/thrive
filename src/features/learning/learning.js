@@ -397,7 +397,7 @@ async function runLearning(ctx, { reason, settings, limits, preset, images = nul
             userMessage: getLearningMessage(settings),
             images: attached,
             maxRounds: limits.learnRounds,
-            tools: createSessionTools(),
+            tools: createSessionTools({ ctx }),
             profileId,
         });
     } catch (err) {

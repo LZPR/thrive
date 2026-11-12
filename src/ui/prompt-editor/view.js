@@ -190,11 +190,11 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
                 <p class="thrive-prompts__tool-desc">${escapeHtml(tool.description)}</p>
             </article>`).join('')}</div>
             <small class="thrive-prompts__fold-hint">
-                学习会话里这些工具全部带上。世界书那几个还要求这一场对话里选好了可写书——
-                没选的时候它们会拒绝调用，不是没带。
+                描述工具按当前对话的编辑方式筛选；只有生效的方式会发送给新会话。
+                世界书工具还要求这一场对话选好了可写书。
             </small>`;
     
-        return renderFold('tools', '工具列表', `${tools.length} 个 · 全部激活`, inner);
+        return renderFold('tools', '工具列表', `${tools.length} 个 · ${tools.filter(tool => tool.active).length} 个可用`, inner);
     }
     
     

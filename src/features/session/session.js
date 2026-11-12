@@ -111,7 +111,7 @@ export async function openSession({ ctx, deps = null, preset = null, maxRounds =
         st: probed.st ?? null,
         deps: { request },
         messages: [],
-        tools: Array.isArray(tools) ? tools : createSessionTools(),
+        tools: Array.isArray(tools) ? tools : createSessionTools({ ctx }),
         sampling: deps?.sampling ?? DEFAULT_SAMPLING,
         abort: new AbortController(),
         limits,

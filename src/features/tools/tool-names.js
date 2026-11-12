@@ -18,6 +18,14 @@ export const TOOL_NAMES = Object.freeze({
     DESC_APPEND: 'desc_append',
     DESC_REPLACE: 'desc_replace',
     DESC_REWRITE: 'desc_rewrite',
+    PLIST_READ: 'plist_read',
+    PLIST_ADD: 'plist_add',
+    PLIST_UPDATE: 'plist_update',
+    PLIST_DELETE: 'plist_delete',
+    ALICHAT_READ: 'alichat_read',
+    ALICHAT_ADD: 'alichat_add',
+    ALICHAT_UPDATE: 'alichat_update',
+    ALICHAT_DELETE: 'alichat_delete',
 
     // —— 世界书
     LORE_LIST: 'lore_list',

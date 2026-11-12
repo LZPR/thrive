@@ -15,6 +15,8 @@
  */
 
 import { getToolDefs } from '../tools/index.js';
+import { getContext } from '../../platform/sillytavern/context.js';
+import { isDescriptionToolEnabled } from '../tools/tool-availability.js';
 
 /**
  * 造一组会话工具。
@@ -25,8 +27,9 @@ import { getToolDefs } from '../tools/index.js';
  * @param {{ defs?: Array<object> }} [options] 传 defs 可以换一套（自检 / 测试用）
  * @returns {Array<{ name: string, description: string, parameters: object, run: Function }>}
  */
-export function createSessionTools({ defs = null } = {}) {
-    const source = Array.isArray(defs) ? defs : getToolDefs();
+export function createSessionTools({ defs = null, ctx = null } = {}) {
+    const source = Array.isArray(defs) ? defs
+        : getToolDefs().filter(def => isDescriptionToolEnabled(ctx ?? getContext(), def.name));
 
     return source.map(def => ({
         name: String(def.name ?? ''),

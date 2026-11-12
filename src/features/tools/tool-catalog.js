@@ -9,6 +9,7 @@ import { guardAction } from './tool-availability.js';
 import { handleLoreAdd, handleLoreAppend, handleLoreList, handleLoreRead, handleLoreReplace, handleLoreRewrite } from './lore-handlers.js';
 
 import { handleDescAppend, handleDescRead, handleDescReplace, handleDescRewrite } from './desc-handlers.js';
+import { handleStructuredDesc } from './structured-desc-handlers.js';
 
 /** 工具定义表。`{ name, description, parameters, action }`，action 永不 throw */
 const DEFS = [];
@@ -31,9 +32,58 @@ function getToolDefs() {
     if (!built) {
         buildLoreTools();
         buildDescTools();
+        buildStructuredTools();
         built = true;
     }
     return DEFS.slice();
+}
+
+function buildStructuredTools() {
+    for (const format of ['plist', 'alichat']) {
+        const label = format === 'plist' ? 'PLists' : 'Ali:Chat';
+        const fields = format === 'plist'
+            ? {
+                key: { type: 'string', description: '分类名，例如角色的性格。' },
+                traits: { type: 'array', items: { type: 'string' }, minItems: 1, description: '属性文字数组，例如 kind、hair(red)。' },
+            }
+            : {
+                index: { type: 'integer', minimum: 0, description: '从 0 开始的位置；新增时省略表示追加。插入或删除后以后续返回的位置为准。' },
+                question: { type: 'string', description: '访谈问题，可含多行。' },
+                answer: { type: 'string', description: '角色的示例回答，体现语气、行动和态度，可含多行。' },
+            };
+        const descriptions = format === 'plist'
+            ? {
+                read: '读取 PLists 分类及属性。省略 key 返回整个字典，给 key 只查该分类（含不存在的分类）。',
+                add: '向分类加入属性并去重；分类不存在则新建。必须先读取该分类或整个字典。',
+                update: '替换已有分类的全部属性；必须先读取该分类或整个字典。',
+                delete: '删除已有分类；给 traits 则只删除指定属性。必须先读取该分类或整个字典。',
+            }
+            : {
+                read: '读取 Ali:Chat 问答列表及位置。省略 index 返回全部，给 index 只查该位置。',
+                add: '新增一组问答。省略 index 追加，给 index 插入该位置。必须先读取整个列表。',
+                update: '替换指定位置的一组问答。必须先读取该位置或整个列表。',
+                delete: '删除指定位置的一组问答。必须先读取该位置或整个列表。',
+            };
+        for (const operation of ['read', 'add', 'update', 'delete']) {
+            const name = `${format}_${operation}`;
+            const selector = format === 'plist' ? 'key' : 'index';
+            const properties = operation === 'read'
+                ? { [selector]: fields[selector] }
+                : operation === 'delete' && format === 'alichat' ? { index: fields.index } : fields;
+            const required = operation === 'read' ? []
+                : format === 'plist' ? (operation === 'delete' ? ['key'] : ['key', 'traits'])
+                    : operation === 'add' ? ['question', 'answer']
+                        : operation === 'delete' ? ['index'] : ['index', 'question', 'answer'];
+            define({
+                name,
+                displayName: `${label} · ${ { read: '读取', add: '新增', update: '修改', delete: '删除' }[operation]}`,
+                description: `${descriptions[operation]}仅操作角色描述的专属世界书条目，自动序列化保存。`,
+                parameters: { type: 'object', properties, required },
+                action: guardAction(name, params => handleStructuredDesc(format, operation, params)),
+                formatMessage: () => `${label} ${operation}`,
+            });
+        }
+    }
 }
 
 /* ------------------------------------------------------------ 世界书工具 */

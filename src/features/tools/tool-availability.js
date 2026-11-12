@@ -2,7 +2,7 @@
 
 import { getContext } from '../../platform/sillytavern/context.js';
 
-import { isLearningActive } from '../settings/index.js';
+import { getActiveDescFormats, isLearningActive } from '../settings/index.js';
 
 import { getWritableBook } from '../memory/index.js';
 
@@ -23,9 +23,19 @@ function isToolAvailable(name) {
     }
 
     const key = String(name ?? '');
+    if (!isDescriptionToolEnabled(getContext(), key)) return false;
     if (key.startsWith('lore_')) {
         return Boolean(getWritableBook(getContext()));
     }
+    return true;
+}
+
+/** 编工具表和运行时守卫共用：未启用的描述方式完全不出现在请求中。 */
+export function isDescriptionToolEnabled(ctx, name) {
+    const formats = getActiveDescFormats(ctx);
+    if (name.startsWith('desc_')) return formats.includes('text');
+    if (name.startsWith('plist_')) return formats.includes('plist');
+    if (name.startsWith('alichat_')) return formats.includes('alichat');
     return true;
 }
 

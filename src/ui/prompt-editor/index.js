@@ -54,6 +54,8 @@ import { DEFAULT_PROMPT_ORDER, isPinnedCard, normalizeOrder } from '../../featur
 import { applyPresetImport, importErrorMessage, parseStPreset } from '../../features/prompts/prompt-import.js';
 import { ensureSettings } from '../../features/settings/index.js';
 import { getToolDefs } from '../../features/tools/index.js';
+import { isDescriptionToolEnabled } from '../../features/tools/tool-availability.js';
+import { getWritableBook } from '../../features/memory/target-selection.js';
 import { escapeHtml, fnv1a } from '../../shared/util.js';
 import { refreshUI, registerSurfaces } from '../shared/refresh.js';
 import { LOG, PROMPT_WINDOW_ID, askConfirm, toast } from '../shared/common.js';
@@ -357,7 +359,7 @@ function buildView(ctx, settings) {
         };
     });
 
-    const tools = getToolsView();
+    const tools = getToolsView(ctx);
 
     const footHint = editing
         ? 'Ctrl+Enter 保存，Esc 取消；打字时输入 {{ 会弹出宏补全，右上角可全屏编辑。'
@@ -383,13 +385,13 @@ function buildView(ctx, settings) {
  * "这一场对话能不能用"——后者要看有没有选可写书，那个条件在浮动面板里说。
  * 所以这里一律显示激活，只把作用域写在小字里。
  */
-function getToolsView() {
+function getToolsView(ctx) {
     try {
-        return getToolDefs().map(def => ({
+        return getToolDefs().filter(def => isDescriptionToolEnabled(ctx, def.name)).map(def => ({
             name: String(def.name ?? ''),
             label: String(def.displayName ?? def.name ?? ''),
             description: String(def.description ?? ''),
-            active: true,
+            active: !def.name.startsWith('lore_') || Boolean(getWritableBook(ctx)),
         }));
     } catch (err) {
         console.warn(`${LOG} 读不到工具列表`, err);

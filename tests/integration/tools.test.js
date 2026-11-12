@@ -20,7 +20,7 @@ afterEach(() => {
 
 it('exposes a unique private catalog and rejects every call while no learning session runs', async () => {
     const defs = getToolDefs();
-    expect(defs).toHaveLength(10);
+    expect(defs).toHaveLength(18);
     expect(new Set(defs.map(def => def.name)).size).toBe(defs.length);
     for (const def of defs) {
         expect(await def.action({})).toMatchObject({ ok: false, error: 'TOOL_UNAVAILABLE' });
