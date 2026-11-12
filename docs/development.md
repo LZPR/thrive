@@ -92,19 +92,20 @@ Vitest resolver 仅在测试中把宿主 `extensions.js` / `popup.js` 替换为 
 
 ### 历史脚本迁移
 
-`.workbuddy/` 保持只读和 Git 忽略，是验收历史。正式测试不会执行其中脚本或读取其中夹具。
-以下有效行为已迁到维护套件：
+重构期间的一次性验收脚本、截图和提交信息草稿曾集中在 `.workbuddy/`。有效行为全部迁入
+维护套件后，这些文件已清理，目录只保留 `memory/` 的工作记录，仍在 `.gitignore` 中。
+正式测试不执行也不读取其中任何文件。有效行为的去向：
 
-- `draft-check.mjs` 的 12 个草稿/磁盘/恢复层次用例，保留行为断言。
-- `session-check.mjs` 的协议、provider、工具执行、宏顺序、循环、中止和隔离场景；
-  已删除的 scratch、ticket 和默认 stub preset 接口不迁入。
+- `draft-check.mjs` 的 12 个草稿/磁盘/恢复层次用例 → `tests/integration/draft.test.js`，保留行为断言。
+- `session-check.mjs` 的协议、provider、工具执行、宏顺序、循环、中止和隔离场景
+  → `tests/unit/session-protocol.test.js`；已删除的 scratch、ticket 和默认 stub preset 接口不迁入。
 - `per-chat-store-check.mjs` 的跨聊天设置隔离，按当前统一学习语义重写。
-- `desc-tests/` 的自动建书、保留条目、改名绑定和压缩路由场景。
+- `desc-tests/` 的自动建书、保留条目、改名绑定和压缩路由场景 → `tests/integration/description-storage.test.js`。
 - `limits-check.mjs`、`passive-check.mjs` 的有效数值和触发规则；
   旧主动/被动模式、trace、全局工具注册和聊天注入规则已经失效。
-- Python/CDP 的核心 UI 和会话隔离场景由 Playwright 重新表达，旧截图保留为历史。
+- Python/CDP 的核心 UI 和会话隔离场景由 `tests/e2e/` 重新表达。
 
-其余一次性人工验收记录保留，不当成当前可执行的测试保证。
+旧脚本不做归档，也不再是验收依据；需要人工复核时按下面的真实宿主步骤现场做一次。
 新增回归优先进入 Vitest 或 Playwright，避免继续扩充手写测试运行器和 Python/CDP 控制代码。
 
 ## 真实 SillyTavern 验收

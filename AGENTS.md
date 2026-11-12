@@ -4,7 +4,7 @@
 
 Thrive is a client-side SillyTavern extension using browser-native ESM. `index.js` loads `src/app/bootstrap.js`; root `manifest.json`, `settings.html`, and `style.css` remain the installed assets. Business modules live in `src/features/{learning,session,prompts,settings,memory,tools}/`; pure algorithms in `src/core/`, shared utilities/events in `src/shared/`, and host adapters in `src/platform/sillytavern/`. UI modules are grouped by surface under `src/ui/`; panel and prompt-editor renderers are separate from their controllers.
 
-Read `docs/development.md` when changing tooling, imports, module layout, tests, or host adapters; it explains dependency direction, test doubles, legacy-test migration, and real-host acceptance steps. Read `docs/spec.md`, `docs/adr.md`, and `docs/user_stories.md` before changing behavior. `.workbuddy/` is read-only, ignored verification history; maintained tests and product code stay independent of it.
+Read `docs/development.md` when changing tooling, imports, module layout, tests, or host adapters; it explains dependency direction, test doubles, legacy-test migration, and real-host acceptance steps. Read `docs/spec.md`, `docs/adr.md`, and `docs/user_stories.md` before changing behavior. `.workbuddy/` is ignored local scratch space holding only `memory/` notes; nothing outside `memory/` is kept there, and maintained tests and product code stay independent of it.
 
 ## Build, Test, and Development Commands
 
