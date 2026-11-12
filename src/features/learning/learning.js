@@ -5,7 +5,7 @@
  *
  *   1. 把当前对话记录合并成一条"目标内容"（超出字数上限时从最早的消息往前截）
  *   2. 用提示词卡片编译出预设（目标内容 + 自建提示词）
- *   3. 另起一场会话，工具是那十个真实的世界书 / 角色描述工具
+ *   3. 另起一场会话，提供世界书工具及当前启用的角色描述工具
  *   4. 结束后把结果写回对话状态（上次学习、基线），聊天里一个字都不加
  *
  * 目标内容有两个来源：对话记录，或者用户自己写的一段话（"教授"）。后者跳过
@@ -34,6 +34,7 @@ import {
     finishLearn,
     getLastLearnRun,
     getLearningRunning,
+    getActiveDescFormats,
     isChatAvailable,
     isEnabled,
     markLearningRunning,
@@ -287,7 +288,7 @@ function prepare(ctx, task) {
         return { ok: false, error: 'NO_TARGET', hint: '这个对话还没有可学的内容（没有可见消息）。' };
     }
 
-    const preset = buildPreset(settings, { target });
+    const preset = buildPreset(settings, { target, descFormats: getActiveDescFormats(ctx) });
     if (preset.runs.length === 0) {
         return {
             ok: false,
@@ -306,10 +307,10 @@ function prepare(ctx, task) {
             total: countMessages(ctx),
             hash: round.user ? fnv1a(round.user) : '',
         });
-        // 读取登记是"这一轮读过什么"：学习是新一轮，必须重新读才能写
-        resetReads(ctx);
         saveChat(ctx);
     }
+    // 学习和教授都是新会话，均不得沿用上一场的读取登记。
+    resetReads(ctx);
 
     markLearningRunning({ reason: task.reason });
     notifyLearning({ running: true, reason: task.reason, queued: queue.length });

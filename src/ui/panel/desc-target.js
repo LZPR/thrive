@@ -15,7 +15,8 @@
  *     下一次读取才会带上"可写书已切换"的提醒（spec §11.3）。
  */
 
-import { ensureDescEntry, setDescEntryEnabled } from '../../features/memory/desc.js';
+import { syncDescEntries } from '../../features/memory/desc.js';
+import { normalizeDescFormats } from '../../features/memory/desc-entry.js';
 import { clearDraft, summarizeDraft } from '../../features/memory/draft.js';
 import { getPatch, isUnresolved } from '../../features/memory/patch.js';
 import {
@@ -23,6 +24,8 @@ import {
     setDescStorageMode,
     setWritableBookSetting,
     getState,
+    getDescFormats,
+    setDescFormats,
     saveChat,
 } from '../../features/settings/index.js';
 import { getActiveCharacter, getWritableBook, isBookScanned } from '../../features/memory/index.js';
@@ -101,7 +104,22 @@ export function descTargetView(ctx) {
         books.push({ value: book, label: forced ? `${book}（还没建）` : `${book}（已不存在）` });
     }
 
-    return { storage: forced ? 'worldbook' : 'card', forced, book, books };
+    return { storage: forced ? 'worldbook' : 'card', forced, book, books, formats: getDescFormats(ctx) };
+}
+
+export async function changeDescFormats(ctx, formats) {
+    const next = normalizeDescFormats(formats);
+    const chatId = ctx.getCurrentChatId?.();
+    if (isWorldbookDesc(ctx)) {
+        const result = await syncDescEntries(ctx, next);
+        if (!result.ok) {
+            toast(result.hint ?? `切换描述方式失败：${result.error}`);
+            return { ok: false, changed: false };
+        }
+    }
+    if (ctx.getCurrentChatId?.() !== chatId) return { ok: false, changed: false };
+    setDescFormats(ctx, next);
+    return { ok: true, changed: true };
 }
 
 /**
@@ -175,6 +193,7 @@ export async function changeDescStorage(ctx, mode) {
  * @returns {Promise<{ ok: boolean, changed: boolean }>}
  */
 async function switchToWorldbook(ctx) {
+    const chatId = ctx.getCurrentChatId?.();
     if (!getActiveCharacter(ctx)) {
         toast('请先选一个角色');
         return { ok: false, changed: false };
@@ -186,11 +205,12 @@ async function switchToWorldbook(ctx) {
         return { ok: false, changed: false };
     }
 
-    const ensured = await ensureDescEntry(ctx);
+    const ensured = await syncDescEntries(ctx, getDescFormats(ctx));
     if (!ensured.ok) {
         toast(ensured.hint ?? `切换失败：${ensured.error}`);
         return { ok: false, changed: false };
     }
+    if (ctx.getCurrentChatId?.() !== chatId) return { ok: false, changed: false };
 
     setDescStorageMode(ctx, 'worldbook');
 
@@ -199,7 +219,7 @@ async function switchToWorldbook(ctx) {
     if (isBookScanned(ctx, ensured.book) === false) {
         toast(`「${ensured.book}」还没有激活：到「世界书」面板勾选这本书`);
     } else {
-        toast(`已切到世界书条目：描述存在「${ensured.book}」的【角色描述】里`);
+        toast('已切到世界书条目：每种已启用的描述方式各使用一条专属条目');
     }
 
     return { ok: true, changed: true };
@@ -207,16 +227,24 @@ async function switchToWorldbook(ctx) {
 
 /**
  * 切回角色卡模式。条目停用但内容不动：切回来的那天东西还在，只是不再和角色卡抢上下文。
- * 停用失败不拦切换（书可能已经被删了），结果只进控制台。
+ * 停用失败时保留原模式，避免角色卡与世界书同时注入描述。
  */
 async function switchToCard(ctx) {
+    const chatId = ctx.getCurrentChatId?.();
     try {
-        await setDescEntryEnabled(ctx, false);
+        const result = await syncDescEntries(ctx, []);
+        if (!result.ok) {
+            toast(result.hint ?? `切换失败：${result.error}`);
+            return { ok: false, changed: false };
+        }
     } catch (err) {
         console.debug(`${LOG} 停用描述条目失败`, err);
+        toast('停用描述条目失败，请稍后重试');
+        return { ok: false, changed: false };
     }
+    if (ctx.getCurrentChatId?.() !== chatId) return { ok: false, changed: false };
 
     setDescStorageMode(ctx, 'card');
-    toast('已切回角色卡存储；世界书里的【角色描述】条目已停用，内容保留');
+    toast('已切回角色卡存储；世界书里的描述条目已停用，内容保留。PLists / Ali:Chat 暂不生效');
     return { ok: true, changed: true };
 }

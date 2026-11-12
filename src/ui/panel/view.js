@@ -248,6 +248,18 @@ function renderMoreRows({ learn, choice }) {
      * 判据已经不在面板里了（它对所有对话一致），不指路等于让用户在面板里找一圈。
      */
     const noRule = learn.enabled && learn.interval <= 0 && learn.keywordCount === 0;
+    const formats = [
+        ['text', '自然文本'],
+        ['plist', 'PLists'],
+        ['alichat', 'Ali:Chat'],
+    ].map(([format, label]) => {
+        const unavailable = format !== 'text' && !choice.forced;
+        return `<label class="thrive-more__format${unavailable ? ' is-muted' : ''}">
+            <input type="checkbox" data-thrive-field="format-${format}" value="${format}"
+                ${choice.formats.includes(format) ? 'checked' : ''}${unavailable ? ' disabled' : ''}>
+            <span>${label}</span>
+        </label>`;
+    }).join('');
 
     return `
         <div class="thrive-more">
@@ -256,6 +268,14 @@ function renderMoreRows({ learn, choice }) {
                 <select id="thrive_more_storage" class="text_pole thrive-more__select"
                     data-thrive-field="storage">${storageOptions}</select>
             </div>
+
+            <fieldset class="thrive-more__formats">
+                <legend class="thrive-more__label">描述编辑方式 · 可多选</legend>
+                <div class="thrive-more__format-options">${formats}</div>
+                <small class="thrive-hint">${choice.forced
+                    ? '每种方式使用独立条目；仅向新会话提供已启用方式的工具和用途提示。'
+                    : 'PLists / Ali:Chat 仅在描述存于世界书时生效，已选状态保留。'}</small>
+            </fieldset>
 
             <div class="thrive-more__field">
                 <label class="thrive-more__label" for="thrive_more_book">可写书</label>

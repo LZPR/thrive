@@ -16,7 +16,7 @@ function badArgument(hint) {
     return errorResult('INVALID_ARGUMENT', hint);
 }
 
-function readKey(format, book, selection = '*') {
+function readKey(format, book, selection = null) {
     return `structured:${JSON.stringify([format, book, selection])}`;
 }
 
@@ -73,7 +73,7 @@ export async function handleStructuredDesc(format, operation, params = {}) {
     }
 
     // 新增问答会改变列表长度，需要先看整个列表；按位置修改/删除允许只读该位置。
-    const specific = format === 'alichat' && operation === 'add' ? '*' : selected;
+    const specific = format === 'alichat' && operation === 'add' ? null : selected;
     const recorded = [
         getReadHash(ctx, readKey(format, book, specific)),
         getReadHash(ctx, readKey(format, book)),
@@ -88,7 +88,10 @@ export async function handleStructuredDesc(format, operation, params = {}) {
         if (next.length > readLimits(ensureSettings(ctx)).hardLimitDesc) {
             return errorResult('TOO_LONG', '序列化后的描述超过角色描述硬上限，请精简属性或问答。');
         }
-        const written = await writeDesc(ctx, next, format);
+        const written = await writeDesc(ctx, next, format, {
+            expectedText: text,
+            guard: () => isToolAvailable(name) && ctx.chatMetadata === metadata && ctx.getCurrentChatId?.() === chatId,
+        });
         if (!written.ok) return written;
         // 返回完整结构，因此模型可继续操作它刚刚看见的新版本。
         setReadHash(ctx, readKey(format, written.book), fnv1a(next));

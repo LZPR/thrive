@@ -130,3 +130,57 @@ test('saves a buffered worldbook only after the explicit UI save', async ({ page
     await expect.poll(() => page.evaluate(() => window.__host.state.writes)).toBe(1);
     expect(await page.evaluate(() => Object.values(window.__host.state.books['测试书'].entries)[0].comment)).toBe('北境');
 });
+
+test('selects per-chat formats and only sends their tools and editable mandatory usage cards', async ({ page }, testInfo) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeDisabled();
+    await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeEnabled();
+    await panel.locator('[data-thrive-field="format-text"]').uncheck();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual([]);
+    await panel.locator('[data-thrive-field="format-plist"]').check();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual(['plist']);
+    await panel.locator('[data-thrive-field="format-alichat"]').check();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual(['plist', 'alichat']);
+    expect(await page.evaluate(() => Object.values(window.__host.state.books['测试角色'].entries).map(entry => [entry.comment, entry.disable])))
+        .toEqual([['【角色描述】', true], ['【角色描述 · PLists】', false], ['【角色描述 · Ali:Chat】', false]]);
+    await panel.screenshot({ path: testInfo.outputPath('description-formats-panel.png') });
+
+    await page.locator('#thrive_prompt_open').click();
+    const editor = page.locator('#thrive_prompts');
+    for (const id of ['descText', 'descPList', 'descAliChat']) {
+        await expect(editor.locator(`[data-prompt="${id}"] [data-act="toggle"]`)).toHaveCount(0);
+    }
+    await editor.locator('[data-prompt="descPList"] [data-act="edit"]').click();
+    await editor.locator('[data-field="text"]').fill('PLists 仅记录简短、稳定的人物属性。');
+    await expect(editor.locator('[data-act="delete"]')).toHaveCount(0);
+    await editor.locator('[data-act="save"]').click();
+    await editor.locator('[data-fold="tools"] summary').click();
+    await expect(editor.locator('[data-tool^="desc_"]')).toHaveCount(0);
+    await expect(editor.locator('[data-tool^="plist_"]')).toHaveCount(4);
+    await expect(editor.locator('[data-tool^="alichat_"]')).toHaveCount(4);
+    await editor.screenshot({ path: testInfo.outputPath('description-format-prompts.png') });
+    await editor.locator('[data-act="close"]').click();
+    await panel.locator('[data-thrive-action="learn-now"]').click();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
+    const request = await page.evaluate(() => window.__host.state.requests[0]);
+    const names = request.payload.tools.map(tool => tool.function.name);
+    expect(names.filter(name => name.startsWith('desc_'))).toEqual([]);
+    expect(names).toHaveLength(14);
+    const systemText = request.messages.filter(message => message.role === 'system').map(message => message.content).join('\n');
+    expect(systemText).toContain('PLists 仅记录简短、稳定的人物属性。');
+    expect(systemText).toContain('Ali:Chat');
+    expect(systemText).not.toContain('自然文本');
+
+    await panel.locator('[data-thrive-field="storage"]').selectOption('card');
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeDisabled();
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeChecked();
+    expect(await page.evaluate(() => Object.values(window.__host.state.books['测试角色'].entries).every(entry => entry.disable))).toBe(true);
+    await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeEnabled();
+    await page.evaluate(() => window.__host.changeChat('formats-chat-2'));
+    await expect(panel.locator('[data-thrive-field="format-text"]')).toBeChecked();
+    expect(await page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual(['text']);
+});

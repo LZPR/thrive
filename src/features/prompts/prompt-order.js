@@ -21,6 +21,9 @@
  */
 
 export const CARD_ID = Object.freeze({
+    DESC_TEXT: 'descText',
+    DESC_PLIST: 'descPList',
+    DESC_ALICHAT: 'descAliChat',
     /** 目标内容的开始标记：可改、可停用、可删 */
     TARGET_DESC: 'targetDesc',
     /** 目标内容的注入位：没有正文，不可编辑 / 停用 / 删除，永远在最后 */
@@ -28,10 +31,20 @@ export const CARD_ID = Object.freeze({
     /** 目标内容的结束标记：可改、可停用、可删 */
     TARGET_END: 'targetEnd',
 });
+export const DESCRIPTION_CARDS = Object.freeze({
+    [CARD_ID.DESC_TEXT]: 'text',
+    [CARD_ID.DESC_PLIST]: 'plist',
+    [CARD_ID.DESC_ALICHAT]: 'alichat',
+});
+
+export function isConditionalCard(id) {
+    return Object.hasOwn(DESCRIPTION_CARDS, id);
+}
 export const LEGACY_RULES_ID = 'rules';
 
 /** 默认顺序：目标内容始终位于可编辑的开始、结束标记之间 */
 export const DEFAULT_PROMPT_ORDER = Object.freeze([
+    ...Object.keys(DESCRIPTION_CARDS),
     CARD_ID.TARGET_DESC,
     CARD_ID.TARGET,
     CARD_ID.TARGET_END,
@@ -91,6 +104,11 @@ export function normalizeOrder(raw, extraIds = []) {
     const missingExtra = extras.filter(id => !order.includes(id));
     if (missingExtra.length) {
         order.push(...missingExtra);
+    }
+
+    // 用途卡不可删除；保留用户已有次序，只在目标区块前补回缺失的卡。
+    for (const id of Object.keys(DESCRIPTION_CARDS)) {
+        if (!order.includes(id)) order.push(id);
     }
 
     if (input.includes(CARD_ID.TARGET_DESC)) order.push(CARD_ID.TARGET_DESC);

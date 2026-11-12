@@ -62,7 +62,8 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
             ? '<span class="thrive-prompts__grip thrive-prompts__grip--locked fa-solid fa-lock" title="目标内容区块固定在预设末尾"></span>'
             : '<span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序"></span>';
     
-        const note = item.pinned
+        const note = item.conditional ? `${item.chars} 字 · ${item.enabled ? '条件满足' : '条件未满足'}`
+            : item.pinned
             ? '运行时注入 · 内容随触发生成'
             : `${item.chars} 字`;
     
@@ -78,7 +79,7 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
                 <div class="thrive-prompts__note" title="${escapeHtml(item.status)}">${note}</div>
             </div>
             ${editButton}
-            ${item.pinned ? '' : renderSwitch(item)}
+            ${item.pinned || item.conditional ? '' : renderSwitch(item)}
             ${open ? renderEditor(item) : ''}
         </article>`;
     }
@@ -256,7 +257,7 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
                 ${nameField}
                 <label class="thrive-prompts__field thrive-prompts__field--role">
                     <span>角色</span>
-                    <select class="thrive-prompts__role" data-act="role" title="这条消息在会话里用的角色"
+                    <select class="thrive-prompts__role" data-act="role"${item.conditional ? ' disabled' : ''} title="这条消息在会话里用的角色"
                         aria-label="${escapeHtml(item.name)} 的角色">${roleOptions}</select>
                 </label>
                 <span class="thrive-prompts__count">${countText(editing.text)}</span>

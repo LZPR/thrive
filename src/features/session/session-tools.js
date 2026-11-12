@@ -5,7 +5,7 @@
  * 这一次会话的请求体里。这样聊天请求里一个插件工具都没有（ADR-050），
  * 会话自己又永远拿得到完整的一套。
  *
- * 工具实现就是 tools.js 里那十个（世界书 / 角色描述读写）。这里只做两件事：
+ * 工具实现住在 tools feature，描述工具按当前对话的生效方式筛选。这里负责：
  *
  *   1. 把定义表翻译成会话要的形状：`{ name, description, parameters, run }`
  *   2. 执行一次调用，并把结果收成一条**非空**的工具消息正文
@@ -24,7 +24,7 @@ import { isDescriptionToolEnabled } from '../tools/tool-availability.js';
  * tools.js 里的定义用 `action`；这里统一包成 `run`，因为会话只认 `run(args, session)`，
  * 而 `session` 只给确有的工具用（世界书工具不需要 scratch）。
  *
- * @param {{ defs?: Array<object> }} [options] 传 defs 可以换一套（自检 / 测试用）
+ * @param {{ defs?: Array<object>, ctx?: object }} [options] 传 defs 可以换一套（自检 / 测试用）
  * @returns {Array<{ name: string, description: string, parameters: object, run: Function }>}
  */
 export function createSessionTools({ defs = null, ctx = null } = {}) {

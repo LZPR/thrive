@@ -88,6 +88,9 @@ it('requires the selected item to be read and rejects stale reads, including cha
     expect(await call('alichat_add', { question: 'Q2', answer: 'A2' })).toMatchObject({ error: 'READ_REQUIRED' });
     await writeDesc(ctx, '', 'alichat');
     expect(await call('alichat_delete', { index: 0 })).toMatchObject({ error: 'STALE_READ' });
+    getState(ctx).reads = {};
+    await call('plist_read', { key: '*' });
+    expect(await call('plist_update', { key: 'persona', traits: ['quiet'] })).toMatchObject({ error: 'READ_REQUIRED' });
 });
 
 it('preserves malformed manual text and rejects invalid input or oversize serialization', async () => {
@@ -113,4 +116,24 @@ it('blocks all ordinary lore operations on every reserved title', async () => {
         }
     }
     expect(await call('lore_list')).toMatchObject({ titles: [] });
+});
+
+it('creates a missing format entry when read and rejects an edit that races with a reload', async () => {
+    const book = books.get('测试角色');
+    delete book.entries[0];
+    expect(await call('plist_read')).toMatchObject({ ok: true, categories: {} });
+    expect(Object.values(books.get('测试角色').entries).some(entry => entry.comment === DESC_ENTRY_TITLES.plist)).toBe(true);
+    const originalLoad = ctx.loadWorldInfo;
+    let reads = 0;
+    ctx.loadWorldInfo = async name => {
+        reads++;
+        // readDesc 校验后，writeDesc 最后一次重新读取时出现外部写入。
+        if (reads === 3) {
+            const entry = Object.values(books.get(name).entries).find(entry => entry.comment === DESC_ENTRY_TITLES.plist);
+            entry.content = '[persona: externally changed]';
+        }
+        return originalLoad(name);
+    };
+    expect(await call('plist_add', { key: 'persona', traits: ['kind'] })).toMatchObject({ error: 'STALE_READ' });
+    expect(getState(ctx).draft).toBeNull();
 });

@@ -20,7 +20,7 @@
  *      按顺序展开 `{{char}}` / `{{user}}` / `{{setvar::…}}`。
  */
 
-import { CARD_ID, DEFAULT_PROMPT_ORDER, isBuiltinCard, isPinnedCard, normalizeOrder } from './prompt-order.js';
+import { CARD_ID, DEFAULT_PROMPT_ORDER, DESCRIPTION_CARDS, isBuiltinCard, isConditionalCard, isPinnedCard, normalizeOrder } from './prompt-order.js';
 import { createId } from '../../shared/util.js';
 
 /** 与 ST 的 extension_prompt_roles 对应（会话里就是消息的 role） */
@@ -55,7 +55,7 @@ export const DEFAULT_LEARNING_TASK = `【任务】
 · 角色描述 —— 主观的、小而轻：这个角色喜欢什么、性格如何、怎么看对方。
 
 怎么写：
-· 角色描述要像原有人设文字一样自然，不要用列表、小标题或笔记痕迹。
+· 角色描述按已提供的编辑方式与用途提示记录，避免重复记录同一信息。
 · 拿不准的不要写。不要把材料里没有的东西补全成设定，也不要替它做推论。`;
 
 /** 压缩会话只返回候选正文，由用户审批后再写回 */
@@ -77,6 +77,9 @@ export const DEFAULT_COMPACT_TASK = `【任务】
 /** 目标内容边界标记。内容由运行时放在两张卡之间 */
 export const DEFAULT_TARGET_PROMPT = '目标内容从此处开始：';
 export const DEFAULT_TARGET_END_PROMPT = '目标内容到此结束。';
+export const DEFAULT_DESC_TEXT_PROMPT = '自然文本适合连贯的经历、关系与细腻态度。使用 desc_* 工具，写得像原有人设文字，避免列表和笔记痕迹。';
+export const DEFAULT_DESC_PLIST_PROMPT = 'PLists 适合性格、外貌、喜好等简短属性。使用 plist_* 工具按分类维护属性，避免把连贯叙事塞成关键词。';
+export const DEFAULT_DESC_ALICHAT_PROMPT = 'Ali:Chat 适合用示例问答体现角色的说话方式、动作、情绪与处事态度。使用 alichat_* 工具维护有代表性的访谈问答，保持角色语气。';
 
 /**
  * 卡片元信息：界面按 id 取标签与说明，不在这里判断"能不能用"。
@@ -85,6 +88,24 @@ export const DEFAULT_TARGET_END_PROMPT = '目标内容到此结束。';
  * ——它没有正文，也不能不存在。
  */
 export const PROMPT_CARD_META = Object.freeze({
+    [CARD_ID.DESC_TEXT]: {
+        label: '角色描述 · 自然文本',
+        hint: '仅在当前对话启用自然文本时发送；不可删除或停用，可修改用途说明。',
+        editable: true,
+        removable: false,
+    },
+    [CARD_ID.DESC_PLIST]: {
+        label: '角色描述 · PLists',
+        hint: '仅在启用 PLists 且描述存于世界书时发送；不可删除或停用，可修改用途说明。',
+        editable: true,
+        removable: false,
+    },
+    [CARD_ID.DESC_ALICHAT]: {
+        label: '角色描述 · Ali:Chat',
+        hint: '仅在启用 Ali:Chat 且描述存于世界书时发送；不可删除或停用，可修改用途说明。',
+        editable: true,
+        removable: false,
+    },
     [CARD_ID.TARGET_DESC]: {
         label: '目标内容 [开始]',
         hint: '目标内容前的开始标记。可编辑、停用或删除。',
@@ -107,12 +128,18 @@ export const PROMPT_CARD_META = Object.freeze({
 
 /** 卡片 id → 设置键。自建卡不在表里（正文存在自己身上） */
 const CARD_SETTING_KEY = Object.freeze({
+    [CARD_ID.DESC_TEXT]: 'descTextPrompt',
+    [CARD_ID.DESC_PLIST]: 'descPListPrompt',
+    [CARD_ID.DESC_ALICHAT]: 'descAliChatPrompt',
     [CARD_ID.TARGET_DESC]: 'targetPrompt',
     [CARD_ID.TARGET_END]: 'targetEndPrompt',
 });
 
 /** 卡片 id → 默认正文 */
 const CARD_DEFAULT = Object.freeze({
+    [CARD_ID.DESC_TEXT]: DEFAULT_DESC_TEXT_PROMPT,
+    [CARD_ID.DESC_PLIST]: DEFAULT_DESC_PLIST_PROMPT,
+    [CARD_ID.DESC_ALICHAT]: DEFAULT_DESC_ALICHAT_PROMPT,
     [CARD_ID.TARGET_DESC]: DEFAULT_TARGET_PROMPT,
     [CARD_ID.TARGET_END]: DEFAULT_TARGET_END_PROMPT,
 });
@@ -168,7 +195,7 @@ export function getPromptName(settings, id) {
  */
 export function getPromptRole(settings, id) {
     // 注入位没有角色覆盖，始终作为系统消息发送。
-    if (isPinnedCard(id)) {
+    if (isPinnedCard(id) || isConditionalCard(id)) {
         return PROMPT_ROLE.SYSTEM;
     }
 
@@ -191,7 +218,7 @@ export function getPromptRole(settings, id) {
  * @returns {boolean} 有没有这条提示词
  */
 export function setPromptRole(settings, id, role) {
-    if (isPinnedCard(id)) {
+    if (isPinnedCard(id) || isConditionalCard(id)) {
         return false;
     }
 
@@ -230,7 +257,7 @@ export function setPromptRole(settings, id, role) {
  */
 export function isPromptEnabled(settings, id) {
     // 注入位不能停用：停掉它，这一场要处理的内容就无处可放，会话也就没有意义了
-    if (isPinnedCard(id)) {
+    if (isPinnedCard(id) || isConditionalCard(id)) {
         return true;
     }
 
@@ -251,7 +278,7 @@ export function isPromptEnabled(settings, id) {
  * @returns {boolean} 有没有这条提示词
  */
 export function setPromptEnabled(settings, id, enabled) {
-    if (isPinnedCard(id)) {
+    if (isPinnedCard(id) || isConditionalCard(id)) {
         return false;
     }
 
@@ -521,6 +548,9 @@ export function getCardText(settings, id) {
         return String(findCustomPrompt(settings, id)?.content ?? '');
     }
 
+    if (isConditionalCard(id)) {
+        return readText(settings, CARD_SETTING_KEY[id], CARD_DEFAULT[id]);
+    }
     switch (id) {
         case CARD_ID.TARGET_DESC:
             return getTargetPrompt(settings);
@@ -572,7 +602,12 @@ export function getPromptOrder(settings) {
  * @param {string} id
  * @returns {{ state: 'on'|'idle'|'content', note: string }}
  */
-export function getCardState(settings, id) {
+export function getCardState(settings, id, descFormats = ['text']) {
+    if (isConditionalCard(id)) {
+        return isPromptActive(settings, id, descFormats)
+            ? { state: 'on', note: '条件满足 · 新会话发送此用途提示' }
+            : { state: 'idle', note: '条件未满足 · 在浮动面板启用对应描述方式后发送' };
+    }
     if (id === CARD_ID.TARGET) {
         return { state: 'content', note: '运行时填入真正的内容（学习 = 当前对话记录），没有正文可改' };
     }
@@ -607,17 +642,19 @@ export function roleLabel(role) {
     return '系统';
 }
 
+/** 条件卡不能手动停用；发送与否仅由描述方式的生效条件决定。 */
+export function isPromptActive(settings, id, descFormats = ['text']) {
+    return isConditionalCard(id)
+        ? descFormats.includes(DESCRIPTION_CARDS[id])
+        : isPromptEnabled(settings, id);
+}
+
 /**
- * 把卡片拼成会话预设。
- *
- * 从上到下每张卡一条消息；开始标记、目标正文、结束标记均保持独立消息。
- * 目标内容为空时，注入位与两条边界标记都跳过。
- *
  * @param {object} settings
- * @param {{ target?: string }} [options] target = 这一场要处理的内容
+ * @param {{ target?: string, descFormats?: string[] }} [options]
  * @returns {{ order: string[], runs: { role: number, text: string, ids: string[] }[] }}
  */
-export function buildPreset(settings, { target = '' } = {}) {
+export function buildPreset(settings, { target = '', descFormats = ['text'] } = {}) {
     const order = getPromptOrder(settings ?? {});
     const body = String(target ?? '').trim();
     const runs = [];
@@ -632,7 +669,7 @@ export function buildPreset(settings, { target = '' } = {}) {
             continue;
         }
 
-        if (!isPromptEnabled(settings, id)) {
+        if (!isPromptActive(settings, id, descFormats)) {
             continue;
         }
 

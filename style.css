@@ -743,6 +743,32 @@ body.thrive-panel-dragging {
     border-top: 1px solid var(--SmartThemeBorderColor);
 }
 
+.thrive-more__formats {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
+.thrive-more__format-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 6px 0;
+}
+
+.thrive-more__format {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.thrive-more__format.is-muted {
+    opacity: 0.55;
+    cursor: default;
+}
+
 .thrive-more__field {
     display: flex;
     flex-direction: column;

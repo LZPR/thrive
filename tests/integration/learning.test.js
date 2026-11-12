@@ -1,6 +1,6 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { createContext } from '../helpers/context.js';
-import { ensureSettings, getLearn } from '../../src/features/settings/index.js';
+import { ensureSettings, getLearn, getState } from '../../src/features/settings/index.js';
 
 const runner = vi.hoisted(() => ({
     busy: false,
@@ -41,7 +41,9 @@ it('Professor leaves the chat-learning baseline unchanged and fixes its connecti
     const settings = ensureSettings(ctx);
     settings.connectionProfile = 'first';
     getLearn(ctx).baseline = 9;
+    getState(ctx).reads = { desc: 'previous-session' };
     const started = startLearning(ctx, { teach: { text: '教授内容' } });
+    expect(getState(ctx).reads).toEqual({});
     settings.connectionProfile = 'second';
     expect(runner.runSession.mock.calls[0][0]).toMatchObject({ profileId: 'first' });
     expect(getLearn(ctx).baseline).toBe(9);

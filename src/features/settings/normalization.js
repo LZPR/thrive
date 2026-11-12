@@ -4,7 +4,7 @@ import { DESC_STORAGE } from '../memory/desc-entry.js';
 
 import { readLimit } from '../../core/limits.js';
 
-import { CARD_ID, isPinnedCard } from '../prompts/prompt-order.js';
+import { CARD_ID, isConditionalCard, isPinnedCard } from '../prompts/prompt-order.js';
 
 function isPlainObject(value) {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -145,7 +145,7 @@ function normalizeCustomPrompts(raw) {
         }
 
         const id = typeof item.id === 'string' ? item.id.trim() : '';
-        if (!id || seen.has(id)) {
+        if (!id || Object.values(CARD_ID).includes(id) || seen.has(id)) {
             continue;
         }
         seen.add(id);
@@ -183,7 +183,7 @@ function normalizeDisabledCards(raw) {
         return [];
     }
 
-    const known = new Set(Object.values(CARD_ID).filter(id => !isPinnedCard(id)));
+    const known = new Set(Object.values(CARD_ID).filter(id => !isPinnedCard(id) && !isConditionalCard(id)));
     const source = raw;
     const out = [];
 
@@ -202,7 +202,7 @@ function normalizePromptRoles(raw) {
         return {};
     }
 
-    const known = new Set(Object.values(CARD_ID).filter(id => !isPinnedCard(id)));
+    const known = new Set(Object.values(CARD_ID).filter(id => !isPinnedCard(id) && !isConditionalCard(id)));
     const out = {};
     for (const [id, role] of Object.entries(raw)) {
         if (known.has(id) && (role === 1 || role === 2)) {

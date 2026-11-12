@@ -21,7 +21,7 @@
  * 顺序怎么排：导入卡按 ST 的顺序在前，目标内容开始标记、注入位、结束标记组成末尾区块。
  */
 
-import { CARD_ID } from './prompt-order.js';
+import { CARD_ID, normalizeOrder } from './prompt-order.js';
 import { createId } from '../../shared/util.js';
 
 /** ST 的角色名 → extension_prompt_roles */
@@ -222,10 +222,10 @@ export function applyPresetImport(settings, parsed) {
     }
 
     settings.customPrompts = custom;
-    settings.promptOrder = [
+    settings.promptOrder = normalizeOrder([
         ...custom.map(prompt => prompt.id),
         ...TARGET_CARDS,
-    ];
+    ], custom.map(prompt => prompt.id));
 
     // 内置卡是必须的部分：导入之后一律启用、回到系统角色
     settings.disabledCards = [];

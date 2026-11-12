@@ -61,6 +61,9 @@ const DEFAULT_SETTINGS = Object.freeze({
      */
     targetPrompt: '',
     targetEndPrompt: '',
+    descTextPrompt: '',
+    descPListPrompt: '',
+    descAliChatPrompt: '',
     sessionRules: '',
     learningTask: '',
     compactTask: '',

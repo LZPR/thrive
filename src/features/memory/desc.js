@@ -85,13 +85,15 @@ function cachedBook(character) {
  *      所以要建就显式建，不能靠写条目顺手带出来。
  *
  * @param {object} ctx
- * @param {{ create?: boolean }} [options]
+ * @param {{ create?: boolean, format?: string }} [options]
  * @returns {Promise<{ ok: true, book: string, data: object, found: object|null, createdBook: boolean }
  *          | { ok: false, error: string, hint?: string }>}
  */
 export async function resolveDescTarget(ctx, options = {}) {
     const create = options.create === true;
     const character = getActiveCharacter(ctx);
+    const metadata = ctx.chatMetadata;
+    const chatId = ctx.getCurrentChatId?.();
 
     if (!character) {
         return {
@@ -112,6 +114,9 @@ export async function resolveDescTarget(ctx, options = {}) {
     const book = await resolveBook(ctx, character, create);
     if (!book.ok) {
         return book;
+    }
+    if (ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId || getActiveCharacter(ctx)?.avatar !== character.avatar) {
+        return { ok: false, error: 'TOOL_UNAVAILABLE', hint: '对话或角色已切换，请在当前对话重试。' };
     }
 
     rememberResolved(character, book.book);
@@ -379,11 +384,16 @@ export async function readDescription(ctx) {
  *
  * @param {object} ctx
  * @param {string} text
+ * @param {string} [format]
+ * @param {{ expectedText?: string, guard?: () => boolean }} [options]
  * @returns {Promise<{ ok: true, book: string, chars: number, beforeChars: number, action: 'created'|'rewritten' }
  *          | { ok: false, error: string, hint?: string }>}
  */
-export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT) {
+export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT, options = {}) {
     const next = normalizeEol(String(text ?? ''));
+    const metadata = ctx.chatMetadata;
+    const chatId = ctx.getCurrentChatId?.();
+    const avatar = getActiveCharacter(ctx)?.avatar;
 
     const title = descriptionTitle(format);
     const target = await resolveDescTarget(ctx, { create: true, format });
@@ -394,6 +404,14 @@ export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT) {
     const loaded = await loadBook(ctx, target.book);
     if (!loaded.ok) {
         return loaded;
+    }
+    if (ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId
+        || getActiveCharacter(ctx)?.avatar !== avatar || options.guard?.() === false) {
+        return { ok: false, error: 'TOOL_UNAVAILABLE', hint: '对话或描述方式已切换，请重新读取。' };
+    }
+    const existing = findLoreEntry(loaded.data, title, { includeReserved: true });
+    if (options.expectedText !== undefined && String(existing?.entry.content ?? '') !== options.expectedText) {
+        return { ok: false, error: 'STALE_READ', hint: '条目在读取后发生变化，请重新读取再修改。' };
     }
 
     /*
@@ -588,14 +606,38 @@ function descriptionTitle(format = DESC_FORMAT.TEXT) {
 
 /** 仅为启用的方式创建条目；切换方式/落点时保留已有正文并同步常驻状态。 */
 export async function syncDescEntries(ctx, formats) {
+    const metadata = ctx.chatMetadata;
+    const avatar = getActiveCharacter(ctx)?.avatar;
+    const chatId = ctx.getCurrentChatId?.();
+    const target = await resolveDescTarget(ctx, { create: formats.length > 0 });
+    if (!target.ok) {
+        return target.error === 'NO_DESC_BOOK' && !formats.length ? { ok: true, book: '' } : target;
+    }
+    let changed = false;
     for (const format of Object.values(DESC_FORMAT)) {
         const enabled = formats.includes(format);
-        if (enabled) {
-            const ensured = await ensureDescEntry(ctx, format);
-            if (!ensured.ok) return ensured;
+        const title = descriptionTitle(format);
+        let found = findLoreEntry(target.data, title, { includeReserved: true });
+        if (!found && enabled) {
+            const entry = buildDescEntry(ensureSettings(ctx), {
+                uid: nextLoreUid(target.data), content: '', title,
+            });
+            target.data.entries[String(entry.uid)] = entry;
+            found = { entry };
+            changed = true;
         }
-        const result = await setDescEntryEnabled(ctx, enabled, format);
-        if (!result.ok) return result;
+        if (found && (found.entry.disable !== !enabled || found.entry.constant !== true)) {
+            found.entry.disable = !enabled;
+            found.entry.constant = true;
+            changed = true;
+        }
     }
-    return { ok: true };
+    if (ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId || getActiveCharacter(ctx)?.avatar !== avatar) {
+        return { ok: false, error: 'TOOL_UNAVAILABLE', hint: '对话或角色已切换，请在当前对话重试。' };
+    }
+    if (changed) {
+        const saved = await persistBook(ctx, target.book, target.data);
+        if (!saved.ok) return saved;
+    }
+    return { ok: true, book: target.book };
 }

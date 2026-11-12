@@ -36,6 +36,7 @@ import {
     clearReadHash,
     clearReadKeysByPrefix,
     ensureSettings,
+    getActiveDescFormats,
     lorePatternPrefix,
     loreReadKey,
     rememberDescBackup,
@@ -137,7 +138,8 @@ export async function scanCompressTargets(ctx, settings) {
 
     const character = getActiveCharacter(ctx);
     // 统一模式下正文在条目里（要 load 世界书，异步）；card 模式只看盘上那份
-    const text = isWorldbookDesc(ctx)
+    const text = !getActiveDescFormats(ctx).includes('text') ? ''
+        : isWorldbookDesc(ctx)
         ? (await readDesc(ctx)).text
         : diskDescription(ctx);
     if (character && text.length >= limits.softLimitDesc) {
@@ -548,7 +550,10 @@ export async function smartCompress(ctx, settings, items) {
             previous = null;
         }
         const source = previous?.source ?? item.text;
-        const preset = buildPreset(settings ?? {}, { target: `${factFor(item)}\n\n${source}` });
+        const preset = buildPreset(settings ?? {}, {
+            target: `${factFor(item)}\n\n${source}`,
+            descFormats: getActiveDescFormats(ctx),
+        });
         const result = await runSession({
             ctx,
             preset: { id: 'compact', name: '压缩', runs: preset.runs },

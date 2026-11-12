@@ -46,6 +46,7 @@ import {
     ensureSettings,
     findLoreBackup,
     getDescBackup,
+    getDescFormats,
     getLoreBackups,
     isChatAvailable,
     isEnabled,
@@ -58,7 +59,7 @@ import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '
 import { normalizeEol } from '../../shared/util.js';
 import { syncBadgeOpenState } from './badge.js';
 import { openCompressPanel } from '../compress/index.js';
-import { changeDescStorage, changeWritableBook, descTargetView } from './desc-target.js';
+import { changeDescFormats, changeDescStorage, changeWritableBook, descTargetView } from './desc-target.js';
 import { openDraftWindow } from '../draft/index.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './layout.js';
 import { refreshUI, registerSurfaces, setPanelOpen } from '../shared/refresh.js';
@@ -223,7 +224,7 @@ export function refreshPanel(ctx = getContext()) {
         settings.learnKeywords,
         moreExpanded,
         // 落点两个下拉：模式、书名，以及"列表里有哪些书"（别处新建/删除之后要重排）
-        [descChoice.storage, descChoice.book, descChoice.books.length],
+        [descChoice.storage, descChoice.book, descChoice.books.length, descChoice.formats],
         descTarget ? [descTarget.mode, descTarget.book, descTarget.active] : null,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
@@ -517,7 +518,7 @@ function onPanelKeydown(event) {
  */
 function onPanelChange(event) {
     const field = event.target?.dataset?.thriveField;
-    if (!field || (field !== 'storage' && field !== 'book')) {
+    if (!field || (field !== 'storage' && field !== 'book' && !field.startsWith('format-'))) {
         return;
     }
 
@@ -530,6 +531,12 @@ function onPanelChange(event) {
     descTargetBusy = true;
     const ctx = getContext();
     const value = String(event.target.value ?? '');
+    const formats = new Set(getDescFormats(ctx));
+    if (field.startsWith('format-')) {
+        const format = field.slice('format-'.length);
+        if (event.target.checked) formats.add(format);
+        else formats.delete(format);
+    }
 
     const done = () => {
         descTargetBusy = false;
@@ -537,7 +544,9 @@ function onPanelChange(event) {
         refreshUI(ctx);
     };
 
-    (field === 'storage'
+    (field.startsWith('format-')
+        ? changeDescFormats(ctx, [...formats])
+        : field === 'storage'
         ? changeDescStorage(ctx, value)
         : changeWritableBook(ctx, value)
     ).then(done, err => {

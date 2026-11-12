@@ -16,8 +16,9 @@ import {
     getCompactMessage,
     getLearningMessage,
     getPromptOrder,
-    isPromptEnabled,
+    isPromptActive,
 } from '../../features/prompts/prompt.js';
+import { getActiveDescFormats } from '../../features/settings/index.js';
 import { openPromptWindow } from '../prompt-editor/index.js';
 import { byId } from './common.js';
 
@@ -39,11 +40,12 @@ export function updatePromptCards(settings) {
     }
 
     const items = getPromptOrder(settings);
-    const enabled = items.filter(id => isPromptEnabled(settings, id)).length;
+    const formats = getActiveDescFormats(getContext());
+    const enabled = items.filter(id => isPromptActive(settings, id, formats)).length;
     const inactive = items.length - enabled;
 
     el.textContent = `共 ${items.length} 条 · 启用 ${enabled} 条`
-        + (inactive > 0 ? ` · ${inactive} 条已停用` : '');
+        + (inactive > 0 ? ` · ${inactive} 条未发送` : '');
     el.classList.toggle('thrive-hint--warn', enabled === 0);
 }
 
@@ -63,7 +65,7 @@ export function updatePromptStats(ctx, settings) {
     }
 
     const order = getPromptOrder(settings);
-    const cards = order.filter(id => isPromptEnabled(settings, id));
+    const cards = order.filter(id => isPromptActive(settings, id, getActiveDescFormats(ctx)));
     if (cards.length === 0) {
         // 注入位永远在、永远启用，正常走不到这里；走到说明设置被手改坏了
         el.textContent = '预设里一条都没有：触发学习会因为预设为空而失败。';

@@ -210,6 +210,7 @@ function isWorldbookDesc(ctx) {
 function setDescStorageMode(ctx, mode) {
     const state = getState(ctx);
     state.descStorage = normalizeDescStorage(mode);
+    state.reads = {};
     dropLegacyChatValue(ctx, 'descStorage');
     saveChat(ctx);
     return state.descStorage;

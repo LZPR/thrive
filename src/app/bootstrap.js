@@ -66,7 +66,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.38.0 · 目标内容边界卡 · 任务专用开场白 · 工具列表`);
+    console.log(`${LOG} 启动 v0.39.0 · 自然文本 / PLists / Ali:Chat · 条件用途提示`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

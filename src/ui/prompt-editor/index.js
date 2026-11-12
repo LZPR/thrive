@@ -42,6 +42,7 @@ import {
     getSessionMessageMeta,
     isCustomPrompt,
     isPromptEnabled,
+    isPromptActive,
     removePromptCard,
     resetPromptText,
     roleLabel,
@@ -50,9 +51,9 @@ import {
     setPromptText,
     setSessionMessage,
 } from '../../features/prompts/prompt.js';
-import { DEFAULT_PROMPT_ORDER, isPinnedCard, normalizeOrder } from '../../features/prompts/prompt-order.js';
+import { DEFAULT_PROMPT_ORDER, isConditionalCard, isPinnedCard, normalizeOrder } from '../../features/prompts/prompt-order.js';
 import { applyPresetImport, importErrorMessage, parseStPreset } from '../../features/prompts/prompt-import.js';
-import { ensureSettings } from '../../features/settings/index.js';
+import { ensureSettings, getActiveDescFormats } from '../../features/settings/index.js';
 import { getToolDefs } from '../../features/tools/index.js';
 import { isDescriptionToolEnabled } from '../../features/tools/tool-availability.js';
 import { getWritableBook } from '../../features/memory/target-selection.js';
@@ -308,10 +309,11 @@ function renderWindow(ctx, force = false) {
  */
 function buildView(ctx, settings) {
     const order = getPromptOrder(settings);
+    const formats = getActiveDescFormats(ctx);
     const items = order.map(id => {
         const custom = isCustomPrompt(settings, id);
         const meta = PROMPT_CARD_META[id];
-        const status = getCardState(settings, id);
+        const status = getCardState(settings, id, formats);
         const text = getCardText(settings, id);
         // 边界卡与注入位固定成末尾区块；边界卡仍可编辑
         const pinned = isPinnedCard(id);
@@ -322,11 +324,12 @@ function buildView(ctx, settings) {
             custom,
             pinned,
             anchored,
+            conditional: isConditionalCard(id),
             kind: custom ? 'custom' : 'builtin',
             name: getPromptName(settings, id),
             hint: custom ? '自建提示词 · 按列表顺序发出' : (meta?.hint ?? ''),
             role: getPromptRole(settings, id),
-            enabled: isPromptEnabled(settings, id),
+            enabled: isPromptActive(settings, id, formats),
             editable: !pinned && (custom || Boolean(meta?.editable)),
             deletable: !pinned && (custom || Boolean(meta?.removable)),
             canReset: Boolean(getCardSettingKey(id)),
