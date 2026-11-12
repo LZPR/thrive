@@ -85,17 +85,8 @@ function renderPanel({
 
 
 /**
- * 学习分区：一个总开关 + 一行状态 + 两个入口。
- *
- * 这个块是整个面板最常看/最常点的地方：灯亮 = 会自动学，第二行说"还差几条"，
- * 下面一行是"学习中 / 上次学习的结果"。两个入口放在同一块里，因为它们回答的是
- * 同一个问题——"现在学什么"：
- *
- *   立刻学一次  学这段对话
- *   教授        学我写的那段话（与对话无关，会打开教授窗口）
- *
- * 有任务在跑时还能点这两个按钮：它们会进队列，串行跑完。所以按钮不隐藏，只是
- * 状态行尾巴上多一句"排队 N"——用户点了没反应比点了要等更让人困惑。
+ * 学习分区：总开关、写入落点、状态与统一的立即学习入口。
+ * 运行时仍可打开窗口排队，并显示单独的停止按钮。
  *
  * @param {ReturnType<typeof readLearnView>} view
  */
@@ -122,9 +113,8 @@ function renderLearnSection(view, choice, characterName) {
     const blocked = !available ? '请先打开一个对话。' : '';
 
     const status = running
-        // 教授与学习是两件事，一行里说清楚现在跑的是哪一种
         ? running.reason === TRIGGER.TEACH
-            ? '正在教授 · 不影响当前聊天'
+            ? '正在学习（未读取聊天历史）· 不影响当前聊天'
             : `正在学（${describeTrigger({ reason: running.reason })}）· 不影响当前聊天`
         : describeLearnRun(last);
 
@@ -148,12 +138,10 @@ function renderLearnSection(view, choice, characterName) {
                 <div class="thrive-learn__actions">
                     <div class="menu_button thrive-panel__button thrive-learn__go"
                         data-thrive-action="open-teach"
-                        title="跳过这段对话，直接写一段话（可附图）教模型一件事；有任务在跑时会排队">教授</div>
-                    <div class="menu_button thrive-panel__button thrive-learn__go${running ? ' thrive-panel__button--ghost' : ''}"
-                        data-thrive-action="${running ? 'stop-learn' : 'learn-now'}"
-                        title="${running
-                            ? '中止正在跑的这一场，排队的一起取消；已经写进去的内容不会撤回'
-                            : '不等判据，立刻在独立会话里学一次'}">${running ? '停止' : '立刻学一次'}</div>
+                        title="补充指令、附图，并选择是否读取聊天历史；有任务在跑时会排队">立即学习</div>
+                    ${running ? `<div class="menu_button thrive-panel__button thrive-panel__button--ghost"
+                        data-thrive-action="stop-learn"
+                        title="中止正在跑的这一场，排队的一起取消；已经写进去的内容不会撤回">停止</div>` : ''}
                 </div>
             </div>
         </section>`;
@@ -194,7 +182,7 @@ function renderLearnTile({ on, hint, usable, running }) {
  *   · 可写书（世界书工具写哪本；统一描述模式下由插件钉死）
  *
  * 判据（每 N 条 / 关键词）不在这里：那是"我隔多久想被提醒一次"，对所有对话一致，
- * 住在设置页的「自动学习」组。"立刻学一次"也不在这里——它和开关回答同一个问题，
+ * 住在设置页的「自动学习」组。"立即学习"也不在这里——它和开关回答同一个问题，
  * 放在最上面那块。
  *
  * 默认收起：面板打开的常态是"看状态、拨开关"，换落点是偶发动作。块内平铺，不套第二层折叠。
@@ -286,7 +274,7 @@ function renderMoreRows({ learn, choice }) {
                     choice.forced
                         ? '世界书条目模式下可写书固定为角色同名书，描述就存在那本里。'
                         : '两项都只对当前对话生效；换对话可以各选各的。'
-                }${noRule ? ' 学习已经开着但还没配判据，到扩展设置的「自动学习」里配（也可以点上面「立刻学一次」）。' : ''}</small>
+                }${noRule ? ' 学习已经开着但还没配判据，到扩展设置的「自动学习」里配（也可以点上面「立即学习」）。' : ''}</small>
             </div>
         </div>`;
 }

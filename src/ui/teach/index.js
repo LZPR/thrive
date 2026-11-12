@@ -1,16 +1,6 @@
 /**
- * ui/teach-window.js · 教授窗口
- *
- * 第五个独立窗口，入口在浮动面板的学习分区。它回答一个问题——**我想直接教模型
- * 一件事，不想等聊天里长出那一段。**
- *
- * 与「立刻学一次」的差别只在目标内容从哪来：
- *
- *   立刻学一次  目标内容 = 当前对话记录（合并成一条），判据、基线照常
- *   教授        目标内容 = 这里写的话 + 可选图片，与当前对话无关，基线不动
- *
- * 教授**不改聊天状态**：不记基线、不推进"还差几条"、这一轮用户消息的哈希也不记。
- * 教一次不等于这一段聊天被学过了——把基线推上去，等于下次自动学习会跳过它。
+ * 立即学习窗口：补充指令、可选图片与聊天历史开关。
+ * 读取历史时沿用聊天学习基线；取消时保留原教授流程，不推进基线和消息哈希。
  *
  * 图片走 data URL（不引用 `user/images/` 里的文件）：会话不落盘，路径形式的图
  * 在任何一步都可能失效；而且这个窗口关掉之后，图片只存在于这一次会话里。
@@ -36,6 +26,7 @@ const JPEG_QUALITY = 0.86;
 
 /** 未保存的草稿：关窗口不丢，重开接着写 */
 let draft = { text: '', images: [] };
+let includeHistory = true;
 
 /** 正在读图 / 正在开始，避免连点 */
 let busy = false;
@@ -50,12 +41,12 @@ export function initTeachWindow() {
     document.body.insertAdjacentHTML(
         'beforeend',
         `<div id="${TEACH_ID}" class="thrive-teach displayNone" role="dialog"
-            aria-label="教授：直接告诉模型一件事">${BODY}</div>`,
+            aria-label="立即学习">${BODY}</div>`,
     );
 
     const win = document.getElementById(TEACH_ID);
     if (!win) {
-        console.warn(`${LOG} 教授窗口创建失败`);
+        console.warn(`${LOG} 学习窗口创建失败`);
         return;
     }
 
@@ -88,7 +79,7 @@ export function isTeachWindowOpen() {
 export function openTeachWindow() {
     const win = document.getElementById(TEACH_ID);
     if (!win) {
-        toast('教授窗口还没挂载，刷新页面再试');
+        toast('学习窗口还没挂载，刷新页面再试');
         return false;
     }
 
@@ -124,16 +115,21 @@ export function closeTeachWindow() {
 const BODY = `
     <div class="thrive-teach__bar">
         <i class="fa-solid fa-chalkboard-user thrive-teach__icon" aria-hidden="true"></i>
-        <span class="thrive-teach__title">教授</span>
-        <span class="thrive-teach__meta">与当前对话无关</span>
+        <span class="thrive-teach__title">立即学习</span>
+        <span class="thrive-teach__meta">独立会话</span>
         <button type="button" class="menu_button thrive-teach__close" data-act="teach-close"
             title="关闭（内容留着，下次打开接着写）" aria-label="关闭">X</button>
     </div>
     <div class="thrive-teach__body">
+        <label class="thrive-teach__history">
+            <input type="checkbox" data-field="teach-history" checked>
+            <span>读取聊天历史</span>
+        </label>
+        <small class="thrive-hint" data-role="teach-history-hint">读取当前聊天记录，并更新聊天学习进度。</small>
         <textarea class="text_pole thrive-teach__text" data-field="teach-text" rows="7"
             spellcheck="false" data-macros="true" data-macros-autocomplete="always"
             data-macros-autocomplete-style="small"
-            placeholder="你想让模型知道什么？比如：这个人物叫……，说话习惯是……；这个世界里的「雾港」是一座……"></textarea>
+            placeholder="补充指令（可选）：例如，只整理这段对话中的地点设定；把图中的外貌写进角色描述；记住雾港是一座海边城市……"></textarea>
         <div class="thrive-teach__row">
             <span class="thrive-teach__count" data-role="teach-count">0 / ${TEACH_MAX_CHARS} 字</span>
             <div class="menu_button thrive-teach__clear" data-act="teach-clear"
@@ -147,8 +143,8 @@ const BODY = `
             <i class="fa-regular fa-image" aria-hidden="true"></i> 图片
         </div>
         <input type="file" accept="image/*" multiple class="displayNone" data-role="teach-file">
-        <span class="thrive-teach__hint">正文和图片都能直接粘贴。这次的材料就是上面这些，产出照样走工具写进世界书 / 角色描述。</span>
-        <div class="menu_button thrive-teach__go" data-act="teach-start" title="在独立会话里教一次">开始教授</div>
+        <span class="thrive-teach__hint">支持粘贴文字与图片。补充指令会放在「学习时发送」之前，结果通过工具写入世界书 / 角色描述。</span>
+        <div class="menu_button thrive-teach__go" data-act="teach-start" title="在独立会话里开始学习">开始学习</div>
     </div>`;
 
 /* ------------------------------------------------------------------ 交互 */
@@ -207,6 +203,14 @@ function onInput(event) {
 }
 
 async function onChange(event) {
+    if (event.target?.dataset?.field === 'teach-history') {
+        includeHistory = event.target.checked;
+        const hint = document.querySelector(`#${TEACH_ID} [data-role="teach-history-hint"]`);
+        hint.textContent = includeHistory
+            ? '读取当前聊天记录，并更新聊天学习进度。'
+            : '只使用补充指令与图片，不更新聊天学习进度。';
+        return;
+    }
     if (event.target?.dataset?.role !== 'teach-file') {
         return;
     }
@@ -396,7 +400,7 @@ function shrinkToDataUrl(dataUrl) {
 /* ------------------------------------------------------------------ 开始 */
 
 /**
- * 开始一场教授会话。
+ * 开始一场学习会话。
  *
  * 失败（没登录对话、工具不可用、预设空了）只弹一句原因，窗口留着——用户改两个字
  * 就能再试，重新写一遍才是真正的损失。
@@ -410,13 +414,13 @@ async function startTeach() {
     const text = draft.text.trim();
     const images = draft.images.map(item => item.url);
 
-    if (!text && images.length === 0) {
-        toast('写点东西，或者加一张图');
+    if (!includeHistory && !text && images.length === 0) {
+        toast('填写补充指令、附一张图，或者勾选读取聊天历史');
         return;
     }
 
     if (text.length > TEACH_MAX_CHARS) {
-        toast(`超过 ${TEACH_MAX_CHARS} 字了，拆成几次教更好`);
+        toast(`超过 ${TEACH_MAX_CHARS} 字了，请拆成几次学习`);
         return;
     }
 
@@ -424,7 +428,7 @@ async function startTeach() {
     setBusy(true);
 
     try {
-        const started = startLearning(ctx, { teach: { text, images } });
+        const started = startLearning(ctx, { teach: { text, images }, includeHistory });
 
         if (!started.ok) {
             toast(`没能开始：${started.hint}`);
@@ -435,7 +439,7 @@ async function startTeach() {
          * 排上队时没有 promise（那一场要等前面的跑完），此时 progress 走的是
          * LEARNING_EVENT 广播，不是这里的返回值。
          */
-        started.promise?.catch(err => console.error(`${LOG} 教授会话异常`, err));
+        started.promise?.catch(err => console.error(`${LOG} 学习会话异常`, err));
 
         // 成功了才清空：失败时草稿必须留着
         draft = { text: '', images: [] };
@@ -449,8 +453,8 @@ async function startTeach() {
         syncCount();
 
         toast(started.queued > 0
-            ? `已排队（第 ${started.queued} 位）：前面那一场跑完接着教`
-            : '开始教授：在独立会话里跑，不影响当前聊天；结束后另弹一条摘要');
+            ? `已排队（第 ${started.queued} 位）：前面那一场跑完接着学`
+            : '开始学习：在独立会话里跑，不影响当前聊天；结束后另弹一条摘要');
     } finally {
         busy = false;
         setBusy(false);
@@ -500,6 +504,6 @@ function setBusy(on) {
     win.classList.toggle('thrive-teach--busy', on);
     const button = win.querySelector('[data-act="teach-start"]');
     if (button) {
-        button.textContent = on ? '正在开始…' : '开始教授';
+        button.textContent = on ? '正在开始…' : '开始学习';
     }
 }

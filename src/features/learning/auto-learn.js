@@ -28,7 +28,7 @@ import {
 } from '../settings/index.js';
 import { fnv1a } from '../../shared/util.js';
 
-/** 触发原因：条数 / 关键词 / 手动「立刻学一次」/ 手动「教授」 */
+/** 触发原因：条数 / 关键词 / 手动读取聊天 / 手动不读取聊天（保留 teach 标识兼容旧记录） */
 export const TRIGGER = Object.freeze({
     INTERVAL: 'interval',
     KEYWORD: 'keyword',
@@ -274,7 +274,7 @@ export function describeTrigger(trigger) {
         case TRIGGER.MANUAL:
             return '手动触发';
         case TRIGGER.TEACH:
-            return '手动教授';
+            return '手动学习（未读取聊天历史）';
         default:
             return '自动触发';
     }

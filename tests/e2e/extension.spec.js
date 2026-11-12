@@ -80,10 +80,11 @@ test('saves and cancels custom prompts while keeping the target block last', asy
     await expect(editor.locator('[data-tool]')).toHaveCount(10);
 });
 
-test('Professor uses a private session without advancing the chat baseline', async ({ page }) => {
+test('learns from instructions without history or advancing the chat baseline', async ({ page }) => {
     await page.locator('#thrive_badge').click();
     await page.evaluate(() => { window.__host.state.chatMetadata.thrive.learn.baseline = 7; });
     await page.locator('[data-thrive-action="open-teach"]').click();
+    await page.locator('[data-field="teach-history"]').uncheck();
     await page.locator('[data-field="teach-text"]').fill('雾港是一座海边城市。');
     await page.locator('[data-act="teach-start"]').click();
     await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
@@ -95,8 +96,121 @@ test('Professor uses a private session without advancing the chat baseline', asy
     expect(result.baseline).toBe(7);
     expect(result.request.includePreset).toBe(false);
     expect(result.request.payload.tools).toHaveLength(10);
+    expect(result.request.messages.at(-1)).toMatchObject({
+        role: 'user',
+        content: expect.stringMatching(/^雾港是一座海边城市。\n/),
+    });
+    expect(result.request.messages.filter(message => message.role === 'system').map(message => message.content).join('\n'))
+        .not.toContain('北境在南边');
     expect(result.chat).toHaveLength(2);
     expect(result.chat.some(message => message.role === 'tool')).toBe(false);
+});
+
+test('combines history and instructions in a private session with the requested message order', async ({ page }) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await expect(panel.locator('.thrive-learn__go')).toHaveCount(1);
+    await expect(panel.locator('.thrive-learn__go')).toHaveText('立即学习');
+    await page.evaluate(() => {
+        window.__host.state.extensionSettings.thrive.learningTask = '学习时发送的内容';
+        window.__host.state.chatMetadata.thrive.learn.baseline = 7;
+    });
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    const dialog = page.getByRole('dialog', { name: '立即学习', exact: true });
+    await expect(dialog.locator('[data-field="teach-history"]')).toBeChecked();
+    await dialog.locator('[data-field="teach-text"]').fill('只整理{{char}}的地点设定');
+    await expect.poll(() => page.evaluate(() => window.__host.state.requests.length)).toBe(0);
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect(dialog).toBeHidden();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
+    const result = await page.evaluate(() => ({
+        baseline: window.__host.state.chatMetadata.thrive.learn.baseline,
+        messages: window.__host.state.requests[0].messages,
+        chat: window.__host.state.chat,
+    }));
+    expect(result.baseline).toBe(2);
+    expect(result.messages.at(-1)).toEqual({ role: 'user', content: '只整理测试角色的地点设定\n学习时发送的内容' });
+    const presetText = result.messages.slice(0, -1).map(message => message.content).join('\n');
+    expect(presetText).toContain('北境在南边。');
+    expect(presetText).not.toContain('只整理');
+    expect(result.chat).toHaveLength(2);
+});
+
+test('supports instructions without history when all description formats and custom cards are absent', async ({ page }) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await panel.locator('[data-thrive-field="format-text"]').uncheck();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual([]);
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    const dialog = page.getByRole('dialog', { name: '立即学习', exact: true });
+    await dialog.locator('[data-field="teach-history"]').uncheck();
+    await dialog.locator('[data-field="teach-text"]').fill('将雾港写入世界书');
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
+    const request = await page.evaluate(() => window.__host.state.requests[0]);
+    expect(request.messages).toHaveLength(1);
+    expect(request.messages[0]).toMatchObject({ role: 'user', content: expect.stringMatching(/^将雾港写入世界书\n/) });
+    expect(request.payload.tools.every(tool => tool.function.name.startsWith('lore_'))).toBe(true);
+});
+
+test('keeps pasted images and the history choice in drafts and supports image-only learning', async ({ page }, testInfo) => {
+    await page.locator('#thrive_badge').click();
+    await page.locator('[data-thrive-action="open-teach"]').click();
+    const dialog = page.getByRole('dialog', { name: '立即学习', exact: true });
+    await dialog.locator('[data-field="teach-history"]').uncheck();
+    await dialog.locator('[data-field="teach-text"]').evaluate(area => {
+        const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='), char => char.charCodeAt(0));
+        const clipboardData = new DataTransfer();
+        clipboardData.items.add(new File([bytes], '人物.png', { type: 'image/png' }));
+        area.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+    });
+    await expect(dialog.locator('.thrive-teach__thumb')).toHaveCount(1);
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator('[data-thrive-action="open-teach"]').click();
+    await expect(dialog.locator('.thrive-teach__thumb')).toHaveCount(1);
+    await expect(dialog.locator('[data-field="teach-history"]')).not.toBeChecked();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await dialog.screenshot({ path: testInfo.outputPath('immediate-learning-mobile.png') });
+    await dialog.locator('[data-field="teach-text"]').press('Control+Enter');
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
+    const message = await page.evaluate(() => window.__host.state.requests[0].messages.at(-1));
+    expect(message.role).toBe('user');
+    expect(message.content.map(part => part.type)).toEqual(['text', 'image_url']);
+    await page.locator('[data-thrive-action="open-teach"]').click();
+    await expect(dialog.locator('.thrive-teach__thumb')).toHaveCount(0);
+});
+
+test('retains invalid drafts, queues from the unified entry and stops both active and queued learning', async ({ page }) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    const dialog = page.getByRole('dialog', { name: '立即学习', exact: true });
+    await dialog.locator('[data-field="teach-history"]').uncheck();
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect(dialog).toBeVisible();
+    expect(await page.evaluate(() => window.__host.state.requests.length)).toBe(0);
+    await dialog.locator('[data-field="teach-text"]').fill('长'.repeat(6001));
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect(dialog.locator('[data-field="teach-text"]')).toHaveValue('长'.repeat(6001));
+    expect(await page.evaluate(() => window.__host.state.requests.length)).toBe(0);
+    await dialog.locator('[data-act="teach-clear"]').click();
+    await expect(dialog.locator('[data-field="teach-history"]')).not.toBeChecked();
+    await dialog.locator('[data-field="teach-history"]').check();
+    await page.evaluate(() => { window.__host.state.holdRequests = true; });
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect.poll(() => page.evaluate(() => window.__host.state.requests.length)).toBe(1);
+    await expect(panel.locator('[data-thrive-action="stop-learn"]')).toBeVisible();
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    await dialog.locator('[data-field="teach-history"]').uncheck();
+    await dialog.locator('[data-field="teach-text"]').fill('下一场指令');
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect(panel.locator('.thrive-learn__queue')).toHaveText('排队 1');
+    await panel.locator('[data-thrive-action="stop-learn"]').click();
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.stopped)).toBe('aborted');
+    await expect(panel.locator('.thrive-learn__queue')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__host.state.requests.length)).toBe(1);
 });
 
 test('chat changes stop the running session and clear the in-memory queue', async ({ page }) => {
@@ -190,7 +304,8 @@ test('selects per-chat formats and only sends their tools and editable mandatory
     await expect(editor.locator('[data-tool^="alichat_"]')).toHaveCount(4);
     await editor.screenshot({ path: testInfo.outputPath('description-format-prompts.png') });
     await editor.locator('[data-act="close"]').click();
-    await panel.locator('[data-thrive-action="learn-now"]').click();
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    await page.locator('[data-act="teach-start"]').click();
     await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
     const request = await page.evaluate(() => window.__host.state.requests[0]);
     const names = request.payload.tools.map(tool => tool.function.name);

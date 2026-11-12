@@ -698,7 +698,7 @@ body.thrive-panel-dragging {
     flex-wrap: wrap;
 }
 
-/* 两个入口（教授 / 立刻学一次）靠右并排：它们回答同一个问题，位置也该在一起 */
+/* 立即学习与运行时的停止按钮靠右并排。 */
 .thrive-learn__actions {
     display: flex;
     flex: 0 0 auto;
@@ -2664,7 +2664,7 @@ body.thrive-panel-dragging {
     display: none;
 }
 
-/* ======================================================= 教授窗口 */
+/* ======================================================= 立即学习窗口 */
 
 /*
  * 第五个独立窗口：写一段话（可附图）直接教模型一件事。
@@ -2730,7 +2730,7 @@ body.thrive-panel-dragging {
     white-space: nowrap;
 }
 
-/* 「与当前对话无关」：这一行是整件事的关键区别，但不必抢眼 */
+/* 独立会话说明。 */
 .thrive-teach__meta {
     flex: 1 1 auto;
     min-width: 0;
@@ -2753,6 +2753,13 @@ body.thrive-panel-dragging {
     flex-direction: column;
     gap: 6px;
     min-height: 0;
+}
+
+.thrive-teach__history {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
 }
 
 /*

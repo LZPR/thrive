@@ -17,7 +17,7 @@ export const COMPRESS_ID = 'thrive_compress';
 export const DRAFT_ID = 'thrive_draft';
 /** 提示词编辑器：第四个独立窗口，入口在设置页「提示词」折叠块 */
 export const PROMPT_WINDOW_ID = 'thrive_prompts';
-/** 教授：第五个独立窗口，入口在浮动面板的学习分区 */
+/** 立即学习：第五个独立窗口，沿用教授窗口的 DOM id */
 export const TEACH_ID = 'thrive_teach';
 
 /** 统一提示。没有 toastr 时退到 console，node 里跑也不会炸 */

@@ -5,6 +5,7 @@ import {
 } from '../../src/features/session/session-messages.js';
 import { detectShape, readReply } from '../../src/features/session/session-provider.js';
 import { compilePreset } from '../../src/features/session/session-preset.js';
+import { applyPreset, sendUserMessage } from '../../src/features/session/session.js';
 import { createSessionTools, executeTool } from '../../src/features/session/session-tools.js';
 
 describe('session message protocol', () => {
@@ -65,6 +66,38 @@ describe('provider responses', () => {
 });
 
 describe('preset and tool execution', () => {
+    it('allows an explicitly empty preset for an opening-only session but still rejects malformed presets', () => {
+        expect(compilePreset({}, { runs: [] }).ok).toBe(false);
+        expect(compilePreset({}, { runs: [] }, { allowEmpty: true })).toMatchObject({ ok: true, runs: [] });
+        expect(compilePreset({}, null, { allowEmpty: true })).toMatchObject({ ok: false, error: 'SESSION_NO_PRESET' });
+    });
+
+    it('expands opening instructions after preset macros and keeps images on the same message', () => {
+        let value = '';
+        const session = {
+            state: 'open',
+            messages: [],
+            ctx: {
+                substituteParams: text => {
+                    if (text === '{{setvar::place::雾港}}') {
+                        value = '雾港';
+                        return '设定完成';
+                    }
+                    return text.replace('{{getvar::place}}', value);
+                },
+            },
+        };
+        expect(applyPreset(session, { runs: [{ role: 0, text: '{{setvar::place::雾港}}' }] }).ok).toBe(true);
+        expect(sendUserMessage(session, '整理{{getvar::place}}\n学习任务', { images: ['data:image/png;base64,AAAA'] }).ok).toBe(true);
+        expect(session.messages.at(-1)).toMatchObject({
+            role: 'user',
+            content: [
+                { type: 'text', text: '整理雾港\n学习任务' },
+                { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
+            ],
+        });
+    });
+
     it('expands macros in card order and preserves separate runs', () => {
         const calls = [];
         const result = compilePreset({ substituteParams: text => { calls.push(text); return text.replace('{{char}}', '角色'); } }, {

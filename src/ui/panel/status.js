@@ -94,9 +94,8 @@ function describeLearnState(ctx, settings) {
 
     const running = getLearningRunning();
     if (running) {
-        // 教授的输入是自己写的一段话，说"自动触发"会误导
         if (running.reason === TRIGGER.TEACH) {
-            return `教授中（你写的那段话，不影响当前聊天）${tail}`;
+            return `学习中（未读取聊天历史，不影响当前聊天）${tail}`;
         }
         return `学习中（${running.reason === TRIGGER.MANUAL ? '手动' : '自动'}触发，不影响当前聊天）${tail}`;
     }

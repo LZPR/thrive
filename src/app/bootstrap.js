@@ -66,7 +66,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.39.1 · 自然文本 / PLists / Ali:Chat · 条件用途提示`);
+    console.log(`${LOG} 启动 v0.40.0 · 立即学习 · 可选聊天历史 · 补充指令开场白`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

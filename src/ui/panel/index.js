@@ -4,7 +4,7 @@ import { renderPanel } from './view.js';
  *
  * 面板只装**作用于当前对话**的东西，全局设置一律留在扩展设置页：
  *   - 学习模式：一个总开关，整块可点；下面写着"学习中 / 上次学习 / 还差几条"
- *   - 立刻学一次 / 停止学习：不等判据，手动起一场会话（或中止正在跑的那场）
+ *   - 立即学习 / 停止学习：打开统一窗口配置本次会话（或中止正在跑的那场）
  *   - 更多设置（默认收起）：描述存哪儿、可写书——都只落在这一场
  *   - 角色描述落点、待确认改动、写入记录
  *
@@ -27,7 +27,6 @@ import { PANEL_EVENT, PANEL_TOGGLE_EVENT } from '../../shared/events.js';
 import {
     getLearningView,
     isLearningRunning,
-    startLearning,
     stopLearning,
 } from '../../features/learning/learning.js';
 import {
@@ -451,9 +450,6 @@ function onPanelClick(event) {
         case 'toggle-learn':
             toggleLearn(getContext());
             break;
-        case 'learn-now':
-            void learnNowAndReport();
-            break;
         case 'open-teach':
             openTeachWindow();
             break;
@@ -554,41 +550,6 @@ function onPanelChange(event) {
         console.error(`${LOG} 切换落点失败`, err);
         done();
     });
-}
-
-/**
- * 不等判据，立刻学一次（`manual` 触发）。
- *
- * 存在的理由不是方便，而是**可验证**：用户配完判据之后总得能立刻看见它生效，
- * 否则要等到真出现那句话，期间只能猜。顺带它也是"我现在就想让它学一下"的正门——
- * 不需要为了学一次先去改判据。
- *
- * 不 await 整场：一次学习要跑十几秒，面板不该在这期间没有响应。开始成功之后
- * 状态行会自己变成"正在学"，结果出来时 LEARNING_EVENT 会把面板刷一遍。
- * 失败只报"没能开始"的原因——跑到一半失败属于结果，由面板的状态行说明。
- */
-async function learnNowAndReport() {
-    const ctx = getContext();
-
-    if (!isChatAvailable(ctx)) {
-        toast('请先打开一个对话');
-        return;
-    }
-
-    const started = await startLearning(ctx, { reason: 'manual' });
-
-    if (!started.ok) {
-        toast(started.hint ?? `没能开始学习：${started.error}`);
-        return;
-    }
-
-    // 排上队了要明说：否则用户点了按钮，看见的却还是"正在学（上一场）"
-    if (started.queued > 0) {
-        toast(`已排队（第 ${started.queued} 位），上一场跑完接着学`);
-    }
-
-    // 开始成功不弹 toast：状态行与徽章会立刻变成"学习中"，再弹一条反而挡住面板
-    refreshUI(ctx);
 }
 
 /**

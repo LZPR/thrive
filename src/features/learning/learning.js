@@ -8,8 +8,8 @@
  *   3. 另起一场会话，提供世界书工具及当前启用的角色描述工具
  *   4. 结束后把结果写回对话状态（上次学习、基线），聊天里一个字都不加
  *
- * 目标内容有两个来源：对话记录，或者用户自己写的一段话（"教授"）。后者跳过
- * 对话、也不记基线——教一次不代表这一段聊天已经被学过了。
+ * 聊天记录按选择注入目标内容；用户补充指令放在学习开场白之前，图片仍附在同条消息。
+ * 未读取聊天历史时不记基线，保留原教授流程的进度语义。
  *
  * 触发是异步的：调用方拿到 `{ ok, promise }` 就走，不必等它跑完。这也是"对话与
  * 学习分离"的实际含义——模型在另一场会话里工作，用户继续聊天。
@@ -51,7 +51,7 @@ const MAX_ONE_MESSAGE = 4000;
 /** 截断时至少给最新那一条留这么多字，否则目标内容可能是空的 */
 const MIN_KEEP = 200;
 
-/** 教授时最多写多少字。这不是对话记录，是"我要教的这件事"，超过这个量该拆成几次 */
+/** 补充指令最多写多少字，超过这个量该拆成几次 */
 export const TEACH_MAX_CHARS = 6000;
 
 /** 一次最多带几张图。再多的注意力摊薄，图之间互相干扰 */
@@ -126,36 +126,26 @@ export function buildChatTarget(ctx, { limitChars = 6000 } = {}) {
 }
 
 /**
- * 目标内容的另一种来源：用户自己写的一段话（+ 若干张图）。
- *
- * 这是"教授"：跳过对话记录，直接告诉模型某个东西是什么、某个人物怎么样。
- * 与对话对应的那套东西（基线、轮数进度、这一轮用户消息的哈希）一概不碰——
- * 教一次不等于"这一段的聊天已经被学过了"，下次该按条数触发时还是要触发。
- *
- * 图不进预设（预设是纯文本的 run 列表），而是挂在开场白那条 user 消息上；
- * 目标内容里留一句"图在下面那条消息"，否则模型只看到一段话说"这是个角色"，
- * 完全不知道还有图可看。
+ * 定型用户补充指令与图片。允许读取聊天时只提供历史，不必另外填写指令。
+ * 指令不再作为预设目标内容；图片与指令同放在开场白消息。
  *
  * @param {{ text?: string, images?: string[] }|null} teach
+ * @param {{ allowEmpty?: boolean }} [options]
  * @returns {{ ok: true, text: string, images: string[] } | { ok: false, error: string, hint: string }}
  */
-export function buildTeachTarget(teach = null) {
+export function buildTeachTarget(teach = null, { allowEmpty = false } = {}) {
     const raw = String(teach?.text ?? '').trim();
     const images = (Array.isArray(teach?.images) ? teach.images : [])
         .map(url => String(url ?? '').trim())
         .filter(url => url.startsWith('data:image/'))
         .slice(0, TEACH_MAX_IMAGES);
 
-    if (!raw && images.length === 0) {
-        return { ok: false, error: 'TEACH_EMPTY', hint: '写一句要教的东西，或者附一张图。' };
+    if (!allowEmpty && !raw && images.length === 0) {
+        return { ok: false, error: 'TEACH_EMPTY', hint: '填写补充指令、附一张图，或者勾选读取聊天历史。' };
     }
 
     const body = raw.length > TEACH_MAX_CHARS ? raw.slice(0, TEACH_MAX_CHARS) : raw;
-    const text = body
-        || '（这次没有文字，材料就是下面这条消息里的图片。）';
-    const note = images.length > 0 ? `\n\n（附了 ${images.length} 张图，在下面这条消息里。）` : '';
-
-    return { ok: true, text: `${text}${note}`, images };
+    return { ok: true, text: body, images };
 }
 
 /**
@@ -172,7 +162,7 @@ export const MAX_QUEUE = 6;
  * 不落盘：排队是"我马上还要学一次"，进程重启后重放它没有意义，反而可能把旧内容
  * 当成新任务再写一遍。每个任务带着它所属的 `chatId`，切换对话时整队清掉。
  *
- * 项的形状：`{ reason, teach: { text, images }|null, chatId, at, ctx }`
+ * 项的形状：`{ reason, teach: { text, images }, includeHistory, chatId, at, ctx }`
  */
 const queue = [];
 
@@ -200,33 +190,33 @@ export function clearLearningQueue() {
 /**
  * 开始一次学习。同步做完所有检查，跑起来之后立刻返回。
  *
- * 两种目标来源共用同一条链路：
- *   · 默认：当前对话记录（`buildChatTarget`），走过判据、记基线
- *   · `teach`：用户自己写的一段话 + 可选图片（`buildTeachTarget`），不记基线
+ * 默认读取当前聊天；兼容旧的 `teach` 调用（默认不读聊天）。
+ * `includeHistory` 显式决定是否读取聊天及推进基线，可与补充指令和图片一起使用。
  *
  * **同时只跑一场，其余排队**（ADR-052）。已经有会话在跑时，这一场进队列并立刻返回
  * `{ ok: true, queued: N }`——没有 promise，进度靠 `LEARNING_EVENT` 广播。
  *
  * @param {object} ctx 现取的 context
- * @param {{ reason?: string, teach?: { text?: string, images?: string[] }|null }} [options]
+ * @param {{ reason?: string, teach?: { text?: string, images?: string[] }|null, includeHistory?: boolean }} [options]
  * @returns {{ ok: true, promise: Promise<object>, queued: 0 }
  *          | { ok: true, queued: number }
  *          | { ok: false, error: string, hint: string }}
  */
-export function startLearning(ctx, { reason = 'manual', teach = null } = {}) {
+export function startLearning(ctx, { reason = 'manual', teach = null, includeHistory = teach === null } = {}) {
     if (!isChatAvailable(ctx)) {
         return { ok: false, error: 'NO_CHAT', hint: '请先打开一个对话。' };
     }
 
-    // 教授的内容在入队时就定型：它就是用户此刻写下的那段话，不该等轮到它再说
-    const taught = teach ? buildTeachTarget(teach) : null;
-    if (taught && !taught.ok) {
+    // 补充指令与图片在入队时定型，避免排队期间的草稿修改改变任务。
+    const taught = buildTeachTarget(teach, { allowEmpty: includeHistory });
+    if (!taught.ok) {
         return taught;
     }
 
     const task = {
-        reason: taught ? TRIGGER.TEACH : reason,
-        teach: taught ? { text: taught.text, images: taught.images } : null,
+        reason: includeHistory ? reason : TRIGGER.TEACH,
+        teach: { text: taught.text, images: taught.images },
+        includeHistory: Boolean(includeHistory),
         chatId: readChatId(ctx),
         at: Date.now(),
         ctx,
@@ -252,7 +242,7 @@ export function startLearning(ctx, { reason = 'manual', teach = null } = {}) {
  * 会话结束后**一定要**再调一次 `pump()`：排队的那几场就是靠这一行接着往下走的。
  *
  * @param {object} ctx
- * @param {{ reason: string, teach: { text: string, images: string[] }|null, chatId: string, at: number }} task
+ * @param {{ reason: string, teach: { text: string, images: string[] }, includeHistory: boolean, chatId: string, at: number }} task
  * @returns {{ ok: true, promise: Promise<object>, queued: 0 } | { ok: false, error: string, hint: string }}
  */
 function launch(ctx, task) {
@@ -270,34 +260,25 @@ function launch(ctx, task) {
 /**
  * 同步准备：目标内容 → 预设 → 基线与运行标记。
  *
- * 教授不走 `beginLearn`：它读的不是对话记录，记了基线等于把这一段聊天标记成
- * "已经学过"，而实际上一句都没看过。
+ * 只有实际读取了聊天记录才走 `beginLearn`，纯指令和图片学习不推进聊天基线。
  *
  * @param {object} ctx
- * @param {{ reason: string, teach: { text: string, images: string[] }|null }} task
+ * @param {{ reason: string, teach: { text: string, images: string[] }, includeHistory: boolean }} task
  * @returns {object}
  */
 function prepare(ctx, task) {
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
-    const target = task.teach
-        ? task.teach.text
-        : buildChatTarget(ctx, { limitChars: limits.learnHistoryChars }).text;
+    const target = task.includeHistory
+        ? buildChatTarget(ctx, { limitChars: limits.learnHistoryChars }).text
+        : '';
 
-    if (!target.trim()) {
+    if (!target.trim() && !task.teach.text && task.teach.images.length === 0) {
         return { ok: false, error: 'NO_TARGET', hint: '这个对话还没有可学的内容（没有可见消息）。' };
     }
 
     const preset = buildPreset(settings, { target, descFormats: getActiveDescFormats(ctx) });
-    if (preset.runs.length === 0) {
-        return {
-            ok: false,
-            error: 'SESSION_NO_PRESET',
-            hint: '预设是空的：目标内容没有内容可发，描述行与自建提示词也都被停用了。',
-        };
-    }
-
-    if (!task.teach) {
+    if (task.includeHistory && target.trim()) {
         /*
          * 基线与哈希在**开始前**就写：跑到一半又来了新消息时，那几条不算进"已经学过的
          * 那一段"，下一轮会重新看到它们。落盘在这里做一次，结束后再存一次结果。
@@ -309,7 +290,7 @@ function prepare(ctx, task) {
         });
         saveChat(ctx);
     }
-    // 学习和教授都是新会话，均不得沿用上一场的读取登记。
+    // 每次学习都是新会话，不得沿用上一场的读取登记。
     resetReads(ctx);
 
     markLearningRunning({ reason: task.reason });
@@ -318,10 +299,10 @@ function prepare(ctx, task) {
     return {
         ok: true,
         reason: task.reason,
-        settings,
         limits,
         preset,
-        images: task.teach ? task.teach.images : null,
+        images: task.teach.images,
+        userMessage: [task.teach.text, getLearningMessage(settings)].filter(Boolean).join('\n'),
         // 连接配置在这时候读一次就定下来：一场会话从头到尾只走一条路
         profileId: String(settings.connectionProfile ?? ''),
     };
@@ -368,7 +349,7 @@ function pump() {
 
 /** 队列项的短说明，给控制台与面板用 */
 function describeQueueItem(reason) {
-    return reason === TRIGGER.TEACH ? '教授' : '学这段对话';
+    return reason === TRIGGER.TEACH ? '学习（不读取聊天历史）' : '学这段对话';
 }
 
 /** 当前对话的 id；拿不到时返回空串（比较时自然不相等，任务会被丢掉） */
@@ -384,10 +365,10 @@ function readChatId(ctx) {
  * 跑完一场，把结果写回状态。**永不 throw**。
  *
  * @param {object} ctx
- * @param {{ reason: string, settings: object, limits: object, preset: object, images?: string[]|null, profileId?: string }} plan
+ * @param {{ reason: string, limits: object, preset: object, userMessage: string, images?: string[]|null, profileId?: string }} plan
  * @returns {Promise<object>} 摘要（同时已经写进对话状态）
  */
-async function runLearning(ctx, { reason, settings, limits, preset, images = null, profileId = '' }) {
+async function runLearning(ctx, { reason, limits, preset, userMessage, images = null, profileId = '' }) {
     const attached = Array.isArray(images) ? images : [];
     let result;
 
@@ -395,7 +376,7 @@ async function runLearning(ctx, { reason, settings, limits, preset, images = nul
         result = await runSession({
             ctx,
             preset: { id: 'learn', name: '学习', runs: preset.runs },
-            userMessage: getLearningMessage(settings),
+            userMessage,
             images: attached,
             maxRounds: limits.learnRounds,
             tools: createSessionTools({ ctx }),
@@ -485,8 +466,7 @@ export function describeLearnRun(run) {
         return '还没学过';
     }
 
-    // 教授与"学这一段聊天"是两件事，摘要的开头就该分开
-    const lead = run.reason === TRIGGER.TEACH ? '上次教授' : '上次学习';
+    const lead = run.reason === TRIGGER.TEACH ? '上次学习（未读取聊天历史）' : '上次学习';
 
     if (!run.ok) {
         const label = run.stopped === 'rounds'

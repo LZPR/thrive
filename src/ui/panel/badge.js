@@ -16,7 +16,7 @@
  */
 
 import { getContext } from '../../platform/sillytavern/context.js';
-import { TRIGGER, describeTrigger, intervalProgress, parseKeywords } from '../../features/learning/auto-learn.js';
+import { describeTrigger, intervalProgress, parseKeywords } from '../../features/learning/auto-learn.js';
 import { getCompressSnapshot } from '../../features/memory/compress.js';
 import { LEARNING_EVENT, notifyPanelToggle } from '../../shared/events.js';
 import { describeLearnRun, getLearningView } from '../../features/learning/learning.js';
@@ -96,10 +96,7 @@ export function initBadge() {
         }
 
         const why = detail.reason ? describeTrigger({ reason: detail.reason }) : '';
-        // 教授与学习是两件事，结束语也该分开；教授本身已是"手动"，不必再说一遍
-        const head = detail.reason === TRIGGER.TEACH
-            ? '教授结束'
-            : `学习结束${why ? `（${why}）` : ''}`;
+        const head = `学习结束${why ? `（${why}）` : ''}`;
         // 没调用工具是正常结果（没有值得记的内容），别把它说得像失败
         toast(result.toolCalls === 0
             ? `${head}：没有调用工具，这次没有值得记下的内容`

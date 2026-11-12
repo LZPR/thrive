@@ -25,10 +25,11 @@ const ROLES = new Set(['system', 'user', 'assistant']);
  *
  * @param {object|null} ctx 用来展开宏；没有 substituteParams 时原样发出
  * @param {{ id?: string, name?: string, runs?: Array<{ role: string|number, text: string, ids?: string[] }> }|null} preset
+ * @param {{ allowEmpty?: boolean }} [options] 有独立开场白时可省略全部预设消息
  * @returns {{ ok: true, id: string, name: string, runs: Array<{ role: string, text: string, ids: string[] }> }
  *          | { ok: false, error: string, detail?: string }}
  */
-export function compilePreset(ctx, preset = null) {
+export function compilePreset(ctx, preset = null, { allowEmpty = false } = {}) {
     if (!preset || !Array.isArray(preset.runs)) {
         return { ok: false, error: 'SESSION_NO_PRESET', detail: '预设没有 runs 数组' };
     }
@@ -41,7 +42,7 @@ export function compilePreset(ctx, preset = null) {
             return { ok: false, error: 'SESSION_PROTOCOL', detail: `预设里有一段角色是「${run?.role}」` };
         }
 
-        const text = substitute(ctx, String(run?.text ?? ''));
+        const text = substituteSessionText(ctx, String(run?.text ?? ''));
         if (!text.trim()) {
             // 空段不是错误，是没东西可填：跳过，别让一条空 system 白占一条消息
             continue;
@@ -50,7 +51,7 @@ export function compilePreset(ctx, preset = null) {
         runs.push({ role, text, ids: Array.isArray(run?.ids) ? run.ids.slice() : [] });
     }
 
-    if (runs.length === 0) {
+    if (runs.length === 0 && !allowEmpty) {
         return { ok: false, error: 'SESSION_NO_PRESET', detail: '预设编译完是空的：目标内容没有内容可发，其余卡片也都没启用' };
     }
 
@@ -63,7 +64,7 @@ export function compilePreset(ctx, preset = null) {
 }
 
 /** 现取 context 的宏替换。失败时按原文发出去，不让一整场会话因为一条宏炸掉 */
-function substitute(ctx, text) {
+export function substituteSessionText(ctx, text) {
     if (!text.includes('{{') || typeof ctx?.substituteParams !== 'function') {
         return text;
     }
@@ -71,7 +72,7 @@ function substitute(ctx, text) {
     try {
         return String(ctx.substituteParams(text) ?? text);
     } catch (err) {
-        console.error('[Thrive] 会话预设的宏替换失败，按原文发送', err);
+        console.error('[Thrive] 会话的宏替换失败，按原文发送', err);
         return text;
     }
 }

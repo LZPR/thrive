@@ -33,7 +33,7 @@ import {
     userText,
     userWithImages,
 } from './session-messages.js';
-import { compilePreset } from './session-preset.js';
+import { compilePreset, substituteSessionText } from './session-preset.js';
 import { readReply } from './session-provider.js';
 import { createSessionTools, executeTool, toOpenAITools } from './session-tools.js';
 import { DEFAULT_TIMEOUT_MS, probeTransport, requestOnce } from '../../platform/sillytavern/transport.js';
@@ -139,14 +139,15 @@ export async function openSession({ ctx, deps = null, preset = null, maxRounds =
  *
  * @param {object} session
  * @param {object|null} [preset]
+ * @param {{ allowEmpty?: boolean }} [options]
  * @returns {{ ok: true, added: number } | { ok: false, error: string, hint: string, detail?: string }}
  */
-export function applyPreset(session, preset = null) {
+export function applyPreset(session, preset = null, { allowEmpty = false } = {}) {
     if (!usable(session, 'open')) {
         return { ok: false, error: 'SESSION_PROTOCOL', hint: composeHint('SESSION_PROTOCOL', '会话不在可填充状态') };
     }
 
-    const compiled = compilePreset(session.ctx, preset);
+    const compiled = compilePreset(session.ctx, preset, { allowEmpty });
     if (!compiled.ok) {
         return { ok: false, error: compiled.error, hint: composeHint(compiled.error, compiled.detail), detail: compiled.detail };
     }
@@ -187,7 +188,7 @@ export function sendUserMessage(session, text, { images = null } = {}) {
         return { ok: false, error: 'SESSION_PROTOCOL', hint: composeHint('SESSION_PROTOCOL', '会话不在可发送状态') };
     }
 
-    const body = String(text ?? '');
+    const body = substituteSessionText(session.ctx, String(text ?? ''));
     const list = Array.isArray(images) ? images : [];
 
     if (!body.trim() && list.length === 0) {
@@ -415,7 +416,8 @@ export async function runSession({
         if (opening.cancelled) {
             return stop(session, 'aborted', 'SESSION_ABORTED');
         }
-        const prepared = applyPreset(session, preset);
+        // 无历史、用途卡或自建卡时，仍可只发送学习开场白；下一步负责拒绝空消息。
+        const prepared = applyPreset(session, preset, { allowEmpty: true });
         if (!prepared.ok) {
             return stop(session, 'error', prepared.error, prepared.detail);
         }
