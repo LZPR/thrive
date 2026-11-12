@@ -35,7 +35,7 @@ test('boots the real extension entry and toggles the panel with mouse and keyboa
     await expect(page.locator('#thrive_panel')).toBeHidden();
 });
 
-test('saves and cancels custom prompts while keeping the target card last', async ({ page }) => {
+test('saves and cancels custom prompts while keeping the target block last', async ({ page }) => {
     await page.locator('#thrive_prompt_open').click();
     const editor = page.locator('#thrive_prompts');
     await expect(editor).toBeVisible();
@@ -44,7 +44,8 @@ test('saves and cancels custom prompts while keeping the target card last', asyn
     await editor.locator('[data-field="text"]').fill('保留北境的设定');
     await editor.locator('[data-act="save"]').click();
     await expect(editor.locator('.thrive-prompts__name', { hasText: '自建规则' })).toBeVisible();
-    await expect(editor.locator('[data-prompt]').last()).toHaveAttribute('data-prompt', 'target');
+    expect(await editor.locator('[data-prompt]').evaluateAll(nodes => nodes.slice(-3).map(node => node.dataset.prompt)))
+        .toEqual(['targetDesc', 'target', 'targetEnd']);
     await editor.locator('[data-act="add"]').click();
     await editor.locator('[data-act="cancel"]').click();
     expect(await page.evaluate(() => window.__host.state.extensionSettings.thrive.customPrompts.length)).toBe(1);

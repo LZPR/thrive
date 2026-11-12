@@ -1,6 +1,6 @@
 /** Ordered historical migrations. Mutates settings, returns whether persistence is needed. */
 import { DEFAULT_SETTINGS } from './defaults.js';
-import { CARD_ID, DEFAULT_PROMPT_ORDER } from '../prompts/prompt-order.js';
+import { CARD_ID, DEFAULT_PROMPT_ORDER, LEGACY_RULES_ID } from '../prompts/prompt-order.js';
 
 export function migrateSettings(settings) {
     let dirty = false;
@@ -105,22 +105,16 @@ export function migrateSettings(settings) {
     }
 
     /*
-     * v0.36 / v0.37：提示词分成"通用 / 特化"两层（ADR-054）。
+     * v0.36 / v0.37：旧提示词迁入任务开场白（ADR-054）。
      *
      *   learningUserMessage         → learningTask
      *   learnPrompt                 → learningTask 前面（旧的"学习规则"卡排在开场白之前）
      *   compactUserMessage          → compactTask
      *   sessionRules（v0.36 的老值） → learningTask 前面，然后清空这个键
      *
-     * 为什么老值一律并进 task 而不是留在通用提示词里：旧版的"规则"写的是产出方式、
-     * 写到哪、怎么写，按新分工属于**特化**内容。通用提示词讲的是"你是谁"，
-     * 是 v0.37 才有的新东西，所以它从空串（= 默认文本）开始。
-     *
-     * v0.36 的 `sessionRules` 也要搬，判据是**顺序表里没有 rules 这张卡**——它不可删，
-     * 顺序表里出现它就说明已经迁过一遍了。搬完顺便把这张卡插到最前面。
+     * v0.38：移除跨任务通用身份卡，改用目标内容前后边界卡。
+     * 历史 sessionRules 保留到学习开场白；压缩开场白由自己的任务默认文本提供身份。
      */
-    let promptMoved = false;
-
     for (const [legacyKey, taskKey] of [
         ['learningUserMessage', 'learningTask'],
         ['compactUserMessage', 'compactTask'],
@@ -132,7 +126,6 @@ export function migrateSettings(settings) {
         const legacy = typeof settings[legacyKey] === 'string' ? settings[legacyKey].trim() : '';
         if (legacy && !String(settings[taskKey] ?? '').trim()) {
             settings[taskKey] = legacy;
-            promptMoved = true;
         }
         delete settings[legacyKey];
         dirty = true;
@@ -143,7 +136,6 @@ export function migrateSettings(settings) {
         if (legacy) {
             settings.learningTask = [legacy, String(settings.learningTask ?? '').trim()]
                 .filter(Boolean).join('\n\n');
-            promptMoved = true;
         }
         delete settings.learnPrompt;
         dirty = true;
@@ -151,19 +143,20 @@ export function migrateSettings(settings) {
 
     {
         const order = Array.isArray(settings.promptOrder) ? settings.promptOrder.filter(id => typeof id === 'string') : [];
-        const hasRulesCard = order.includes(CARD_ID.RULES);
+        const hasRulesCard = order.includes(LEGACY_RULES_ID);
         const staleRules = typeof settings.sessionRules === 'string' ? settings.sessionRules.trim() : '';
 
-        if (!hasRulesCard && (order.length || staleRules || promptMoved)) {
+        if (hasRulesCard || staleRules) {
             if (staleRules) {
                 settings.learningTask = [staleRules, String(settings.learningTask ?? '').trim()]
                     .filter(Boolean).join('\n\n');
                 settings.sessionRules = '';
             }
-            // 通用提示词排在目标内容上面：先知道自己是谁，再读到要干什么。
-            // 顺序表本来是空的话，这里写出的是默认顺序（空 = 默认，等价）
             const base = order.length ? order : DEFAULT_PROMPT_ORDER;
-            settings.promptOrder = [CARD_ID.RULES, ...base.filter(id => id !== CARD_ID.RULES)];
+            settings.promptOrder = [
+                ...base.filter(id => id !== LEGACY_RULES_ID && id !== CARD_ID.TARGET_END),
+                CARD_ID.TARGET_END,
+            ];
             dirty = true;
         }
     }

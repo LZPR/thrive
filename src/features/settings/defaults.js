@@ -50,20 +50,17 @@ const DEFAULT_SETTINGS = Object.freeze({
     promptRoles: {},
 
     /**
-     * 学习会话用到的四段文字（ADR-054 把它们分成两层）。
-     *
-     * 通用层（列表里的卡片，每一场都带）：
-     *   sessionRules  通用提示词的正文——这场会话里你是谁、擅长什么。默认空串。
-     *   targetPrompt  目标内容描述行（默认「以下是目标内容：」），真正的内容由
-     *                 learning.js 在发请求前追加在后面。
-     *
-     * 特化层（开场白，只属于那一种任务）：
-     *   learningTask  学习这一场怎么干：产出方式、写到哪、怎么写、这一次的要求。
-     *   compactTask   压缩那一场同样的一份。
+     * 提示词设置：
+     *   targetPrompt     目标内容开始标记。
+     *   targetEndPrompt  目标内容结束标记。
+     *   sessionRules     旧版本迁移用的通用提示词字段。
+     *   learningTask     学习专用开场白（含专家身份与任务要求）。
+     *   compactTask      压缩专用开场白（含专家身份与任务要求）。
      *
      * 空串 = 使用 prompt.js 里对应的 DEFAULT_*（默认文本随版本更新时老用户也能拿到新版）。
      */
     targetPrompt: '',
+    targetEndPrompt: '',
     sessionRules: '',
     learningTask: '',
     compactTask: '',

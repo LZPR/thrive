@@ -57,9 +57,9 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
                     ${open ? '收起' : '编辑'}</button>`
             : '';
     
-        // 注入位没有抓手也没有开关：它不参与排序，也不能被停用
-        const grip = item.pinned
-            ? '<span class="thrive-prompts__grip thrive-prompts__grip--locked fa-solid fa-lock" title="固定位置：始终在最后，代表这一场要看的内容"></span>'
+        // 目标内容区块的顺序固定，边界卡仍可编辑、停用与删除
+        const grip = item.pinned || item.anchored
+            ? '<span class="thrive-prompts__grip thrive-prompts__grip--locked fa-solid fa-lock" title="目标内容区块固定在预设末尾"></span>'
             : '<span class="thrive-prompts__grip fa-solid fa-grip-vertical" title="拖动调整顺序"></span>';
     
         const note = item.pinned
@@ -67,7 +67,8 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
             : `${item.chars} 字`;
     
         return `<article class="thrive-prompts__item" data-prompt="${item.id}"
-            data-kind="${item.kind}" data-enabled="${item.enabled}" data-pinned="${item.pinned}">
+            data-kind="${item.kind}" data-enabled="${item.enabled}" data-pinned="${item.pinned}"
+            data-anchored="${item.anchored}">
             ${grip}
             <div class="thrive-prompts__main">
                 <div class="thrive-prompts__head">
@@ -98,11 +99,10 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
             return '';
         }
     
-        const note = '特化提示词 · 每场一段 · 收起来不影响发送';
+        const note = '任务专用提示词 · 学习与压缩分别设置';
         const head = '<small class="thrive-prompts__fold-hint">'
-            + '上面列表里的卡片是通用提示词：每一场都带，讲的是这一场里你是谁。'
-            + '这里两段是特化提示词：只在那一种任务里发出，讲的是这一场具体怎么干——'
-            + '产出走哪、写到哪、怎么写、这一次要它做什么。'
+            + '这里分别设置学习与压缩的任务身份和要求；两段互不共用。'
+            + '上方目标内容区块用开始、结束标记包住运行时注入的材料。'
             + '</small>';
     
         return renderFold('msgs', '会话开场白', note, head + messages.map(renderMessage).join(''));

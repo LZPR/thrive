@@ -9,14 +9,15 @@ it('migrates obsolete settings once, deletes migrated keys and preserves prompt 
     const ctx = createContext({ settings: {
         passiveInterval: 12, passiveKeywords: '记住', passiveByDefault: true,
         sessionRules: '旧规则', learningUserMessage: '本场任务', compactUserMessage: '压缩任务',
-        promptOrder: ['custom', 'target'], customPrompts: [{ id: 'custom', name: '自建', content: '文本' }],
+        promptOrder: ['rules', 'custom', 'targetDesc', 'target'],
+        customPrompts: [{ id: 'custom', name: '自建', content: '文本' }],
         blockActive: '旧', toolsResident: true, moduleWorldbook: false,
     } });
     const settings = ensureSettings(ctx);
     expect(settings).toMatchObject({
         learnInterval: 12, learnKeywords: '记住', enabledByDefault: true,
         sessionRules: '', learningTask: '旧规则\n\n本场任务', compactTask: '压缩任务',
-        promptOrder: ['rules', 'custom', 'target'],
+        promptOrder: ['custom', 'targetDesc', 'target', 'targetEnd'],
     });
     for (const key of ['passiveInterval', 'passiveKeywords', 'passiveByDefault', 'learningUserMessage', 'compactUserMessage', 'blockActive', 'toolsResident', 'moduleWorldbook']) {
         expect(Object.hasOwn(settings, key)).toBe(false);

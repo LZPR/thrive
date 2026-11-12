@@ -9,19 +9,12 @@
  * 所以这里没有 extension prompt、没有头部/尾部分界、没有"这一轮生不生效"，
  * 只有"这份预设长什么样"。
  *
- * 分层（ADR-054）：**列表里的卡片是通用提示词，开场白是特化提示词**。
- *   通用 = 这场会话里你是谁、擅长什么、按什么标准判断——每一场都带，与任务无关。
- *   特化 = 这一次具体怎么干（产出方式、写到哪、怎么写、这一场的要求）——只属于那一种任务。
- * 所以通用规则是一张卡（排在目标内容上面），而"只有工具会留下结果"这类话写在开场白里。
+ * 任务身份与工作方式分别写在学习、压缩开场白；目标内容的边界卡只标记材料。
  *
  * 五条约定：
- *   1. 每张卡 = 一条消息。不合并相邻同角色的卡：卡片是用户自己排的，
- *      合并之后"我把它放在这一条之后"就不再是它字面上的意思了。唯一的例外是
- *      目标内容的描述行与注入位——后者本来就是前者的正文，挨着时并成一条。
- *   2. 目标内容拆成两行：描述行是用户能改能删的一句话，注入位没有正文，由运行时
- *      填真实内容（学习 = 当前对话记录）。没有内容时注入位不出现。
- *   3. 停用 = 不进预设，正文一个字不动。描述行还可以从列表里移除（正文留着，
- *      「默认顺序」能拿回来）；通用提示词只能停用；注入位连停用都不行——它必须存在。
+ *   1. 每张卡 = 一条消息，不合并相邻同角色的卡。
+ *   2. 目标内容区块由可选开始标记、运行时注入的正文、可选结束标记组成。
+ *   3. 边界卡可改、停用、删除；注入位不可编辑、停用或删除。
  *   4. 空串 = 用默认文本。默认文本随版本更新，老用户也能拿到新版。
  *   5. 宏不在这里展开：这里产出的是"用户写的样子"，session-preset.js 发请求前
  *      按顺序展开 `{{char}}` / `{{user}}` / `{{setvar::…}}`。
@@ -39,29 +32,15 @@ export const PROMPT_ROLE = Object.freeze({
 
 /* ------------------------------------------------------------------ 默认文本 */
 
-/**
- * 通用提示词：这场会话里模型是谁、擅长什么、按什么标准判断。
- *
- * 它是列表里的第一张卡（排在目标内容上面），学习、压缩、以后别的任务都用同一份。
- * 刻意**不含任何流程**——产出方式、写到哪、怎么写都属于"这一场怎么干"，写在
- * 开场白里（ADR-054）。也刻意不提 {{char}} / {{user}} 的指代问题：新会话里模型的
- * 身份是第三方整理者，不是聊天里的角色，没必要向它解释"谁是谁"。
- *
- * 语气是"你是一名……专家，你的专长是……"——给它一个站得住的位置，比一串禁令好使。
- */
-export const DEFAULT_RULES_PROMPT = `你是一名长期记忆整理专家。
-
-你的专长是从零散的材料里看出哪些东西值得长期保留，再把它写成以后还用得上的文字：客观的写成客观的，具体的写成具体的，不留空话，不重复材料里已经说清楚的部分，也不替材料做推论。
-
-你的产出会被当成设定长期留用，所以宁可少写一句，也不要写错一句。`;
+/** Legacy export retained for callers outside this module; no longer injected into presets. */
+export const DEFAULT_RULES_PROMPT = '';
 
 /**
- * 学习这一场的特化提示词：怎么产出、写到哪、怎么写、这一次要它做什么。
- *
- * 每一条都只在"这一场"里成立（独立会话、只有工具留下结果、这一场写去哪），
- * 所以放在开场白里而不是通用提示词里。三种任务各一份默认文本，互不影响。
+ * 学习专用的身份与任务提示词。压缩任务有完全独立的一份。
  */
 export const DEFAULT_LEARNING_TASK = `【任务】
+
+你是一名长期记忆学习专家，擅长从对话材料中识别值得长期保留的设定。
 
 请从上面这些内容里找出值得长期保留的设定，写进它该去的地方。
 
@@ -82,6 +61,8 @@ export const DEFAULT_LEARNING_TASK = `【任务】
 /** 压缩会话只返回候选正文，由用户审批后再写回 */
 export const DEFAULT_COMPACT_TASK = `【任务】
 
+你是一名长期记忆压缩专家，擅长在保留关键事实与语气的前提下精简设定。
+
 请压缩目标内容，并只返回压缩后的完整正文。不要解释，也不要尝试写入。
 
 产出方式：
@@ -93,8 +74,9 @@ export const DEFAULT_COMPACT_TASK = `【任务】
 · 不要改成提纲或摘要：它以后还要被当成设定来读。
 · 拿不准的一律保留，不要替材料做推论。`;
 
-/** 目标内容描述行的默认文本。内容会追加在它下面 */
-export const DEFAULT_TARGET_PROMPT = '以下是目标内容：';
+/** 目标内容边界标记。内容由运行时放在两张卡之间 */
+export const DEFAULT_TARGET_PROMPT = '目标内容从此处开始：';
+export const DEFAULT_TARGET_END_PROMPT = '目标内容到此结束。';
 
 /**
  * 卡片元信息：界面按 id 取标签与说明，不在这里判断"能不能用"。
@@ -103,22 +85,21 @@ export const DEFAULT_TARGET_PROMPT = '以下是目标内容：';
  * ——它没有正文，也不能不存在。
  */
 export const PROMPT_CARD_META = Object.freeze({
-    [CARD_ID.RULES]: {
-        label: '通用提示词',
-        hint: '这场会话里你是谁、擅长什么、按什么标准判断。每一场都带，与学什么、压什么无关；'
-            + '具体怎么干活写在下方的「会话开场白」里',
-        editable: true,
-        removable: false,
-    },
     [CARD_ID.TARGET_DESC]: {
-        label: '目标内容 · 描述',
-        hint: '只决定注入内容前面那一句。可以改、可以停用，也可以整个删掉——删了注入的内容照样发送',
+        label: '目标内容 [开始]',
+        hint: '目标内容前的开始标记。可编辑、停用或删除。',
+        editable: true,
+        removable: true,
+    },
+    [CARD_ID.TARGET_END]: {
+        label: '目标内容 [结束]',
+        hint: '目标内容后的结束标记。可编辑、停用或删除。',
         editable: true,
         removable: true,
     },
     [CARD_ID.TARGET]: {
         label: '目标内容',
-        hint: '运行时把真实内容填在这里：学习 = 当前对话记录，压缩 = 那条超长条目。没有正文，也不能改、不能停用、不能删',
+        hint: '运行时把真实内容填在开始与结束标记之间：学习 = 当前对话记录，压缩 = 那条超长条目。',
         editable: false,
         removable: false,
     },
@@ -126,19 +107,14 @@ export const PROMPT_CARD_META = Object.freeze({
 
 /** 卡片 id → 设置键。自建卡不在表里（正文存在自己身上） */
 const CARD_SETTING_KEY = Object.freeze({
-    /*
-     * 通用提示词沿用 `sessionRules` 这个键：v0.36 它指的是"开场白里那段共用规则"，
-     * v0.37 起同一段文字换了位置——变成列表里的一张卡（ADR-054）。老值由 store.js
-     * 搬回 learningTask，所以这个键从空开始，含义只有"这张卡的正文"。
-     */
-    [CARD_ID.RULES]: 'sessionRules',
     [CARD_ID.TARGET_DESC]: 'targetPrompt',
+    [CARD_ID.TARGET_END]: 'targetEndPrompt',
 });
 
 /** 卡片 id → 默认正文 */
 const CARD_DEFAULT = Object.freeze({
-    [CARD_ID.RULES]: DEFAULT_RULES_PROMPT,
     [CARD_ID.TARGET_DESC]: DEFAULT_TARGET_PROMPT,
+    [CARD_ID.TARGET_END]: DEFAULT_TARGET_END_PROMPT,
 });
 
 /* ------------------------------------------------------------------ 自建提示词 */
@@ -191,8 +167,7 @@ export function getPromptName(settings, id) {
  * @returns {number} 0 系统 / 1 用户 / 2 助手
  */
 export function getPromptRole(settings, id) {
-    // 注入位没有正文，也就没有"以谁的口吻发"这回事：它永远是系统消息，
-    // 除非它并进上面那条描述行——那时候用的是描述行的角色。
+    // 注入位没有角色覆盖，始终作为系统消息发送。
     if (isPinnedCard(id)) {
         return PROMPT_ROLE.SYSTEM;
     }
@@ -400,9 +375,7 @@ export function deleteCustomPrompt(settings, id) {
  *
  * 两种卡的"删"含义不同：
  *   · 自建提示词：整条删掉，正文一起没（`deleteCustomPrompt`）；
- *   · 可移除的内置卡（目标内容的描述行）：只从顺序表里去掉，正文留着。
- *     它本来就可以"不要这一句"，但用户可能只是想试试不带描述行——「默认顺序」
- *     能让它带着原来写的话回来，不必重打一遍。
+ *   · 可移除的边界卡：只从顺序表里去掉，正文留着。「默认顺序」能把它放回来。
  *
  * 注入位不能删：它不是"一段可写的文字"，是"这一场要看的东西"落脚的固定位置。
  *
@@ -445,12 +418,12 @@ function readText(settings, key, fallback) {
     return text.trim() ? text : fallback;
 }
 
-/** 通用提示词（列表里第一张卡）实际生效的文本 */
+/** Legacy accessor retained for compatibility; shared rules are no longer injected. */
 export function getRulesPrompt(settings) {
     return readText(settings, 'sessionRules', DEFAULT_RULES_PROMPT);
 }
 
-/** 目标内容描述行实际生效的文本 */
+/** 目标内容开始标记实际生效的文本 */
 export function getTargetPrompt(settings) {
     return readText(settings, 'targetPrompt', DEFAULT_TARGET_PROMPT);
 }
@@ -458,7 +431,7 @@ export function getTargetPrompt(settings) {
 /**
  * 会话开场白：**特化提示词**，每种任务一段，讲这一场具体怎么干。
  *
- * 通用提示词（你是谁）在列表里当卡片发，不在这里——两处的分工见 ADR-054。
+ * 任务身份与操作要求都在这一种任务自己的开场白里，学习和压缩互不共用。
  * 读法与卡片一致：空 = 用默认，这样默认文案随版本更新时老用户也能拿到新版。
  *
  * `kind` 是任务名，不是卡片 id——它不出现在 promptOrder 里，因为它不是"预设里的
@@ -470,7 +443,7 @@ const SESSION_MESSAGE = Object.freeze({
         fallback: DEFAULT_LEARNING_TASK,
         label: '学习',
         hint: '触发后作为那一场学习会话的第一条 User 消息发出：这一次要它做什么，'
-            + '以及产出方式 / 写到哪 / 怎么写。通用提示词里不必重复这些',
+            + '以及产出方式 / 写到哪 / 怎么写。',
     },
     compact: {
         key: 'compactTask',
@@ -549,10 +522,10 @@ export function getCardText(settings, id) {
     }
 
     switch (id) {
-        case CARD_ID.RULES:
-            return getRulesPrompt(settings);
         case CARD_ID.TARGET_DESC:
             return getTargetPrompt(settings);
+        case CARD_ID.TARGET_END:
+            return readText(settings, 'targetEndPrompt', DEFAULT_TARGET_END_PROMPT);
         default:
             return '';
     }
@@ -608,12 +581,12 @@ export function getCardState(settings, id) {
         return { state: 'idle', note: '已停用：预设里没有这一段' };
     }
 
-    if (id === CARD_ID.RULES) {
-        return { state: 'on', note: '通用提示词：学习与压缩都带上，讲的是这一场里你是谁' };
+    if (id === CARD_ID.TARGET_DESC) {
+        return { state: 'on', note: '目标内容开始标记，可编辑、停用或移除' };
     }
 
-    if (id === CARD_ID.TARGET_DESC) {
-        return { state: 'on', note: '接在注入的内容前面；删掉也没有关系，内容照样发送' };
+    if (id === CARD_ID.TARGET_END) {
+        return { state: 'on', note: '目标内容结束标记，可编辑、停用或移除' };
     }
 
     if (isCustomPrompt(settings, id)) {
@@ -637,15 +610,8 @@ export function roleLabel(role) {
 /**
  * 把卡片拼成会话预设。
  *
- * 一条线：从上到下每张卡一条消息，两条例外——
- *
- *   1. 注入位并进紧挨着它上面那条描述行。描述行本来就是"下面这些东西是……"的引子，
- *      拆成两条消息等于把同一句话打断。合并后角色用描述行的（用户把它设成 User
- *      就是想让模型读到一段"用户给的材料"）。
- *   2. 描述行被停用或已经被删掉时，注入位单独成一条 System 消息，内容一个字不少——
- *      删掉那句引子，不代表这一场不要看材料。
- *
- * 目标内容为空时整段跳过：只剩一句「以下是目标内容：」比不出现更糟。
+ * 从上到下每张卡一条消息；开始标记、目标正文、结束标记均保持独立消息。
+ * 目标内容为空时，注入位与两条边界标记都跳过。
  *
  * @param {object} settings
  * @param {{ target?: string }} [options] target = 这一场要处理的内容
@@ -656,18 +622,13 @@ export function buildPreset(settings, { target = '' } = {}) {
     const body = String(target ?? '').trim();
     const runs = [];
 
-    for (const id of order) {        if (id === CARD_ID.TARGET) {
+    for (const id of order) {
+        if (id === CARD_ID.TARGET) {
             if (!body) {
                 continue;
             }
 
-            const above = runs[runs.length - 1];
-            if (above && above.ids.length === 1 && above.ids[0] === CARD_ID.TARGET_DESC) {
-                above.text = `${above.text}\n\n${body}`;
-                above.ids = [CARD_ID.TARGET_DESC, CARD_ID.TARGET];
-            } else {
-                runs.push({ role: PROMPT_ROLE.SYSTEM, text: body, ids: [id] });
-            }
+            runs.push({ role: PROMPT_ROLE.SYSTEM, text: body, ids: [id] });
             continue;
         }
 
@@ -675,8 +636,8 @@ export function buildPreset(settings, { target = '' } = {}) {
             continue;
         }
 
-        // 没有材料时描述行也不发：孤零零一句「以下是目标内容：」比不出现更糟
-        if (id === CARD_ID.TARGET_DESC && !body) {
+        // 没有材料时不发送孤立边界标记
+        if ((id === CARD_ID.TARGET_DESC || id === CARD_ID.TARGET_END) && !body) {
             continue;
         }
 

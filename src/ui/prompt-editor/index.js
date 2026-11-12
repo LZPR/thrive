@@ -4,11 +4,10 @@ import { renderPromptBody, countText, msgCountText } from './view.js';
  *
  * 入口只有一处：设置页「提示词」折叠块里的按钮。标题栏也能拖，Esc 关闭。
  *
- * 这里编辑的是**一场学习会话的预设**（ADR-050、ADR-053、ADR-054）：
+ * 这里编辑的是**一场独立会话的预设**：
  *   · 卡片 = 预设里的一条消息，按列表顺序发出（没有系统区 / 尾部之分）
- *   · 卡片是**通用提示词**：通用提示词卡（你是谁）+ 目标内容的描述行与注入位 + 自建卡
- *   · 目标内容拆成两条：可改可删的**描述行**，和没有正文、只在运行时被填内容的**注入位**
- *   · 折叠块「会话开场白」是**特化提示词**：学习 / 压缩各一段，讲这一场具体怎么干
+ *   · 目标内容区块：可改可删的开始标记 + 运行时注入位 + 可改可删的结束标记
+ *   · 折叠块「会话开场白」分别定义学习 / 压缩任务的身份与做法
  *   · 折叠块「工具列表」：这一版带出去的全部工具，名字、用途与激活状态
  *   · 导入 SillyTavern 预设：可以从文件选，也可以直接从 ST 已装的预设里挑
  *
@@ -312,13 +311,15 @@ function buildView(ctx, settings) {
         const meta = PROMPT_CARD_META[id];
         const status = getCardState(settings, id);
         const text = getCardText(settings, id);
-        // 注入位没有正文：它的内容是触发那一刻才有的，界面上不显示"0 字"
+        // 边界卡与注入位固定成末尾区块；边界卡仍可编辑
         const pinned = isPinnedCard(id);
+        const anchored = id === 'targetDesc' || id === 'targetEnd';
 
         return {
             id,
             custom,
             pinned,
+            anchored,
             kind: custom ? 'custom' : 'builtin',
             name: getPromptName(settings, id),
             hint: custom ? '自建提示词 · 按列表顺序发出' : (meta?.hint ?? ''),
@@ -1011,7 +1012,7 @@ async function confirmDelete(id) {
     const custom = isCustomPrompt(settings, id);
 
     /*
-     * 两种"删除"要说清楚差别：自建卡连正文一起没，内置的描述行只是从列表里
+     * 两种"删除"要说清楚差别：自建卡连正文一起没，内置边界卡只是从列表里
      * 挪开——用户点删除时通常想的是"这一场不要这句"，不该顺带毁掉他写的话。
      */
     const question = custom
@@ -1094,7 +1095,7 @@ function resetOrder() {
     const settings = ensureSettings(ctx);
     const extra = getCustomPrompts(settings).map(item => item.id);
 
-    // 描述行回到最前、注入位固定在最后，自建提示词按默认规则夹在中间
+    // 恢复目标内容边界区块的默认顺序
     settings.promptOrder = normalizeOrder(DEFAULT_PROMPT_ORDER, extra);
 
     signature = null;
@@ -1329,10 +1330,10 @@ function buildImportMessage(sourceName, counts) {
     }
 
     return `从「${sourceName}」导入 ${counts.imported} 条提示词：`
-        + `启用 ${counts.enabled} / 停用 ${counts.disabled}，按预设里的顺序夹在「描述行」与「目标内容」之间。`
+        + `启用 ${counts.enabled} / 停用 ${counts.disabled}，排在目标内容区块之前。`
         + (skipped.length ? `跳过 ${skipped.join('、')}。` : '')
         + (notes.length ? `${notes.join('；')}。` : '')
-        + '导入会替换当前所有自建提示词；目标内容的两条与开场白保留。继续吗？';
+        + '导入会替换当前所有自建提示词；目标内容区块与开场白保留。继续吗？';
 }
 
 /* ------------------------------------------------------------------ 拖动 */
@@ -1361,7 +1362,7 @@ function initSortable() {
         // 整卡可拖会让编辑框里的选区没法用；只认抓手
         handle: '.thrive-prompts__grip',
         // 注入位既没有抓手也不接受被拖到它后面：它代表这一场要看的东西，位置是固定的
-        cancel: '.thrive-prompts__editor, [data-act], [data-pinned="true"]',
+        cancel: '.thrive-prompts__editor, [data-act], [data-pinned="true"], [data-anchored="true"]',
         placeholder: 'thrive-prompts__placeholder',
         forcePlaceholderSize: true,
         axis: 'y',
