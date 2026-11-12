@@ -574,10 +574,23 @@ body.thrive-panel-dragging {
     border-bottom: 1px solid var(--SmartThemeBorderColor);
 }
 
-/* 一行只放这一块（曾经是主动 / 被动两块并排）：现在整行都是学习模式 */
+/* 学习开关与当前写入落点并排，书名较长时小字自然换行。 */
 .thrive-modes__row {
     display: flex;
+    align-items: center;
     gap: 6px;
+}
+
+.thrive-modes__row .thrive-mode {
+    flex: 0 0 auto;
+}
+
+.thrive-modes__destination {
+    min-width: 0;
+    font-size: calc(var(--mainFontSize, 15px) * 0.72);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    opacity: 0.65;
 }
 
 /*

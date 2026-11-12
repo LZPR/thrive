@@ -35,6 +35,33 @@ test('boots the real extension entry and toggles the panel with mouse and keyboa
     await expect(page.locator('#thrive_panel')).toBeHidden();
 });
 
+test('shows write destinations beside learning mode and closes both windows with X', async ({ page }, testInfo) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await expect(panel.locator('.thrive-modes__destination')).toHaveText('角色：测试角色（角色卡） · 世界书：未选择');
+    await expect(panel.locator('[data-thrive-action="toggle-more"] .thrive-panel__meta')).toHaveCount(0);
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await expect(panel.locator('.thrive-modes__destination')).toHaveText('角色：测试角色（世界书条目） · 世界书：测试角色');
+    await expect(panel.locator('.thrive-panel__section-title', { hasText: '角色描述 · 世界书条目' })).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.screenshot({ path: testInfo.outputPath('learning-destinations-mobile.png') });
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    const teach = page.locator('#thrive_teach');
+    await teach.locator('[data-field="teach-text"]').fill('保留草稿');
+    await expect(teach.getByRole('button', { name: '关闭', exact: true })).toHaveText('X');
+    await teach.getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(teach).toBeHidden();
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    await expect(teach.locator('[data-field="teach-text"]')).toHaveValue('保留草稿');
+    await teach.getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(panel.getByRole('button', { name: '关闭面板' })).toHaveText('X');
+    await panel.getByRole('button', { name: '关闭面板' }).click();
+    await expect(panel).toBeHidden();
+    await page.locator('#thrive_badge').click();
+    await expect(panel).toBeVisible();
+});
+
 test('saves and cancels custom prompts while keeping the target block last', async ({ page }) => {
     await page.locator('#thrive_prompt_open').click();
     const editor = page.locator('#thrive_prompts');

@@ -126,8 +126,8 @@ const BODY = `
         <i class="fa-solid fa-chalkboard-user thrive-teach__icon" aria-hidden="true"></i>
         <span class="thrive-teach__title">教授</span>
         <span class="thrive-teach__meta">与当前对话无关</span>
-        <div class="menu_button thrive-teach__close" data-act="teach-close"
-            title="关闭（内容留着，下次打开接着写）" aria-label="关闭">收起</div>
+        <button type="button" class="menu_button thrive-teach__close" data-act="teach-close"
+            title="关闭（内容留着，下次打开接着写）" aria-label="关闭">X</button>
     </div>
     <div class="thrive-teach__body">
         <textarea class="text_pole thrive-teach__text" data-field="teach-text" rows="7"

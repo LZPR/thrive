@@ -68,12 +68,12 @@ function renderPanel({
                 <i class="fa-solid fa-compress" aria-hidden="true"></i>
                 ${compressAlert ? `<span class="thrive-panel__compress-count">${compressCount}</span>` : ''}
             </div>
-            <div class="menu_button thrive-panel__toggle" data-thrive-action="hide-panel"
-                title="收起面板；输入框旁的徽章随时能把它叫回来">收起</div>
+            <button type="button" class="menu_button thrive-panel__toggle" data-thrive-action="hide-panel"
+                title="关闭面板；输入框旁的徽章随时能把它叫回来" aria-label="关闭面板">X</button>
         </div>`;
 
     const body = [
-        renderLearnSection(learn),
+        renderLearnSection(learn, descChoice, characterName),
         renderMoreSection({ learn, choice: descChoice, expanded: moreOpen }),
         renderDescTargetSection(descTarget),
         renderPatchSection(patch, drift, editorStale, characterName),
@@ -99,8 +99,10 @@ function renderPanel({
  *
  * @param {ReturnType<typeof readLearnView>} view
  */
-function renderLearnSection(view) {
+function renderLearnSection(view, choice, characterName) {
     const { enabled, running, last, usable, available, interval, remaining, keywordCount, queued } = view;
+    const destination = `角色：${characterName || '未选择'}（${choice.storage === 'worldbook' ? '世界书条目' : '角色卡'}）`
+        + ` · 世界书：${choice.book || '未选择'}`;
 
     /*
      * 第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
@@ -135,6 +137,7 @@ function renderLearnSection(view) {
         <section class="thrive-panel__section thrive-modes">
             <div class="thrive-modes__row">
                 ${renderLearnTile({ on: enabled, hint, usable, running })}
+                <small class="thrive-modes__destination" title="${escapeHtml(destination)}">${escapeHtml(destination)}</small>
             </div>
             ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
             <div class="thrive-learn${running ? ' is-running' : ''}">
@@ -200,13 +203,6 @@ function renderLearnTile({ on, hint, usable, running }) {
  *          choice: ReturnType<typeof descTargetView>, expanded: boolean}} props
  */
 function renderMoreSection({ learn, choice, expanded }) {
-    /*
-     * 折头上的摘要回答"现在写到哪"：描述落点 + 可写书。
-     */
-    const meta = choice.storage === 'worldbook'
-        ? `描述：世界书${choice.book ? ` · ${choice.book}` : ''}`
-        : `描述：角色卡${choice.book ? ` · ${choice.book}` : ' · 未选书'}`;
-
     const rows = expanded ? renderMoreRows({ learn, choice }) : '';
 
     return `
@@ -218,7 +214,6 @@ function renderMoreSection({ learn, choice, expanded }) {
                 <span class="thrive-panel__section-title">
                     <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>更多设置
                 </span>
-                <span class="thrive-panel__meta">${escapeHtml(meta)}</span>
             </div>
             ${rows}
         </section>`;
@@ -298,34 +293,20 @@ function renderMoreRows({ learn, choice }) {
 
 
 /**
- * 统一模式的说明段：一行字回答"现在生不生效"（ADR-046）。
- *
- * 只说这一件事，别的都收掉：书名在标题旁边，正文在哪、能不能改都有各自的入口，
- * 面板里再复述一遍只会让这一块变成说明书。"角色卡上还留着 N 字"那条警告也去掉了——
- * 它描述的是切换模式时的历史残留，用户既不知道该怎么处理，也不影响本模式的读写，
- * 放在这里只是噪音。
+ * 统一模式只保留未激活警告，落点摘要统一放在学习模式旁。
  *
  * @param {{book: string, active: boolean|null}|null} descTarget
  */
 function renderDescTargetSection(descTarget) {
-    if (!descTarget) {
+    if (descTarget?.active !== false) {
         return '';
     }
 
-    const { book, active } = descTarget;
-    const inactive = active === false;
-
-    const notice = inactive
-        ? `「${book}」还没有激活：到「世界书」面板勾选这本书。`
-        : '每一轮都会注入。';
+    const notice = `「${descTarget.book}」还没有激活：到「世界书」面板勾选这本书。`;
 
     return `
         <section class="thrive-panel__section">
-            <div class="thrive-panel__head">
-                <span class="thrive-panel__section-title">角色描述 · 世界书条目</span>
-                <span class="thrive-panel__meta">${escapeHtml(book || '（没有书名）')}</span>
-            </div>
-            <div class="thrive-panel__notice${inactive ? ' thrive-panel__notice--warn' : ''}">${escapeHtml(notice)}</div>
+            <div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(notice)}</div>
         </section>`;
 }
 

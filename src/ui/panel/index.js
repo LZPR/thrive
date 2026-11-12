@@ -225,6 +225,7 @@ export function refreshPanel(ctx = getContext()) {
         moreExpanded,
         // 落点两个下拉：模式、书名，以及"列表里有哪些书"（别处新建/删除之后要重排）
         [descChoice.storage, descChoice.book, descChoice.books.length, descChoice.formats],
+        getActiveCharacter(ctx)?.name ?? '',
         descTarget ? [descTarget.mode, descTarget.book, descTarget.active] : null,
         patch ? [patch.id, patch.status, patch.before.length, patch.after.length, patch.after] : null,
         backups.map(item => [item.id, item.restoredAt]),
