@@ -251,7 +251,7 @@ function renderMoreRows({ learn, choice }) {
     return `
         <div class="thrive-more">
             <div class="thrive-more__field">
-                <label class="thrive-more__label" for="thrive_more_storage">描述存哪儿</label>
+                <label class="thrive-more__label" for="thrive_more_storage">描述存储位置</label>
                 <select id="thrive_more_storage" class="text_pole thrive-more__select"
                     data-thrive-field="storage">${storageOptions}</select>
             </div>
