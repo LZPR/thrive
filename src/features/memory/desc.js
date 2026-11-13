@@ -1,27 +1,6 @@
-/**
- * desc.js · 「统一使用世界书」模式下的角色描述存储
- *
- * 旧的 card 模式把描述写在角色卡的 `description` 字段里（targets.js 的
- * saveDescription / cardDescription）。这个模式换了个落点：
- *
- *   角色描述 = 「与角色同名的世界书」里一条标题为 `【角色描述】` 的**常驻**条目
- *
- * 为什么是常驻：ST 的世界书只扫关键词，而"人物描述"必须每轮都在，否则角色会
- * 忘掉自己是谁。为什么塞进世界书而不是另建一份文件：世界书本身就是"一本可以
- * 存很多条目、各自带条件"的容器，插件没必要再维护第二套存储与第二套界面。
- *
- * 三条约束，别在别处再判一遍：
- *   1. 条目对模型侧的 lore_* 工具不可见、不可改（targets.js 用 isReservedEntry 过滤，
- *      tools.js 的 lore 工具用 isReservedTitle 直接拒绝）；
- *   2. 每次写入都校正 `constant = true` / `disable = false` —— 这两个字段是"描述"这个
- *      语义的基础，用户或别的插件改掉之后必须被掰回来；
- *   3. 书怎么选只有一个顺序（见 resolveDescTarget），不允许各调用点各猜一套。
- *
- * 这里只做"存哪里、怎么存"，不判断该不该写（模块开关、长度上限、先读后写、
- * 读取登记都在 tools.js）。
- */
+/** Description tools use only the selected description book; each format owns a reserved entry. */
 
-import { DESC_ENTRY_TITLE, DESC_ENTRY_TITLES, DESC_FORMAT, DESC_STORAGE, descBookName, isReservedEntry } from './desc-entry.js';
+import { DESC_ENTRY_TITLE, DESC_ENTRY_TITLES, DESC_FORMAT, DESC_STORAGE, descBookName } from './desc-entry.js';
 import { ensureDraft, layerFor, rollbackEmptyDraft } from './draft.js';
 import { descriptionView } from './patch.js';
 import {
@@ -30,15 +9,10 @@ import {
     isWorldbookDesc,
     rememberLoreBackup,
 } from '../settings/index.js';
-import {
-    clampEntryPosition,
-    findLoreEntry,
-    getActiveCharacter,
-    isBookScanned,
-    loadBook,
-    nextLoreUid,
-    persistBook,
-} from './index.js';
+import { clampEntryPosition, findLoreEntry, nextLoreUid } from './lore-entry.js';
+import { getActiveCharacter } from './character-target.js';
+import { createBook, loadBook, persistBook } from './lore-repository.js';
+import { getDescriptionBook, isBookScanned, prepareBookRead } from './target-selection.js';
 import { normalizeEol } from '../../shared/util.js';
 
 /*
@@ -56,39 +30,7 @@ export function boundBookName(character) {
     return typeof value === 'string' ? value.trim() : '';
 }
 
-/**
- * 上一次真正解析到的书名。
- *
- * 面板是同步渲染的，没法每次都 load 一遍世界书；这个缓存只在
- * "解析成功"时更新，用来在界面上显示确切的落点（比如角色改名之后书名仍是旧的那个）。
- * 换角色时不复用 —— 缓存里带着头像文件名，对不上就退回同名推导。
- */
-let resolved = { avatar: '', book: '' };
-
-function rememberResolved(character, book) {
-    resolved = { avatar: String(character?.avatar ?? ''), book: String(book ?? '') };
-}
-
-function cachedBook(character) {
-    const avatar = String(character?.avatar ?? '');
-    return avatar && resolved.avatar === avatar ? resolved.book : '';
-}
-
-/**
- * 解析"这次该读写哪本书"。
- *
- * 顺序是固定的，三条都有理由：
- *   1. 角色绑定书里已经有保留条目 → 用它。角色改名 / 书改名之后，这是唯一还能找回
- *      原来那本书的线索；不先用它，改名就会凭空再建一本空书，描述看起来"丢了"。
- *   2. 与角色同名的书 → 用它（含"这本书里还没有条目"的情况，由调用方决定要不要建条目）。
- *   3. 只有 `create` 才建书：`saveWorldInfo` 对不存在的文件会直接写出一份新的，
- *      所以要建就显式建，不能靠写条目顺手带出来。
- *
- * @param {object} ctx
- * @param {{ create?: boolean, format?: string }} [options]
- * @returns {Promise<{ ok: true, book: string, data: object, found: object|null, createdBook: boolean }
- *          | { ok: false, error: string, hint?: string }>}
- */
+/** Resolve the configured description destination without falling back to another book. */
 export async function resolveDescTarget(ctx, options = {}) {
     const create = options.create === true;
     const character = getActiveCharacter(ctx);
@@ -111,15 +53,13 @@ export async function resolveDescTarget(ctx, options = {}) {
         };
     }
 
-    const book = await resolveBook(ctx, character, create);
+    const book = await resolveBook(ctx, create);
     if (!book.ok) {
         return book;
     }
     if (ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId || getActiveCharacter(ctx)?.avatar !== character.avatar) {
         return { ok: false, error: 'TOOL_UNAVAILABLE', hint: '对话或角色已切换，请在当前对话重试。' };
     }
-
-    rememberResolved(character, book.book);
 
     return {
         ok: true,
@@ -131,31 +71,8 @@ export async function resolveDescTarget(ctx, options = {}) {
 }
 
 /** @returns {Promise<{ ok: true, book: string, data: object, created: boolean } | { ok: false, error: string, hint?: string }>} */
-async function resolveBook(ctx, character, create) {
-    /*
-     * 0. 同一个角色上次解析到的那本书。
-     *    没有这一步的话，每次 desc_read 都要先把"角色绑定的那本书"整本读一遍来确认
-     *    里面有没有保留条目 —— 绑着一本大设定书时，这个代价很实在。
-     */
-    const cached = cachedBook(character);
-    if (cached) {
-        const loaded = await loadBook(ctx, cached);
-        if (loaded.ok && Object.values(loaded.data.entries ?? {}).some(isReservedEntry)) {
-            return { ok: true, book: loaded.book, data: loaded.data, created: false };
-        }
-    }
-
-    // 1. 绑定书（只认"里面有保留条目"这一种，避免把普通条目书误当描述书）
-    const bound = boundBookName(character);
-    if (bound) {
-        const loaded = await loadBook(ctx, bound);
-        if (loaded.ok && Object.values(loaded.data.entries ?? {}).some(isReservedEntry)) {
-            return { ok: true, book: loaded.book, data: loaded.data, created: false };
-        }
-    }
-
-    // 2/3. 同名书 → 必要时新建
-    const wanted = descBookName(character);
+async function resolveBook(ctx, create) {
+    const wanted = getDescriptionBook(ctx);
     if (!wanted) {
         return {
             ok: false,
@@ -164,8 +81,9 @@ async function resolveBook(ctx, character, create) {
         };
     }
 
-    const existing = matchBookName(listNames(ctx), wanted);
+    const existing = (ctx.getWorldInfoNames?.() ?? []).find(name => name === wanted);
     if (existing) {
+        prepareBookRead(ctx, existing);
         const loaded = await loadBook(ctx, existing);
         if (!loaded.ok) {
             return loaded;
@@ -184,110 +102,7 @@ async function resolveBook(ctx, character, create) {
     return createBook(ctx, wanted);
 }
 
-/**
- * 建一本空书。
- *
- * 不能直接用 `createNewWorldInfo`：它没有挂到 ST 的 context 上。所以走同一条
- * 服务端接口（`/api/worldinfo/edit` 对不存在的文件会直接新建），再用
- * `updateWorldInfoList` 把 `world_names` 拉新。
- *
- * 建完必须回到列表里确认真实名字：服务端会 sanitize 文件名，算出来的名字和
- * 落盘的名字可能差一两个字符。用"前后差集"找新出现的那本，比按字符串猜可靠。
- */
-async function createBook(ctx, name) {
-    if (typeof ctx.saveWorldInfo !== 'function') {
-        return {
-            ok: false,
-            error: 'WRITE_FAILED',
-            hint: '当前 ST 没有向扩展暴露 saveWorldInfo，建不了世界书。',
-        };
-    }
-
-    // 兜底：净化口径和服务端可能还差一点点，真撞上已有书名就别写那份空模板
-    const collision = matchBookName(listNames(ctx), name);
-    if (collision) {
-        const loaded = await loadBook(ctx, collision);
-        return loaded.ok
-            ? { ok: true, book: loaded.book, data: loaded.data, created: false }
-            : loaded;
-    }
-
-    const before = new Set(listNames(ctx).map(normalizeName));
-
-    try {
-        await ctx.saveWorldInfo(name, { entries: {} }, true);
-    } catch (err) {
-        console.debug('[Thrive] 创建世界书失败', name, err);
-        return {
-            ok: false,
-            error: 'WRITE_FAILED',
-            hint: `创建世界书「${name}」失败：${err?.message ?? err}。可以让用户先手动在「世界书」面板里新建一本。`,
-        };
-    }
-
-    try {
-        await ctx.updateWorldInfoList?.();
-    } catch (err) {
-        console.debug('[Thrive] updateWorldInfoList 失败', err);
-    }
-
-    const names = listNames(ctx);
-    const created = names.find(item => !before.has(normalizeName(item)))
-        ?? matchBookName(names, name);
-
-    if (!created) {
-        return {
-            ok: false,
-            error: 'WRITE_FAILED',
-            hint: `世界书「${name}」没有出现在列表里，写入目标不可用。可以让用户手动新建一次。`,
-        };
-    }
-
-    const loaded = await loadBook(ctx, created);
-    if (!loaded.ok) {
-        return loaded;
-    }
-
-    return { ok: true, book: loaded.book, data: loaded.data, created: true };
-}
-
-/** 书名清单；拿不到时返回空数组（判据与 targets 一致：它是 world_names 的副本） */
-function listNames(ctx) {
-    try {
-        const names = ctx.getWorldInfoNames?.();
-        return Array.isArray(names) ? names.map(String) : [];
-    } catch {
-        return [];
-    }
-}
-
-/**
- * 在清单里找"就是这一本"的书名。
- * 不区分大小写与变音符号 —— ST 自己建书时也用同一套比较口径，
- * 严格相等会把「张三」和「张三」当成两本。
- */
-function matchBookName(names, wanted) {
-    const key = normalizeName(wanted);
-    return names.find(name => normalizeName(name) === key) ?? '';
-}
-
-function normalizeName(name) {
-    return String(name ?? '')
-        .normalize('NFD')
-        .replace(/\p{Diacritic}/gu, '')
-        .toLowerCase()
-        .trim();
-}
-
-/**
- * 保证"书 + 条目"都存在，条目内容保持原样。
- *
- * 切换到统一模式时用它：即使一个字都没写，世界书里也得先有一条常驻条目，
- * 用户才能看见"描述去哪儿了"。内容为空是允许的（常驻 + 空正文不会注入任何东西）。
- *
- * @param {object} ctx
- * @returns {Promise<{ ok: true, book: string, created: boolean } | { ok: false, error: string, hint?: string }>}
- */
+/** Explicit structural operation; normal tool reads never create a book or entry. */
 export async function ensureDescEntry(ctx, format = DESC_FORMAT.TEXT) {
     const target = await resolveDescTarget(ctx, { create: true, format });
     if (!target.ok) {
@@ -394,6 +209,7 @@ export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT, options = 
     const metadata = ctx.chatMetadata;
     const chatId = ctx.getCurrentChatId?.();
     const avatar = getActiveCharacter(ctx)?.avatar;
+    const destination = getDescriptionBook(ctx);
 
     const title = descriptionTitle(format);
     const target = await resolveDescTarget(ctx, { create: true, format });
@@ -406,7 +222,8 @@ export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT, options = 
         return loaded;
     }
     if (ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId
-        || getActiveCharacter(ctx)?.avatar !== avatar || options.guard?.() === false) {
+        || getActiveCharacter(ctx)?.avatar !== avatar || getDescriptionBook(ctx) !== destination
+        || options.guard?.() === false) {
         return { ok: false, error: 'TOOL_UNAVAILABLE', hint: '对话或描述方式已切换，请重新读取。' };
     }
     const existing = findLoreEntry(loaded.data, title, { includeReserved: true });
@@ -452,7 +269,7 @@ export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT, options = 
     const saved = await persistBook(ctx, target.book, loaded.data, { uid: found.uid });
     if (!saved.ok) {
         // 缓冲区是这一笔才开出来的、又被拒了：收掉，别留一块空壳挡住真实世界书
-        rollbackEmptyDraft(ctx);
+        rollbackEmptyDraft(ctx, target.book);
         return saved;
     }
 
@@ -466,6 +283,7 @@ export async function writeDesc(ctx, text, format = DESC_FORMAT.TEXT, options = 
     rememberLoreBackup(ctx, {
         book: target.book,
         title,
+        uid: found.uid,
         action,
         layer: layerFor(ctx, target.book),
         before,
@@ -534,8 +352,7 @@ export async function setDescEntryEnabled(ctx, enabled, format = DESC_FORMAT.TEX
  * @returns {{ mode: string, book: string, title: string, active: boolean|null }}
  */
 export function getDescTargetSnapshot(ctx) {
-    const character = getActiveCharacter(ctx);
-    const book = cachedBook(character) || descBookName(character);
+    const book = getDescriptionBook(ctx);
 
     return {
         mode: descStorageMode(ctx),
@@ -605,13 +422,13 @@ function descriptionTitle(format = DESC_FORMAT.TEXT) {
 }
 
 /** 仅为启用的方式创建条目；切换方式/落点时保留已有正文并同步常驻状态。 */
-export async function syncDescEntries(ctx, formats) {
+export async function syncDescEntries(ctx, formats, options = {}) {
     const metadata = ctx.chatMetadata;
     const avatar = getActiveCharacter(ctx)?.avatar;
     const chatId = ctx.getCurrentChatId?.();
-    const target = await resolveDescTarget(ctx, { create: formats.length > 0 });
+    const target = await resolveDescTarget(ctx, { create: formats.length > 0 && options.create !== false });
     if (!target.ok) {
-        return target.error === 'NO_DESC_BOOK' && !formats.length ? { ok: true, book: '' } : target;
+        return target.error === 'NO_DESC_BOOK' && (!formats.length || options.create === false) ? { ok: true, book: '' } : target;
     }
     let changed = false;
     for (const format of Object.values(DESC_FORMAT)) {

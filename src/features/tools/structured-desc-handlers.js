@@ -1,8 +1,9 @@
+import { getDescriptionBook } from '../memory/target-selection.js';
 import { parseAliChat, parsePList, serializeAliChat, serializePList, validateDialogue } from '../../core/description-formats.js';
 import { readLimits } from '../../core/limits.js';
 import { getContext } from '../../platform/sillytavern/context.js';
 import { fnv1a } from '../../shared/util.js';
-import { ensureDescEntry, readDesc, writeDesc } from '../memory/desc.js';
+import { readDesc, writeDesc } from '../memory/desc.js';
 import { ensureSettings, getReadHash, saveChat, setReadHash } from '../settings/index.js';
 import { errorResult } from './tool-contracts.js';
 import { isToolAvailable } from './tool-availability.js';
@@ -37,17 +38,13 @@ export async function handleStructuredDesc(format, operation, params = {}) {
     if (!isToolAvailable(name)) return errorResult('TOOL_UNAVAILABLE');
     const metadata = ctx.chatMetadata;
     const chatId = ctx.getCurrentChatId?.();
-    if (operation === 'read') {
-        const ensured = await ensureDescEntry(ctx, format);
-        if (!ensured.ok) return ensured;
-    }
     const read = await readDesc(ctx, format);
     if (!isToolAvailable(name) || ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId) {
         return errorResult('TOOL_UNAVAILABLE');
     }
     if (!read.ok && read.error !== 'NO_DESC_BOOK') return read;
     const text = read.text;
-    const book = read.book ?? '';
+    const book = getDescriptionBook(ctx);
     let data;
     try {
         data = FORMATS[format].parse(text);

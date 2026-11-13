@@ -90,8 +90,13 @@ export function hashEntries(entries) {
 }
 
 /** 当前对话的缓冲区；没有时返回 null */
-export function getDraft(ctx) {
-    return getDraftState(ctx);
+export function getDrafts(ctx) {
+    const root = getDraftState(ctx);
+    return root ? [root, ...(root.others ?? [])] : [];
+}
+
+export function getDraft(ctx, book) {
+    return book === undefined ? getDraftState(ctx) : getDrafts(ctx).find(item => item.book === book) ?? null;
 }
 
 /** 缓冲区属于哪本书；空串 = 没有缓冲区 */
@@ -101,8 +106,7 @@ export function draftBook(ctx) {
 
 /** 这本书是不是正被缓冲区接管（读写都该走缓冲区） */
 export function isDraftBook(ctx, book) {
-    const drafted = draftBook(ctx);
-    return Boolean(drafted) && drafted === String(book ?? '').trim();
+    return Boolean(getDraft(ctx, String(book ?? '').trim()));
 }
 
 /**
@@ -125,8 +129,8 @@ export function layerFor(ctx, book) {
  * @returns {object|null} null = 这本书没有缓冲区
  */
 export function readDraftEntries(ctx, book) {
-    const draft = getDraftState(ctx);
-    if (!draft || draft.book !== String(book ?? '').trim()) {
+    const draft = getDraft(ctx, String(book ?? '').trim());
+    if (!draft) {
         return null;
     }
     return cloneEntries(draft.entries);
@@ -144,18 +148,25 @@ export function openDraft(ctx, { book, entries }) {
     const now = Date.now();
     const seeded = cloneEntries(entries);
 
-    setDraftState(ctx, {
+    const previous = getDraftState(ctx);
+    const next = {
         book: String(book ?? '').trim(),
         entries: seeded,
         baseHash: hashEntries(seeded),
         touched: {},
         createdAt: now,
         updatedAt: now,
-    });
+    };
+    if (previous) {
+        previous.others ??= [];
+        previous.others.push(next);
+    } else {
+        setDraftState(ctx, next);
+    }
 
     saveChat(ctx);
     notifyPanel();
-    return getDraftState(ctx);
+    return getDraft(ctx, next.book);
 }
 
 /**
@@ -184,20 +195,7 @@ export function ensureDraft(ctx, book, data) {
         };
     }
 
-    const draft = getDraftState(ctx);
-    if (draft) {
-        if (draft.book === name) {
-            return { ok: true, book: name, created: false };
-        }
-        // 缓冲区里是另一本书的改动：不自动丢掉（那是用户没保存的工作），
-        // 也不跨书写——那会让"保存"把 A 的内容写进 B
-        return {
-            ok: false,
-            error: 'DRAFT_BOOK',
-            hint: `虚拟世界书里还有「${draft.book}」的改动，没保存也没丢弃。`
-                + `请让用户先在虚拟世界书窗口里处理掉它，再往「${name}」里写。`,
-        };
-    }
+    if (getDraft(ctx, name)) return { ok: true, book: name, created: false };
 
     openDraft(ctx, { book: name, entries: data?.entries ?? {} });
     return { ok: true, book: name, created: true };
@@ -215,8 +213,8 @@ export function ensureDraft(ctx, book, data) {
  * @returns {object|null} 更新后的缓冲区；null = 缓冲区已经不在了
  */
 export function writeDraft(ctx, book, entries) {
-    const draft = getDraftState(ctx);
-    if (!draft || draft.book !== String(book ?? '').trim()) {
+    const draft = getDraft(ctx, String(book ?? '').trim());
+    if (!draft) {
         return null;
     }
 
@@ -255,15 +253,15 @@ export function writeDraft(ctx, book, entries) {
  * @param {object} ctx
  * @returns {boolean} 是否撤掉了
  */
-export function rollbackEmptyDraft(ctx) {
-    const draft = getDraftState(ctx);
+export function rollbackEmptyDraft(ctx, book) {
+    const draft = getDraft(ctx, book);
     if (!draft) {
         return false;
     }
     if (Object.keys(draft.touched ?? {}).length > 0) {
         return false;
     }
-    clearDraft(ctx);
+    clearDraft(ctx, draft.book);
     return true;
 }
 
@@ -276,13 +274,16 @@ export function rollbackEmptyDraft(ctx) {
  * @param {object} ctx
  * @returns {boolean} 原来有没有缓冲区
  */
-export function clearDraft(ctx) {
+export function clearDraft(ctx, book) {
     const existed = getDraftState(ctx) !== null;
     if (!existed) {
         return false;
     }
 
-    setDraftState(ctx, null);
+    const remaining = book === undefined ? [] : getDrafts(ctx).filter(item => item.book !== book);
+    const [first, ...others] = remaining;
+    if (first) first.others = others;
+    setDraftState(ctx, first ?? null);
     saveChat(ctx);
     notifyPanel();
     return true;
@@ -304,9 +305,9 @@ export function summarizeDraft(ctx) {
 
     return {
         exists: true,
-        book: draft.book,
-        entries: Object.keys(draft.entries ?? {}).length,
-        touched: Object.keys(draft.touched ?? {}).length,
+        book: getDrafts(ctx).map(item => item.book).join('、'),
+        entries: getDrafts(ctx).reduce((sum, item) => sum + Object.keys(item.entries ?? {}).length, 0),
+        touched: getDrafts(ctx).reduce((sum, item) => sum + Object.keys(item.touched ?? {}).length, 0),
         createdAt: Number(draft.createdAt) || 0,
         updatedAt: Number(draft.updatedAt) || 0,
     };

@@ -158,11 +158,12 @@ export async function refreshDraftWindow(ctx = getContext()) {
         view.writable,
         showSame,
         (view.items ?? []).map(item => [
+            item.book,
             item.uid,
             item.status,
             item.bufferTouched,
-            item.before.length,
-            item.after.length,
+            item.before,
+            item.after,
             item.keys.join('|'),
             item.keysBefore.join('|'),
             item.logic,
@@ -240,13 +241,6 @@ function renderBody(view) {
         </div>`);
     }
 
-    if (view.writable && view.book && view.writable !== view.book) {
-        notices.push(`<div class="thrive-draft__notice">
-            这一场对话的可写书现在是「${escapeHtml(view.writable)}」，工具会写到那本去；
-            这块缓冲区还停在「${escapeHtml(view.book)}」，保存前先确认要的是哪一本。
-        </div>`);
-    }
-
     if (view.ok === false) {
         return notices.join('');
     }
@@ -316,7 +310,7 @@ function renderEntry(item) {
     return `
         <article class="thrive-draft__entry thrive-draft__entry--${status}">
             <div class="thrive-draft__entry-head">
-                <span class="thrive-draft__entry-title">${escapeHtml(item.title || '（无标题）')}</span>
+                <span class="thrive-draft__entry-title">${escapeHtml(`${item.book ? `「${item.book}」· ` : ''}${item.title || '（无标题）'}`)}</span>
                 <span class="thrive-draft__tag thrive-draft__tag--${tagKind}">${escapeHtml(tag)}</span>
             </div>
             <div class="thrive-draft__keys">

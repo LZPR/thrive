@@ -10,26 +10,23 @@ import { getActiveCharacter } from '../memory/index.js';
 
 import { PATCH_STATUS, diskDescription, getPatch, stagePatch } from '../memory/patch.js';
 
-import { ensureDescEntry, isWorldbookDesc, readDescription, writeDesc } from '../memory/desc.js';
+import { isWorldbookDesc, readDescription, writeDesc } from '../memory/desc.js';
 
 import { compilePattern, replaceIn, scan } from '../../core/regex.js';
 
 import { appendParagraph, fnv1a, isBlank } from '../../shared/util.js';
 
-import { LOG, canReplace, errorResult } from './tool-contracts.js';
+import { LOG, captureToolScope, canReplace, errorResult } from './tool-contracts.js';
 
 /* --------------------------------------------------------------- desc_read */
 
 async function handleDescRead(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
 
     if (!isLearningActive()) {
         return errorResult('TOOL_UNAVAILABLE');
-    }
-    if (isWorldbookDesc(ctx)) {
-        const ensured = await ensureDescEntry(ctx);
-        if (!ensured.ok) return errorResult(ensured.error, ensured.hint);
     }
 
     const limits = readLimits(settings);
@@ -39,6 +36,7 @@ async function handleDescRead(params) {
     if (!view.ok) {
         return errorResult(view.error, view.hint);
     }
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     const text = view.text;
 
     // 看过描述这件事本身：追加的前置。哪怕只是查了一个词，模型也算知道"这里有什么"
@@ -100,6 +98,7 @@ async function handleDescRead(params) {
 
 async function handleDescAppend(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -116,6 +115,7 @@ async function handleDescAppend(params) {
     if (!view.ok) {
         return errorResult(view.error, view.hint);
     }
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     const base = view.text;
 
     // 读过全文的话顺手做一次变更检测：内容变了，模型对"末尾是什么"的认知就不成立了
@@ -136,7 +136,7 @@ async function handleDescAppend(params) {
             `追加后共 ${next.length} 字，超过上限 ${hardLimit} 字。这次没有写入：请少追加一些，或改用 desc_replace 顺手删掉一段再写。`);
     }
 
-    const committed = await commitDescription(ctx, { next, fullText: false });
+    const committed = await commitDescription(ctx, { next, base, currentScope, fullText: false });
     if (!committed.ok) {
         return committed;
     }
@@ -154,6 +154,7 @@ async function handleDescAppend(params) {
 
 async function handleDescReplace(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -171,6 +172,7 @@ async function handleDescReplace(params) {
     if (!view.ok) {
         return errorResult(view.error, view.hint);
     }
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     const base = view.text;
 
     // 守卫：这个 pattern 预读过，或者这一轮读过全文。都没有就是闭着眼睛改字
@@ -223,6 +225,7 @@ async function handleDescReplace(params) {
 
 async function handleDescRewrite(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -235,6 +238,7 @@ async function handleDescRewrite(params) {
     if (!view.ok) {
         return errorResult(view.error, view.hint);
     }
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     const base = view.text;
     const recorded = getReadHash(ctx, READ_KEY_DESC);
 
@@ -257,7 +261,7 @@ async function handleDescRewrite(params) {
             `正文 ${next.length} 字，超过上限 ${hardLimit} 字。这次没有写入：整段重写必须一次给到上限以内，否则先用 desc_replace 删掉一部分。`);
     }
 
-    const committed = await commitDescription(ctx, { next, fullText: true });
+    const committed = await commitDescription(ctx, { next, base, currentScope, fullText: true });
     if (!committed.ok) {
         return committed;
     }
@@ -340,9 +344,9 @@ function registerDescWrite(ctx, next, fullText) {
  *   不碰角色卡、不碰角色编辑框、不写 backups.desc —— 那条快照槽位属于 card 模式，
  *   世界书的撤销走 backups.lore（面板「已写入 → 恢复写入前」）。
  */
-async function commitDescription(ctx, { next, fullText }) {
+async function commitDescription(ctx, { next, base, currentScope, fullText }) {
     if (isWorldbookDesc(ctx)) {
-        const written = await writeDesc(ctx, next);
+        const written = await writeDesc(ctx, next, 'text', { expectedText: base, guard: currentScope });
         if (!written.ok) {
             console.debug(`${LOG} 描述写入失败`, written.error);
             return written;
@@ -356,7 +360,7 @@ async function commitDescription(ctx, { next, fullText }) {
             ok: true,
             staged: false,
             applied: true,
-            note: `已写入世界书「${written.book}」的【角色描述】条目，最迟下一轮生效。`,
+            note: '角色描述已写入虚拟世界书，保存后生效。',
         };
     }
 

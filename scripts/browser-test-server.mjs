@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const prefix = '/scripts/extensions/third-party/thrive/';
 const hostPaths = new Set([
+    '/world-info.js', '/scripts/world-info.js',
     '/extensions.js', '/popup.js', '/preset-manager.js',
     '/scripts/extensions.js', '/scripts/popup.js', '/scripts/preset-manager.js',
     '/slash-commands/SlashCommandParser.js', '/slash-commands/SlashCommand.js', '/slash-commands/SlashCommandArgument.js',

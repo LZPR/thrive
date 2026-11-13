@@ -50,6 +50,8 @@ import {
     isChatAvailable,
     isEnabled,
     loreReadKey,
+    lorePatternPrefix,
+    clearReadKeysByPrefix,
     markLoreBackupRestored,
     saveChat,
     setEnabled,
@@ -58,7 +60,7 @@ import { getActiveCharacter, refreshDescriptionEditor, restoreLoreEntry } from '
 import { normalizeEol } from '../../shared/util.js';
 import { syncBadgeOpenState } from './badge.js';
 import { openCompressPanel } from '../compress/index.js';
-import { changeDescFormats, changeDescStorage, changeWritableBook, descTargetView } from './desc-target.js';
+import { changeDescFormats, changeDescriptionBook, changeDescStorage, changeWritableBook, descTargetView } from './desc-target.js';
 import { openDraftWindow } from '../draft/index.js';
 import { applyPanelLayout, bindDrag, bindPanelRelayout } from './layout.js';
 import { refreshUI, registerSurfaces, setPanelOpen } from '../shared/refresh.js';
@@ -515,7 +517,7 @@ function onPanelKeydown(event) {
  */
 function onPanelChange(event) {
     const field = event.target?.dataset?.thriveField;
-    if (!field || (field !== 'storage' && field !== 'book' && !field.startsWith('format-'))) {
+    if (!field || (field !== 'storage' && field !== 'book' && field !== 'description-book' && !field.startsWith('format-'))) {
         return;
     }
 
@@ -543,6 +545,8 @@ function onPanelChange(event) {
 
     (field.startsWith('format-')
         ? changeDescFormats(ctx, [...formats])
+        : field === 'description-book'
+        ? changeDescriptionBook(ctx, value)
         : field === 'storage'
         ? changeDescStorage(ctx, value)
         : changeWritableBook(ctx, value)
@@ -672,7 +676,8 @@ async function restoreLoreAndReport(backupId) {
         }
 
         markLoreBackupRestored(ctx, backup.id);
-        clearReadHash(ctx, loreReadKey(backup.book, backup.title));
+        clearReadHash(ctx, loreReadKey(backup.book, backup.uid ?? backup.title));
+        clearReadKeysByPrefix(ctx, lorePatternPrefix(backup.book, backup.uid ?? backup.title));
         saveChat(ctx);
 
         toast(result.action === 'gone'

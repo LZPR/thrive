@@ -30,7 +30,7 @@ import { isReservedEntry } from './desc-entry.js';
 import { COMPRESS_EVENT } from '../../shared/events.js';
 import { readLimits } from '../../core/limits.js';
 import { diskDescription, getPatch, isUnresolved } from './patch.js';
-import { draftBook, layerFor } from './draft.js';
+import { isDraftBook, layerFor } from './draft.js';
 import {
     READ_KEY_DESC,
     clearReadHash,
@@ -165,7 +165,7 @@ export async function scanCompressTargets(ctx, settings) {
     const book = getWritableBook(ctx);
     result.book = book;
     // 缓冲区开着时，下面读到的、以及保存时写回的，都是缓冲区里的那一份
-    result.draft = Boolean(book) && draftBook(ctx) === book;
+    result.draft = Boolean(book) && isDraftBook(ctx, book);
 
     if (!book) {
         result.error = '还没选择可写书，世界书条目没有参与检查。';
@@ -390,6 +390,7 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
     rememberLoreBackup(ctx, {
         book: loaded.book,
         title: item.title,
+        uid: found.uid,
         action: 'rewritten',
         layer: layerFor(ctx, loaded.book),
         before,
@@ -401,8 +402,8 @@ async function writeLoreEntry(ctx, settings, item, text, hard) {
      * 正文被插件替用户改了：模型这一轮读过的"这条多长、哪里有什么"随之失效。
      * 不作废的话，它下一次写入会基于旧认知覆盖掉刚压出来的版本。
      */
-    clearReadHash(ctx, loreReadKey(loaded.book, item.title));
-    clearReadKeysByPrefix(ctx, lorePatternPrefix(loaded.book, item.title));
+    clearReadHash(ctx, loreReadKey(loaded.book, found.key));
+    clearReadKeysByPrefix(ctx, lorePatternPrefix(loaded.book, found.key));
     saveChat(ctx);
 
     console.debug(`${LOG} 手动压缩条目`, { book: loaded.book, title: item.title, before: before.length, after: text.length });

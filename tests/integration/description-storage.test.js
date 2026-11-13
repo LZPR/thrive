@@ -69,9 +69,10 @@ it('normalizes selections per chat and only activates structured formats in worl
     expect(getDescFormats(ctx)).toEqual([]);
 });
 
-it('continues using a renamed character’s bound description book', async () => {
+it('keeps using an explicitly selected description book after a character rename', async () => {
     const { ctx, books } = host();
     ctx.characters[0].avatar = 'renamed.png';
+    getState(ctx).descriptionBook = '旧名字';
     ctx.characters[0].data = { extensions: { world: '旧名字' } };
     books.set('旧名字', { entries: {
         3: { uid: 3, comment: DESC_ENTRY_TITLE, content: '旧书里的描述', constant: true, disable: false },

@@ -66,7 +66,7 @@ function context() {
 }
 
 async function init() {
-    console.log(`${LOG} 启动 v0.40.2 · 立即学习 · 描述方式必选 · 两行落点摘要`);
+    console.log(`${LOG} 启动 v0.41.0 · 独立描述书 · 跨书条目映射 · 自动建书与激活`);
 
     // 设置项必须最先补齐：后面所有读取都依赖默认值存在
     ensureSettings(context());

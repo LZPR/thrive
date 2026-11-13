@@ -1,6 +1,6 @@
 /** draft-commit.js · Internal memory module; public entry: index.js. */
 
-import { DRAFT_LAYER, clearDraft, cloneEntries, getDraft, hashEntries } from './draft.js';
+import { DRAFT_LAYER, clearDraft, cloneEntries, getDraft, getDrafts, hashEntries } from './draft.js';
 
 import { notifyPanel } from '../../shared/events.js';
 
@@ -38,8 +38,8 @@ const LOGIC_LABELS = Object.freeze({
  *            counts: object, createdAt: number, updatedAt: number, writable: string }
  *          | { ok: false, error: string, hint?: string, book: string }>}
  */
-async function buildDraftView(ctx) {
-    const draft = getDraft(ctx);
+async function buildSingleDraftView(ctx, book) {
+    const draft = getDraft(ctx, book);
     if (!draft) {
         return { ok: true, exists: false };
     }
@@ -90,8 +90,8 @@ async function buildDraftView(ctx) {
  *                     added: number, removed: number, editor?: object }
  *          | { ok: false, error: string, hint?: string }>}
  */
-async function commitDraft(ctx, options = {}) {
-    const draft = getDraft(ctx);
+async function commitSingleDraft(ctx, options = {}) {
+    const draft = getDraft(ctx, options.book);
     if (!draft) {
         return { ok: false, error: 'NO_DRAFT', hint: '虚拟世界书里没有待保存的改动。' };
     }
@@ -122,8 +122,8 @@ async function commitDraft(ctx, options = {}) {
     const changed = items.filter(item => item.status !== 'same');
 
     if (changed.length === 0) {
-        clearDraft(ctx);
-        dropDraftBackups(ctx);
+        clearDraft(ctx, draft.book);
+        dropDraftBackups(ctx, draft.book);
         saveChat(ctx);
         return { ok: true, action: 'empty', book: draft.book, written: 0, added: 0, removed: 0 };
     }
@@ -138,6 +138,7 @@ async function commitDraft(ctx, options = {}) {
         rememberLoreBackup(ctx, {
             book: draft.book,
             title: item.title || item.titleBefore,
+            uid: item.uid,
             action: item.status === 'added' ? 'created' : 'rewritten',
             layer: DRAFT_LAYER.DISK,
             before: item.status === 'added' ? '' : item.before,
@@ -146,9 +147,9 @@ async function commitDraft(ctx, options = {}) {
         });
     }
 
-    clearDraft(ctx);
+    clearDraft(ctx, draft.book);
     // 保存完，缓冲区那一层的记录已经指不到任何东西了；刚补的 disk 记录留着
-    dropDraftBackups(ctx);
+    dropDraftBackups(ctx, draft.book);
     saveChat(ctx);
 
     return {
@@ -272,6 +273,45 @@ function sameEntry(left, right) {
     const a = keyList(left);
     const b = keyList(right);
     return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+async function buildDraftView(ctx) {
+    const drafts = getDrafts(ctx);
+    if (!drafts.length) return { ok: true, exists: false };
+    const views = [];
+    for (const draft of drafts) {
+        const view = await buildSingleDraftView(ctx, draft.book);
+        if (!view.ok) return view;
+        views.push(view);
+    }
+    const items = views.flatMap(view => view.items.map(item => ({ ...item, book: view.book })));
+    const changed = items.filter(item => item.status !== 'same');
+    return { ...views[0], book: drafts.map(item => item.book).join('、'),
+        books: drafts.map(item => item.book), items, changed,
+        diskChanged: views.some(view => view.diskChanged),
+        counts: { total: items.length, added: changed.filter(item => item.status === 'added').length,
+            changed: changed.filter(item => item.status === 'changed').length,
+            removed: changed.filter(item => item.status === 'removed').length } };
+}
+
+async function commitDraft(ctx, options = {}) {
+    const drafts = getDrafts(ctx);
+    if (!drafts.length) return { ok: false, error: 'NO_DRAFT' };
+    // Preflight every book before writing any book. On a later I/O failure, only unsaved drafts remain.
+    const view = await buildDraftView(ctx);
+    if (!view.ok) return view;
+    if (view.diskChanged && !options.force) return { ok: false, error: 'DISK_CHANGED', hint: '真实世界书已改动，请检查差异后确认覆盖。' };
+    const results = [];
+    for (const draft of drafts) {
+        const result = await commitSingleDraft(ctx, { ...options, book: draft.book });
+        if (!result.ok) return result;
+        results.push(result);
+    }
+    return { ok: true, action: results.every(item => item.action === 'empty') ? 'empty' : 'committed',
+        book: results.map(item => item.book).join('、'),
+        written: results.reduce((sum, item) => sum + item.written, 0),
+        added: results.reduce((sum, item) => sum + item.added, 0),
+        removed: results.reduce((sum, item) => sum + item.removed, 0) };
 }
 
 export { buildDraftView, commitDraft, discardDraft };

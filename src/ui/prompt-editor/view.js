@@ -192,7 +192,7 @@ export function renderPromptBody(view, { editing = null, msgDraft = '', folds = 
             </article>`).join('')}</div>
             <small class="thrive-prompts__fold-hint">
                 描述工具按当前对话的编辑方式筛选；只有生效的方式会发送给新会话。
-                世界书工具还要求这一场对话选好了可写书。
+                世界书工具读取本对话全部激活条目，新建位置由面板的「其它设定」决定。
             </small>`;
     
         return renderFold('tools', '工具列表', `${tools.length} 个 · ${tools.filter(tool => tool.active).length} 个可用`, inner);

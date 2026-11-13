@@ -13,9 +13,9 @@ import { getState } from './chat-store.js';
  *   seen:desc                             看过描述这件事本身（任意视图；追加的前置）
  *   pat:desc:<flags>:<h>                  某个正则预读命中过（替换的前置）
  *   book:<name>                           看过这本书（新建条目的前置）
- *   lore:<book>|<title>                   条目全文的哈希（整段重写的前置）
- *   seen:lore:<book>|<title>              目录里见过这条标题（追加的前置）
- *   pat:lore:<book>|<title>:<flags>:<h>   某条目的某个正则预读命中过
+ *   lore:<book>|<entryKey>                   条目全文的哈希（整段重写的前置）
+ *   seen:lore:<book>|<entryKey>              目录里见过这条标题（追加的前置）
+ *   pat:lore:<book>|<entryKey>:<flags>:<h>   某条目的某个正则预读命中过
  *
  * 分四级的理由：读得越少，能做的写入必须越少。只看过标题就允许整段覆盖，
  * "先读后写"就只是一句口号。写在 tools.js 里的守卫顺序与本表一一对应。
@@ -58,7 +58,7 @@ function clearReadHash(ctx, key) {
 }
 
 /**
- * 世界书读取登记的键：`lore:<book>|<title>`。
+ * 世界书读取登记的键：`lore:<book>|<entryKey>`。
  * 书名与标题都可能含 `|`，所以只用第一个 `|` 分隔，解析时按后者处理。
  */
 function loreReadKey(book, title) {
@@ -81,7 +81,7 @@ function bookReadKey(book) {
 const BOOK_SEEN = 'seen';
 
 /**
- * 某个条目的"标题见过"标记：`seen:lore:<book>|<title>`。
+ * 某个条目的"标题见过"标记：`seen:lore:<book>|<entryKey>`。
  *
  * 与 `loreReadKey` 分开是因为授权的动作不同：见过标题只允许**追加**，
  * 整段改写还得读过全文。两者共用一个键就会出现"看了一眼目录就能覆盖全文"。
@@ -91,7 +91,7 @@ function loreSeenKey(book, title) {
 }
 
 /**
- * 正则预读标记：`pat:desc:<flags>:<hash>` / `pat:lore:<book>|<title>:<flags>:<hash>`。
+ * 正则预读标记：`pat:desc:<flags>:<hash>` / `pat:lore:<book>|<entryKey>:<flags>:<hash>`。
  *
  * 存 pattern 的哈希而不是 pattern 本身：reads 会随聊天记录落盘，没必要把
  * 用户/模型写的正则原文也存一份。

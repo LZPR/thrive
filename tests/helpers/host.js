@@ -17,3 +17,6 @@ export const POPUP_TYPE = { CONFIRM: 1 };
 export async function callGenericPopup() {
     return POPUP_RESULT.NEGATIVE;
 }
+
+export const selected_world_info = [];
+export const world_info = {};

@@ -38,11 +38,11 @@ test('boots the real extension entry and toggles the panel with mouse and keyboa
 test('shows write destinations beside learning mode and closes both windows with X', async ({ page }, testInfo) => {
     await page.locator('#thrive_badge').click();
     const panel = page.locator('#thrive_panel');
-    await expect(panel.locator('.thrive-modes__destination > span')).toHaveText(['角色：测试角色（角色卡）', '世界书：未选择']);
+    await expect(panel.locator('.thrive-modes__destination > span')).toHaveText(['角色：测试角色（角色卡）', '其它设定：测试角色']);
     await expect(panel.locator('[data-thrive-action="toggle-more"] .thrive-panel__meta')).toHaveCount(0);
     await panel.locator('[data-thrive-action="toggle-more"]').click();
     await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
-    await expect(panel.locator('.thrive-modes__destination > span')).toHaveText(['角色：测试角色（世界书条目）', '世界书：测试角色']);
+    await expect(panel.locator('.thrive-modes__destination > span')).toHaveText(['角色：测试角色（世界书：测试角色）', '其它设定：测试角色']);
     await expect(panel.locator('.thrive-panel__section-title', { hasText: '角色描述 · 世界书条目' })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect.poll(() => panel.locator('.thrive-modes__row').evaluate(row => {
@@ -69,6 +69,54 @@ test('shows write destinations beside learning mode and closes both windows with
     await expect(panel).toBeHidden();
     await page.locator('#thrive_badge').click();
     await expect(panel).toBeVisible();
+});
+
+test('configures independent books and shows deferred creation and activation notices', async ({ page }, testInfo) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    const description = panel.locator('[data-thrive-field="description-book"]');
+    const other = panel.locator('[data-thrive-field="book"]');
+    await expect(description).toBeDisabled();
+    await expect(other).toBeEnabled();
+    await other.fill('其它设定库');
+    await other.press('Tab');
+    await expect(other).toHaveValue('其它设定库');
+    await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await expect(description).toBeEnabled();
+    await description.fill('人物描述库');
+    await description.press('Tab');
+    await expect(description).toHaveValue('人物描述库');
+    await expect(panel).toContainText('角色描述「人物描述库」尚不存在，将在下次写入时自动创建。');
+    await expect(panel).toContainText('其它设定「其它设定库」尚不存在，将在下次写入时自动创建。');
+    expect(await page.evaluate(() => window.__host.state.writes)).toBe(0);
+
+    // Suggest an existing inactive book; selecting it must preserve the description destination.
+    await other.fill('测试书');
+    await other.press('Tab');
+    await expect(panel).toContainText('其它设定「测试书」未激活，将在下次读取前自动激活。');
+    await expect(description).toHaveValue('人物描述库');
+    await page.evaluate(async base => {
+        const store = await import(`${base}/src/features/settings/index.js`);
+        const { getToolDefs } = await import(`${base}/src/features/tools/index.js`);
+        store.markLearningRunning({ reason: 'manual' });
+        try {
+            const call = name => getToolDefs().find(tool => tool.name === name).action({});
+            await call('desc_read');
+            await call('lore_list');
+        } finally {
+            store.markLearningRunning(null);
+        }
+    }, prefix);
+    expect(await page.evaluate(() => window.__host.state.writes)).toBe(0);
+    expect(await page.evaluate(() => [...window.__host.selected_world_info])).toContain('测试书');
+    await expect(panel).not.toContainText('其它设定「测试书」未激活');
+    await expect(panel).toContainText('角色描述「人物描述库」尚不存在');
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await panel.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await panel.screenshot({ path: testInfo.outputPath('independent-worldbooks-mobile.png') });
+    await page.locator('[data-thrive-action="toggle-more"]').click();
+    await expect(panel).toContainText('角色描述「人物描述库」尚不存在');
 });
 
 test('saves and cancels custom prompts while keeping the target block last', async ({ page }) => {
@@ -369,8 +417,14 @@ test('selects per-chat formats and only sends their tools and editable mandatory
     await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual(['plist']);
     await panel.locator('[data-thrive-field="format-alichat"]').check();
     await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual(['plist', 'alichat']);
-    expect(await page.evaluate(() => Object.values(window.__host.state.books['测试角色'].entries).map(entry => [entry.comment, entry.disable])))
-        .toEqual([['【角色描述】', true], ['【角色描述 · PLists】', false], ['【角色描述 · Ali:Chat】', false]]);
+    expect(await page.evaluate(() => window.__host.state.books['测试角色'])).toBeUndefined();
+    await page.evaluate(async base => {
+        const { writeDesc } = await import(`${base}/src/features/memory/desc.js`);
+        const { commitDraft } = await import(`${base}/src/features/memory/index.js`);
+        await writeDesc(window.__host.getContext(), '[persona: kind]', 'plist');
+        await writeDesc(window.__host.getContext(), '', 'alichat');
+        await commitDraft(window.__host.getContext());
+    }, prefix);
     await panel.screenshot({ path: testInfo.outputPath('description-formats-panel.png') });
 
     await page.locator('#thrive_prompt_open').click();

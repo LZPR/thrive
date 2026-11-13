@@ -92,9 +92,9 @@ function buildLoreTools() {
     define({
         name: TOOL_NAMES.LORE_LIST,
         displayName: '列出世界书条目',
-        description: '列出当前可写世界书里已启用的条目，只给标题，不给正文。'
+        description: '平铺列出当前对话所有激活世界书中已启用的条目，只给标题，不给正文。'
             + '用 pattern 可以按标题或触发关键词过滤。'
-            + '这是写之前了解这本书已有什么的第一步；要看某条的正文用 lore_read。',
+            + '重名标题会附唯一编号，读写时须原样使用，编号不会写入实际标题。这是写之前了解已有内容的第一步；要看某条的正文用 lore_read。',
         parameters: {
             type: 'object',
             properties: {

@@ -19,6 +19,7 @@ import {
     isEnabled,
     isWorldbookDesc,
 } from '../../features/settings/index.js';
+import { getDescriptionBook } from '../../features/memory/target-selection.js';
 import { getWritableBook, isBookScanned } from '../../features/memory/index.js';
 
 /**
@@ -52,7 +53,8 @@ export function describeStatus(ctx = getContext()) {
     const parts = [
         `学习：${describeLearnState(ctx, settings)}`,
         `模块：${modules.join(' + ')}`,
-        `可写书：${bookText}`,
+        `角色描述：${isWorldbookDesc(ctx) ? getDescriptionBook(ctx) : '角色卡'}`,
+        `其它设定新建：${bookText}`,
         `待确认：${pending} 份`,
     ];
 

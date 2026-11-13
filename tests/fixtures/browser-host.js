@@ -107,3 +107,6 @@ export class SlashCommandArgument {
         return properties;
     }
 }
+
+export const selected_world_info = [];
+export const world_info = {};

@@ -219,7 +219,12 @@ async function restoreLoreEntry(ctx, backup) {
 
     const { data } = loaded;
     // 恢复是用户动作，保留条目也允许被恢复（否则「撤销新建」删不了它）
-    const found = findLoreEntry(data, title, { includeReserved: true });
+    const match = Number.isInteger(backup.uid)
+        ? Object.entries(data.entries).find(([, entry]) => Number(entry?.uid) === backup.uid)
+        : null;
+    const found = Number.isInteger(backup.uid)
+        ? (match ? { key: match[0], uid: backup.uid, entry: match[1] } : null)
+        : findLoreEntry(data, title, { includeReserved: true });
 
     if (!found) {
         if (backup.action === 'created') {

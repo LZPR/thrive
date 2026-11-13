@@ -1,104 +1,74 @@
-/** lore-directory.js · Internal memory module; public entry: index.js. */
-
 import { isReservedEntry, isReservedTitle } from './desc-entry.js';
-
-import { getWritableBook } from './target-selection.js';
-
-import { noBook, reservedHint } from './target-errors.js';
-
-import { entryTitle, findLoreEntry, uidOf } from './lore-entry.js';
-
+import { getLoreBookNames, getWritableBook } from './target-selection.js';
+import { reservedHint } from './target-errors.js';
+import { entryTitle, uidOf } from './lore-entry.js';
 import { loadBook, loadWritableBook } from './lore-repository.js';
+import { getState } from '../settings/index.js';
 
-/* ------------------------------------------------------ 世界书 · 目录 */
-
-/**
- * 列出可写书里的条目，只取标题。
- *
- * 目录的信息量要小：模型问"这本书里有什么"，一串标题就够回答。把关键词和
- * 正文一起端上去，一次目录就能吃掉几千 token，而它多半只是想确认
- * "这条写没写过"。
- *
- * 只列可写书：目录的用途是写之前先看看，而写只能落到可写书。读范围也只剩这一本
- * （ADR-046），所以目录与读、写是同一本书，模型不会看到"读得到但改不了"的标题。
- *
- * @param {object} ctx
- * @returns {Promise<{ ok: true, book: string, items: Array<{ title: string, uid: number, disabled: boolean }> }
- *          | { ok: false, error: string, hint?: string }>}
- */
-async function listLore(ctx) {
-    const loaded = await loadWritableBook(ctx);
-    if (!loaded.ok) {
-        return loaded;
+// Per-read-session aliases never move to another book or uid when the active set changes.
+const directories = new WeakMap();
+function registry(ctx) {
+    const state = getState(ctx);
+    let value = directories.get(ctx.chatMetadata);
+    if (!value || value.reads !== state.reads) {
+        value = { reads: state.reads, aliases: new Map(), identities: new Map() };
+        directories.set(ctx.chatMetadata, value);
     }
-
-    const items = Object.values(loaded.data.entries)
-        .filter(Boolean)
-        // 角色描述的保留条目不属于"目录"：模型看不到它，也不该拿标题去改它
-        .filter(entry => !isReservedEntry(entry))
-        .map(entry => ({
-            title: entryTitle(entry),
-            uid: uidOf(entry),
-            disabled: entry.disable === true,
-            // 只在目录过滤时用得上（按关键词找条目），不往返回里带：目录只给标题
-            keys: Array.isArray(entry.key) ? entry.key.map(String) : [],
-        }))
-        // 按 uid 排：新建的条目落在末尾，模型能看出"这是最近写的那条"
-        .sort((a, b) => a.uid - b.uid);
-
-    return { ok: true, book: loaded.book, items };
+    return value;
 }
 
-/**
- * 定位一条条目，只在可写书里找（ADR-046）。
- *
- * 以前还能去角色绑定的书里读一眼，但那带来一个无解的问题：模型读到一条改不了的内容，
- * 它该认为"这条已经记在别处"，还是"这条还不存在"？两个答案都会让它做错事，
- * 所以读范围收成一本：能读的就是能改的。
- *
- * 写路径本来也只认可写书，两边现在是同一本。
- *
- * @param {object} ctx
- * @param {string} title
- * @returns {Promise<{ ok: true, book: string, data: object,
- *                     found: { key: string, uid: number, entry: object } }
- *          | { ok: false, error: string, hint?: string }>}
- */
-async function locateLoreEntry(ctx, title) {
+export async function listLore(ctx) {
+    const metadata = ctx.chatMetadata;
+    const chatId = ctx.getCurrentChatId?.();
+    const items = [];
+    const books = getLoreBookNames(ctx);
+    for (const book of books) {
+        const loaded = book === getWritableBook(ctx) ? await loadWritableBook(ctx) : await loadBook(ctx, book);
+        if (!loaded.ok) return loaded;
+        if (ctx.chatMetadata !== metadata || ctx.getCurrentChatId?.() !== chatId) {
+            return { ok: false, error: 'TOOL_UNAVAILABLE', hint: '对话已切换，请重新读取。' };
+        }
+        for (const [key, entry] of Object.entries(loaded.data.entries)) {
+            if (!entry || isReservedEntry(entry)) continue;
+            items.push({ book, key, title: entryTitle(entry), originalTitle: entryTitle(entry), uid: uidOf(entry),
+                disabled: entry.disable === true, keys: Array.isArray(entry.key) ? entry.key.map(String) : [] });
+        }
+    }
+    items.sort((a, b) => books.indexOf(a.book) - books.indexOf(b.book) || a.uid - b.uid);
+    const names = new Set(items.map(item => item.title));
+    const counts = new Map();
+    for (const item of items) counts.set(item.title, (counts.get(item.title) ?? 0) + 1);
+    const mapping = registry(ctx);
+    for (const item of items) {
+        const identity = JSON.stringify([item.book, item.key]);
+        let alias = mapping.identities.get(identity);
+        if (!alias) {
+            alias = item.title;
+            if (counts.get(alias) > 1 || mapping.aliases.has(alias)) {
+                let number = 1;
+                do { alias = `${item.title} [#${number++}]`; } while (names.has(alias) || mapping.aliases.has(alias));
+            }
+            mapping.identities.set(identity, alias);
+            mapping.aliases.set(alias, { book: item.book, key: item.key, originalTitle: item.originalTitle });
+        }
+        item.title = alias;
+    }
+    return { ok: true, book: getWritableBook(ctx), books, items };
+}
+
+export async function locateLoreEntry(ctx, title) {
     const wanted = String(title ?? '').trim();
-    if (!wanted) {
-        return {
-            ok: false,
-            error: 'INVALID_TITLE',
-            hint: '标题是空串。标题既是同书内的唯一标识，也是定位条目的唯一方式。',
-        };
+    if (!wanted) return { ok: false, error: 'INVALID_TITLE', hint: '标题不能为空。先用 lore_list 查看条目。' };
+    if (isReservedTitle(wanted)) return reservedHint();
+    const listed = await listLore(ctx);
+    if (!listed.ok) return listed;
+    const item = listed.items.find(row => row.title === wanted);
+    if (!item || item.disabled) return { ok: false, error: 'NOT_FOUND', hint: '没有这个已启用条目。先用 lore_list 获取当前标题，重名条目须保留编号。' };
+    const loaded = await loadBook(ctx, item.book);
+    if (!loaded.ok) return loaded;
+    const entry = loaded.data.entries[item.key];
+    if (!entry || isReservedEntry(entry) || entryTitle(entry) !== item.originalTitle || entry.disable === true) {
+        return { ok: false, error: 'STALE_READ', hint: '条目已变化，请重新读取目录。' };
     }
-
-    // 保留条目只走 desc_* 工具。这里是 lore_read 的入口，直接说清楚，别让它猜 NOT_FOUND
-    if (isReservedTitle(wanted)) {
-        return reservedHint();
-    }
-
-    const writable = getWritableBook(ctx);
-    if (!writable) {
-        return noBook('还没有选择可写书。请让用户在浮动面板里选一本。');
-    }
-
-    const loaded = await loadBook(ctx, writable);
-    if (!loaded.ok) {
-        return loaded;
-    }
-
-    const found = findLoreEntry(loaded.data, wanted);
-    if (!found) {
-        return {
-            ok: false,
-            error: 'NOT_FOUND',
-            hint: `「${writable}」里没有标题为「${wanted}」的条目。先用 lore_list 看现有标题，标题必须与列表里完全一致。`,
-        };
-    }
-
-    return { ok: true, book: writable, data: loaded.data, found };
+    return { ok: true, book: item.book, data: loaded.data, found: { key: item.key, uid: item.uid, entry } };
 }
-
-export { listLore, locateLoreEntry };

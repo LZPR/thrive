@@ -118,11 +118,11 @@ it('blocks all ordinary lore operations on every reserved title', async () => {
     expect(await call('lore_list')).toMatchObject({ titles: [] });
 });
 
-it('creates a missing format entry when read and rejects an edit that races with a reload', async () => {
+it('reads a missing entry without creating it and rejects an edit that races with a reload', async () => {
     const book = books.get('测试角色');
     delete book.entries[0];
     expect(await call('plist_read')).toMatchObject({ ok: true, categories: {} });
-    expect(Object.values(books.get('测试角色').entries).some(entry => entry.comment === DESC_ENTRY_TITLES.plist)).toBe(true);
+    expect(Object.values(books.get('测试角色').entries).some(entry => entry.comment === DESC_ENTRY_TITLES.plist)).toBe(false);
     const originalLoad = ctx.loadWorldInfo;
     let reads = 0;
     ctx.loadWorldInfo = async name => {
@@ -130,7 +130,8 @@ it('creates a missing format entry when read and rejects an edit that races with
         // readDesc 校验后，writeDesc 最后一次重新读取时出现外部写入。
         if (reads === 3) {
             const entry = Object.values(books.get(name).entries).find(entry => entry.comment === DESC_ENTRY_TITLES.plist);
-            entry.content = '[persona: externally changed]';
+            if (entry) entry.content = '[persona: externally changed]';
+            else books.get(name).entries[9] = { uid: 9, comment: DESC_ENTRY_TITLES.plist, content: '[persona: externally changed]' };
         }
         return originalLoad(name);
     };

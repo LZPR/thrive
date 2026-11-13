@@ -6,7 +6,6 @@ import { escapeHtml } from '../../shared/util.js';
 function renderPanel({
     learn,
     patch,
-    descTarget,
     descChoice,
     backups,
     descBackup,
@@ -75,7 +74,7 @@ function renderPanel({
     const body = [
         renderLearnSection(learn, descChoice, characterName),
         renderMoreSection({ learn, choice: descChoice, expanded: moreOpen }),
-        renderDescTargetSection(descTarget),
+        renderDescTargetSection(descChoice),
         renderPatchSection(patch, drift, editorStale, characterName),
         renderHistorySection(backups, descBackup, historyExpanded),
     ].filter(Boolean).join('');
@@ -92,8 +91,8 @@ function renderPanel({
  */
 function renderLearnSection(view, choice, characterName) {
     const { enabled, running, last, usable, available, interval, remaining, keywordCount, queued, blocked: formatWarning } = view;
-    const characterDestination = `角色：${characterName || '未选择'}（${choice.storage === 'worldbook' ? '世界书条目' : '角色卡'}）`;
-    const bookDestination = `世界书：${choice.book || '未选择'}`;
+    const characterDestination = `角色：${characterName || '未选择'}（${choice.storage === 'worldbook' ? `世界书：${choice.descriptionBook}` : '角色卡'}）`;
+    const bookDestination = `其它设定：${choice.book || '未选择'}`;
 
     /*
      * 第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
@@ -183,7 +182,7 @@ function renderLearnTile({ on, hint, usable, running }) {
  *
  * 两样东西都只作用于当前对话（ADR-044 / ADR-045）：
  *   · 角色描述存哪儿（角色卡 / 世界书条目）
- *   · 可写书（世界书工具写哪本；统一描述模式下由插件钉死）
+ *   · 角色描述书与其它设定新建书（独立选择）
  *
  * 判据（每 N 条 / 关键词）不在这里：那是"我隔多久想被提醒一次"，对所有对话一致，
  * 住在设置页的「自动学习」组。"立即学习"也不在这里——它和开关回答同一个问题，
@@ -202,7 +201,7 @@ function renderMoreSection({ learn, choice, expanded }) {
             <div class="thrive-panel__head thrive-panel__fold${expanded ? ' is-open' : ''}"
                 role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}"
                 data-thrive-action="toggle-more"
-                title="展开 / 收起落点设置（描述存哪儿、可写书；都只作用于本对话）">
+                title="展开 / 收起落点设置（描述存哪儿、角色描述书、其它设定书；都只作用于本对话）">
                 <span class="thrive-panel__section-title">
                     <i class="fa-solid fa-chevron-right thrive-panel__fold-icon" aria-hidden="true"></i>更多设置
                 </span>
@@ -215,7 +214,7 @@ function renderMoreSection({ learn, choice, expanded }) {
 /**
  * 折起来的那几行。单独拆出来是因为它只在展开时存在，和折头的摘要不是一回事。
  *
- * 两个下拉都钉 `data-thrive-field`：重绘靠它保住焦点，事件靠它认字段。
+ * 落点控件都钉 `data-thrive-field`：重绘靠它保住焦点，事件靠它认字段。
  *
  * @param {{learn: ReturnType<typeof readLearnView>, choice: ReturnType<typeof descTargetView>}} props
  */
@@ -227,7 +226,7 @@ function renderMoreRows({ learn, choice }) {
         + `${escapeHtml(item.label)}</option>`).join('');
 
     const bookOptions = choice.books
-        .map(item => `<option value="${escapeHtml(item.value)}"${choice.book === item.value ? ' selected' : ''}>`
+        .map(item => `<option value="${escapeHtml(item.value)}">`
             + `${escapeHtml(item.label)}</option>`).join('');
 
     /*
@@ -264,20 +263,26 @@ function renderMoreRows({ learn, choice }) {
                     : 'PLists / Ali:Chat 仅在描述存于世界书时生效，已选状态保留。'}</small>
             </fieldset>
 
+            <datalist id="thrive_book_names">${bookOptions}</datalist>
             <div class="thrive-more__field">
-                <label class="thrive-more__label" for="thrive_more_book">可写书</label>
-                <select id="thrive_more_book" class="text_pole thrive-more__select"
-                    data-thrive-field="book"${choice.forced ? ' disabled' : ''}
-                    title="${choice.forced
-                        ? '「描述存哪儿 = 世界书条目」时固定为角色同名书'
-                        : '世界书工具只会写这一本'}">${bookOptions}</select>
+                <label class="thrive-more__label" for="thrive_more_description_book">角色描述</label>
+                <input id="thrive_more_description_book" class="text_pole thrive-more__select"
+                    data-thrive-field="description-book" list="thrive_book_names"
+                    value="${escapeHtml(choice.descriptionBookSetting)}" placeholder="默认角色同名书"
+                    ${choice.forced ? '' : 'disabled'}>
             </div>
+            <small class="thrive-hint">仅在描述存于世界书时生效；所有角色描述工具只操作这本书。</small>
+            <div class="thrive-more__field">
+                <label class="thrive-more__label" for="thrive_more_book">其它设定</label>
+                <input id="thrive_more_book" class="text_pole thrive-more__select"
+                    data-thrive-field="book" list="thrive_book_names"
+                    value="${escapeHtml(choice.bookSetting)}" placeholder="默认角色同名书">
+            </div>
+            <small class="thrive-hint">只决定新条目的创建位置；已有条目始终在原书修改。可选择已有书或输入新书名。</small>
 
             <div class="thrive-panel__actions">
                 <small class="thrive-hint">${
-                    choice.forced
-                        ? '世界书条目模式下可写书固定为角色同名书，描述就存在那本里。'
-                        : '两项都只对当前对话生效；换对话可以各选各的。'
+                    '两项均按当前对话保存；留空使用角色同名书。'
                 }${noRule ? ' 学习已经开着但还没配判据，到扩展设置的「自动学习」里配（也可以点上面「立即学习」）。' : ''}</small>
             </div>
         </div>`;
@@ -285,23 +290,16 @@ function renderMoreRows({ learn, choice }) {
 
 
 /**
- * 统一模式只保留未激活警告，落点摘要统一放在学习模式旁。
+ * 两个落点的延迟创建/激活提醒在设置折叠时也保持可见。
  *
  * @param {{book: string, active: boolean|null}|null} descTarget
  */
-function renderDescTargetSection(descTarget) {
-    if (descTarget?.active !== false) {
-        return '';
-    }
-
-    const notice = `「${descTarget.book}」还没有激活：到「世界书」面板勾选这本书。`;
-
-    return `
-        <section class="thrive-panel__section">
-            <div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(notice)}</div>
-        </section>`;
+function renderDescTargetSection(choice) {
+    if (!choice.notices?.length) return '';
+    return `<section class="thrive-panel__section">
+        ${choice.notices.map(notice => `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(notice)}</div>`).join('')}
+    </section>`;
 }
-
 
 /**
  * 待确认分区。没有 patch 时整段不渲染。

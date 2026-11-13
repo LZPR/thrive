@@ -1,8 +1,6 @@
 /** tool-contracts.js · Internal tools module; public entry: index.js. */
 
-import { BOOK_SEEN, bookReadKey, clearReadHash, clearReadKeysByPrefix, getReadHash, getState, lorePatternPrefix, loreReadKey, loreSeenKey, setReadHash } from '../settings/index.js';
-
-import { isBookScanned } from '../memory/index.js';
+import { BOOK_SEEN, bookReadKey, clearReadHash, clearReadKeysByPrefix, getReadHash, getState, isLearningActive, lorePatternPrefix, loreReadKey, loreSeenKey, setReadHash } from '../settings/index.js';
 
 import { hintFor } from '../../shared/diagnostics.js';
 
@@ -47,44 +45,9 @@ function canReplace(ctx, patternKey, fullKey, current) {
     return Boolean(recorded) && fnv1a(current) === recorded;
 }
 
-/**
- * 读侧的两条附注：换书提醒（ADR-017）与"这本书没激活"（ADR-021）。
- *
- * 读的范围只剩可写书（ADR-046），所以没有"读到只读的那本"这种附注了——
- * 能读到的条目就是能改的那条。
- */
-function applyReadNotes(ctx, book, payload) {
-    const notes = [];
-
-    if (isBookScanned(ctx, book) === false) {
-        notes.push('这本书当前没有激活，写进去的条目生成时不会触发。');
-    }
-
-    const state = getState(ctx);
-    if (state.lastBook !== null && state.lastBook !== book) {
-        notes.push('可写书已切换，这里没有之前那本书的内容，不要重复记录。');
-        payload.switched = true;
-    }
-    state.lastBook = book;
-
-    if (notes.length > 0) {
-        payload.note = [payload.note, ...notes].filter(Boolean).join(' ');
-    }
-}
-
-function applyBookNotes(ctx, book, payload) {
-    if (isBookScanned(ctx, book) === false) {
-        payload.note = ['这本书当前没有激活，写进去的条目生成时不会触发。', payload.note]
-            .filter(Boolean)
-            .join(' ');
-    }
-}
-
 /** 写入后的那条附注：只说事实，不给模型组织台词 */
-function bookNote(ctx, book) {
-    return isBookScanned(ctx, book) === false
-        ? `已写入「${book}」，但这本书当前没有激活。`
-        : '已写入。同一次回复的续写可能已经读到它；最迟下一轮生效。';
+function bookNote(_ctx, _book) {
+    return '已写入虚拟世界书，保存后生效。';
 }
 
 /**
@@ -125,4 +88,12 @@ function errorResult(error, hint) {
     return text ? { ok: false, error, hint: text } : { ok: false, error };
 }
 
-export { LOG, registerLoreWrite, canReplace, applyReadNotes, applyBookNotes, bookNote, normalizeKeys, normalizeLogic, errorResult };
+export { LOG, registerLoreWrite, canReplace, bookNote, normalizeKeys, normalizeLogic, errorResult };
+
+export function captureToolScope(ctx) {
+    const metadata = ctx.chatMetadata;
+    const chatId = ctx.getCurrentChatId?.();
+    const reads = getState(ctx).reads;
+    return () => isLearningActive() && ctx.chatMetadata === metadata
+        && ctx.getCurrentChatId?.() === chatId && getState(ctx).reads === reads;
+}

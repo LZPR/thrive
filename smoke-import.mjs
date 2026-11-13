@@ -26,6 +26,7 @@ const context = createContext({
 });
 const modules = new Map();
 const hostExports = {
+    'world-info.js': { selected_world_info: [], world_info: {} },
     'extensions.js': { getContext: () => { throw new Error('Host context accessed during import'); } },
     'popup.js': { POPUP_RESULT: {}, POPUP_TYPE: {}, callGenericPopup: () => {} },
     'preset-manager.js': { getPresetManager: () => null },

@@ -33,7 +33,7 @@ function rememberDescBackup(ctx, before) {
  * 决定这条记录还能不能被恢复（见 normalizeLoreBackup）。
  *
  * @param {object} ctx
- * @param {{ book: string, title: string, before: string, beforeKeys?: string[],
+ * @param {{ book: string, title: string, before: string, uid?: number, beforeKeys?: string[],
  *           action?: 'created'|'rewritten', layer?: 'disk'|'draft', chars?: number }} snapshot
  * @returns {object} 记下来的那条记录
  */
@@ -45,6 +45,7 @@ function rememberLoreBackup(ctx, snapshot = {}) {
         id: createBackupId(),
         book: snapshot.book,
         title: snapshot.title,
+        uid: snapshot.uid,
         action: snapshot.action,
         layer: snapshot.layer,
         before: snapshot.before,
@@ -99,10 +100,10 @@ function markLoreBackupRestored(ctx, id) {
  * @param {object} ctx
  * @returns {number} 丢掉了几条
  */
-function dropDraftBackups(ctx) {
+function dropDraftBackups(ctx, book) {
     const state = getState(ctx);
     const list = state.backups.lore;
-    const kept = list.filter(item => item.layer !== 'draft');
+    const kept = list.filter(item => item.layer !== 'draft' || (book !== undefined && item.book !== book));
     state.backups.lore = kept;
     return list.length - kept.length;
 }

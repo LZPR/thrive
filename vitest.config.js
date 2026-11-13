@@ -7,6 +7,7 @@ export default defineConfig({
     resolve: {
         alias: [
             { find: /^(?:\.\.\/)+extensions\.js$/, replacement: hostStub },
+            { find: /^(?:\.\.\/)+world-info\.js$/, replacement: hostStub },
             { find: /^(?:\.\.\/)+popup\.js$/, replacement: hostStub },
         ],
     },

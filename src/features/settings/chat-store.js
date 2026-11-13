@@ -1,7 +1,7 @@
 import { isChatAvailable, saveChat } from '../../platform/sillytavern/storage.js';
 /** chat-store.js · Internal settings module; public entry: index.js. */
 
-import { DESC_FORMAT, DESC_STORAGE, normalizeDescFormats } from '../memory/desc-entry.js';
+import { DESC_FORMAT, DESC_STORAGE, descBookName, normalizeDescFormats } from '../memory/desc-entry.js';
 
 import { MODULE_NAME } from './defaults.js';
 
@@ -54,7 +54,7 @@ function createChatState(settings) {
         /**
          * 角色描述存在哪（ADR-042）：
          *   'card'      角色卡的 description 字段（默认）
-         *   'worldbook' 与角色同名那本世界书里的 `【角色描述】` 常驻条目
+         *   'worldbook' 所选描述书里的 `【角色描述】` 常驻条目
          *
          * 存字符串而不是布尔：以后要加第三处落点时不用再动一遍字段。
          * 按对话保存的理由见 ADR-044 —— 它决定"这一场对话的描述读哪儿、写哪儿"，
@@ -62,8 +62,9 @@ function createChatState(settings) {
          */
         descStorage: normalizeDescStorage(legacyChatValue(settings, 'descStorage')),
         descFormats: [DESC_FORMAT.TEXT],
-        /** 可写世界书；空 = 这一场对话还没选书（世界书工具不注册） */
+        /** 普通条目的新建落点；空串跟随角色同名书。 */
         writableBook: typeof legacyBook === 'string' ? legacyBook.trim() : '',
+        descriptionBook: '',
         /**
          * 虚拟世界书（缓冲区）：模型的每一笔世界书改动先落在这里，用户点「保存」
          * 才写进真实世界书。null = 缓冲区是空的。形状与语义见 src/draft.js。
@@ -115,6 +116,9 @@ function getState(ctx) {
     if (typeof state.writableBook !== 'string') {
         const legacyBook = legacyChatValue(settings, 'writableBook');
         state.writableBook = typeof legacyBook === 'string' ? legacyBook.trim() : '';
+    }
+    if (typeof state.descriptionBook !== 'string') {
+        state.descriptionBook = '';
     }
     if (!Object.hasOwn(state, 'patch')) {
         state.patch = null;
@@ -234,7 +238,7 @@ export function setDescFormats(ctx, formats) {
     return state.descFormats;
 }
 
-/** 这一场对话选的可写世界书；空串 = 还没选 */
+/** 普通条目新建位置的偏好；空串表示跟随角色同名书。 */
 function getWritableBookSetting(ctx) {
     return String(getState(ctx).writableBook ?? '').trim();
 }
@@ -246,10 +250,22 @@ function getWritableBookSetting(ctx) {
  */
 function setWritableBookSetting(ctx, book) {
     const state = getState(ctx);
-    state.writableBook = String(book ?? '').trim();
+    state.writableBook = descBookName({ name: book });
     dropLegacyChatValue(ctx, 'writableBook');
     saveChat(ctx);
     return state.writableBook;
+}
+
+export function getDescriptionBookSetting(ctx) {
+    return getState(ctx).descriptionBook.trim();
+}
+
+export function setDescriptionBookSetting(ctx, book) {
+    const state = getState(ctx);
+    state.descriptionBook = descBookName({ name: book });
+    state.reads = {};
+    saveChat(ctx);
+    return state.descriptionBook;
 }
 
 /* -------------------------------------------------------------- 虚拟世界书 */

@@ -280,21 +280,18 @@ check('丢弃：磁盘不动，缓冲区那层的记录一并收掉', async () =
     assert.equal(store.getLoreBackups(ctx).some(item => item.layer === 'draft'), false);
 });
 
-check('缓冲区只属于一本书：写另一本会被挡住', async () => {
+check('不同书的缓冲区分别保存，不覆盖已有草稿', async () => {
     const ctx = makeCtx();
-    await write(ctx, data => {
-        data.entries['0'].content = '缓冲区版本。';
-    });
-
-    const loaded = await targets.loadWritableBook(ctx);
-    const blocked = draft.ensureDraft(ctx, OTHER, loaded.data);
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.error, 'DRAFT_BOOK');
-
-    // 读不受影响：另一本书照样读得到磁盘
-    const other = await targets.loadBook(ctx, OTHER);
-    assert.equal(other.ok, true);
-    assert.equal(other.data.entries['7'].comment, '南海');
+    await write(ctx, data => { data.entries['0'].content = '缓冲区版本。'; });
+    const loaded = await targets.loadBook(ctx, OTHER);
+    assert.equal(draft.ensureDraft(ctx, OTHER, loaded.data).ok, true);
+    loaded.data.entries['7'].content = '另一份草稿。';
+    await targets.persistBook(ctx, OTHER, loaded.data);
+    assert.equal(draft.summarizeDraft(ctx).touched, 2);
+    assert.equal(ctx.__state.writes, 0);
+    assert.equal((await targets.loadBook(ctx, BOOK)).data.entries['0'].content, '缓冲区版本。');
+    assert.equal((await targets.commitDraft(ctx)).written, 2);
+    assert.equal(ctx.__state.disk[OTHER].entries['7'].content, '另一份草稿。');
 });
 
 check('写入被拒时不留空缓冲区', async () => {

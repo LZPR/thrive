@@ -29,6 +29,8 @@ async function loadWritableBook(ctx) {
         return noBook('还没有选择可写书。请让用户在浮动面板里选一本。');
     }
 
+    const names = ctx.getWorldInfoNames?.() ?? [];
+    if (!names.includes(book)) return { ok: true, book, data: { entries: readDraftEntries(ctx, book) ?? {} }, missing: true };
     return loadBook(ctx, book);
 }
 
@@ -93,3 +95,98 @@ async function persistBook(ctx, book, data, options = {}) {
 }
 
 export { loadWritableBook, loadBook, loadBookFromDisk, persistBook, persistBookOnDisk };
+
+/**
+ * 建一本空书。
+ *
+ * 不能直接用 `createNewWorldInfo`：它没有挂到 ST 的 context 上。所以走同一条
+ * 服务端接口（`/api/worldinfo/edit` 对不存在的文件会直接新建），再用
+ * `updateWorldInfoList` 把 `world_names` 拉新。
+ *
+ * 建完必须回到列表里确认真实名字：服务端会 sanitize 文件名，算出来的名字和
+ * 落盘的名字可能差一两个字符。用"前后差集"找新出现的那本，比按字符串猜可靠。
+ */
+export async function createBook(ctx, name) {
+    if (typeof ctx.saveWorldInfo !== 'function') {
+        return {
+            ok: false,
+            error: 'WRITE_FAILED',
+            hint: '当前 ST 没有向扩展暴露 saveWorldInfo，建不了世界书。',
+        };
+    }
+
+    // 兜底：净化口径和服务端可能还差一点点，真撞上已有书名就别写那份空模板
+    const collision = matchBookName(listNames(ctx), name);
+    if (collision) {
+        const loaded = await loadBook(ctx, collision);
+        return loaded.ok
+            ? { ok: true, book: loaded.book, data: loaded.data, created: false }
+            : loaded;
+    }
+
+    const before = new Set(listNames(ctx).map(normalizeName));
+
+    try {
+        await ctx.saveWorldInfo(name, { entries: {} }, true);
+    } catch (err) {
+        console.debug('[Thrive] 创建世界书失败', name, err);
+        return {
+            ok: false,
+            error: 'WRITE_FAILED',
+            hint: `创建世界书「${name}」失败：${err?.message ?? err}。可以让用户先手动在「世界书」面板里新建一本。`,
+        };
+    }
+
+    try {
+        await ctx.updateWorldInfoList?.();
+    } catch (err) {
+        console.debug('[Thrive] updateWorldInfoList 失败', err);
+    }
+
+    const names = listNames(ctx);
+    const created = matchBookName(names, name);
+    const wasCreated = created && !before.has(normalizeName(created));
+
+    if (!created) {
+        return {
+            ok: false,
+            error: 'WRITE_FAILED',
+            hint: `世界书「${name}」没有出现在列表里，写入目标不可用。可以让用户手动新建一次。`,
+        };
+    }
+
+    const loaded = await loadBook(ctx, created);
+    if (!loaded.ok) {
+        return loaded;
+    }
+
+    return { ok: true, book: loaded.book, data: loaded.data, created: Boolean(wasCreated) };
+}
+
+/** 书名清单；拿不到时返回空数组（判据与 targets 一致：它是 world_names 的副本） */
+function listNames(ctx) {
+    try {
+        const names = ctx.getWorldInfoNames?.();
+        return Array.isArray(names) ? names.map(String) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * 在清单里找"就是这一本"的书名。
+ * 不区分大小写与变音符号 —— ST 自己建书时也用同一套比较口径，
+ * 严格相等会把「张三」和「张三」当成两本。
+ */
+function matchBookName(names, wanted) {
+    const key = normalizeName(wanted);
+    return names.find(name => normalizeName(name) === key) ?? '';
+}
+
+function normalizeName(name) {
+    return String(name ?? '')
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase()
+        .trim();
+}

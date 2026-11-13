@@ -8,6 +8,8 @@ import { readLimits } from '../../core/limits.js';
 
 import { appendLoreEntry, createLoreEntry, findLoreEntry, getWritableBook, listLore, loadWritableBook, locateLoreEntry, replaceLoreEntry } from '../memory/index.js';
 
+import { createBook } from '../memory/lore-repository.js';
+import { entryTitle } from '../memory/lore-entry.js';
 import { isReservedTitle } from '../memory/desc-entry.js';
 
 import { ensureDraft, layerFor, rollbackEmptyDraft } from '../memory/draft.js';
@@ -16,12 +18,13 @@ import { compilePattern, replaceIn, scan } from '../../core/regex.js';
 
 import { fnv1a, isBlank, truncate } from '../../shared/util.js';
 
-import { LOG, applyBookNotes, applyReadNotes, bookNote, canReplace, errorResult, normalizeKeys, normalizeLogic, registerLoreWrite } from './tool-contracts.js';
+import { LOG, captureToolScope, bookNote, canReplace, errorResult, normalizeKeys, normalizeLogic, registerLoreWrite } from './tool-contracts.js';
 
 /* --------------------------------------------------------------- lore_list */
 
 async function handleLoreList(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
 
     if (!isLearningActive()) {
@@ -33,9 +36,10 @@ async function handleLoreList(params) {
 
     const listed = await listLore(ctx);
     if (!listed.ok) {
-        return errorResult(listed.error, listed.hint);
+        return errorResult(listed.error);
     }
 
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     const limits = readLimits(settings);
     const enabled = listed.items.filter(item => item.disabled !== true);
 
@@ -59,7 +63,6 @@ async function handleLoreList(params) {
 
     const payload = {
         ok: true,
-        book: listed.book,
         total: listed.items.length,
         enabled: enabled.length,
         truncated: picked.length > shown.length,
@@ -77,17 +80,15 @@ async function handleLoreList(params) {
 
     // 条目多到一定程度就该提醒合并：这是模型自己能做的动作，不替它对用户说话
     const merge = listed.items.length > limits.softEntryCount
-        ? `这本书已经有 ${listed.items.length} 条，考虑合并重复条目。`
+        ? `已有 ${listed.items.length} 条，考虑合并重复条目。`
         : '';
     if (merge) {
         payload.note = [payload.note, merge].filter(Boolean).join(' ');
     }
 
-    applyBookNotes(ctx, listed.book, payload);
-    registerDirectoryRead(ctx, listed.book, shown);
+    registerDirectoryRead(ctx, listed.books, shown);
 
     console.debug(`${LOG} lore_list`, {
-        book: listed.book,
         total: payload.total,
         shown: shown.length,
         filtered: !isBlank(pattern),
@@ -97,10 +98,10 @@ async function handleLoreList(params) {
 }
 
 /** 目录读过 = 新建条目的前置。只登记真正列出来的那些标题 */
-function registerDirectoryRead(ctx, book, shown) {
-    setReadHash(ctx, bookReadKey(book), BOOK_SEEN);
+function registerDirectoryRead(ctx, books, shown) {
+    for (const book of books) setReadHash(ctx, bookReadKey(book), BOOK_SEEN);
     for (const item of shown) {
-        setReadHash(ctx, loreSeenKey(book, item.title), BOOK_SEEN);
+        setReadHash(ctx, loreSeenKey(item.book, item.key), BOOK_SEEN);
     }
 }
 
@@ -108,6 +109,7 @@ function registerDirectoryRead(ctx, book, shown) {
 
 async function handleLoreRead(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
 
     if (!isLearningActive()) {
@@ -119,7 +121,7 @@ async function handleLoreRead(params) {
 
     const title = String(params?.title ?? '').trim();
     if (!title) {
-        return errorResult('INVALID_TITLE', 'title 是必填的。要浏览这本书有什么，用 lore_list。');
+        return errorResult('INVALID_TITLE', 'title 是必填的。要浏览已有条目，用 lore_list。');
     }
 
     const located = await locateLoreEntry(ctx, title);
@@ -127,12 +129,13 @@ async function handleLoreRead(params) {
         return errorResult(located.error, located.hint);
     }
 
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     const { book, found } = located;
     const full = String(found.entry.content ?? '');
     const limits = readLimits(settings);
 
     // 见过标题，追加就放行了 —— 但仍然不登记全文，整段重写还得真读到全文
-    setReadHash(ctx, loreSeenKey(book, title), BOOK_SEEN);
+    setReadHash(ctx, loreSeenKey(book, found.key), BOOK_SEEN);
 
     const pattern = String(params?.pattern ?? '');
     if (!isBlank(pattern)) {
@@ -148,24 +151,22 @@ async function handleLoreRead(params) {
 
         // 命中 0 处不登记：没有"会替换掉什么"可看，替换本来就该先改 pattern
         if (hit.count > 0) {
-            setReadHash(ctx, lorePatternKey(book, title, compiled.flags, compiled.source), String(hit.count));
+            setReadHash(ctx, lorePatternKey(book, found.key, compiled.flags, compiled.source), String(hit.count));
         }
 
-        const payload = { ok: true, book, title, count: hit.count, matches: hit.matches };
+        const payload = { ok: true, title, count: hit.count, matches: hit.matches };
         if (hit.truncated) {
             payload.truncated = true;
             payload.hint = `命中 ${hit.count} 处，只列了前 ${hit.matches.length} 处。pattern 写得更具体一些。`;
         } else if (hit.count === 0) {
             payload.hint = '这条里没有命中。换一个关键词，或去掉 pattern 读全文。';
         }
-        applyReadNotes(ctx, book, payload);
         return payload;
     }
 
     const cut = truncate(full, limits.maxReadChars);
     const payload = {
         ok: true,
-        book,
         title,
         chars: full.length,
         keys: Array.isArray(found.entry.key) ? found.entry.key.map(String) : [],
@@ -183,7 +184,7 @@ async function handleLoreRead(params) {
         payload.note = `正文 ${full.length} 字，这里只返回了前 ${limits.maxReadChars} 字。`
             + '整段重写需要完整正文，请改用 lore_replace 做局部修改，或让用户把上限调大。';
     } else {
-        setReadHash(ctx, loreReadKey(book, title), fnv1a(full));
+        setReadHash(ctx, loreReadKey(book, found.key), fnv1a(full));
     }
 
     /*
@@ -195,10 +196,8 @@ async function handleLoreRead(params) {
      * 模型侧只剩硬上限：写不进去就是写不进去。
      */
 
-    applyReadNotes(ctx, book, payload);
 
     console.debug(`${LOG} lore_read`, {
-        book,
         title,
         chars: full.length,
         truncated: Boolean(cut.truncated),
@@ -211,6 +210,7 @@ async function handleLoreRead(params) {
 
 async function handleLoreAdd(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -233,17 +233,20 @@ async function handleLoreAdd(params) {
 
     const loaded = await loadWritableBook(ctx);
     if (!loaded.ok) {
-        return errorResult(loaded.error, loaded.hint);
+        return errorResult(loaded.error);
     }
 
-    const { book, data } = loaded;
+    const { book } = loaded;
+    let data = loaded.data;
 
     // 守卫一：先看目录。看不见目录就新建，等于闭着眼睛往书里塞重复条目
     if (!getReadHash(ctx, bookReadKey(book))) {
-        return errorResult('READ_REQUIRED', `本轮还没看过「${book}」的目录。先调用 lore_list 确认里面已有什么，避免写出重复条目。`);
+        return errorResult('READ_REQUIRED', '本轮还没看过目录。先调用 lore_list 确认已有内容，避免写出重复条目。');
     }
 
-    if (findLoreEntry(data, title)) {
+    const directory = await listLore(ctx);
+    if (!directory.ok) return errorResult(directory.error, directory.hint);
+    if (directory.items.some(item => item.title === title || item.originalTitle === title) || findLoreEntry(data, title)) {
         return errorResult('TITLE_EXISTS', `「${title}」已经存在。要改正文用 lore_rewrite，要补内容用 lore_append。`);
     }
 
@@ -265,6 +268,22 @@ async function handleLoreAdd(params) {
     const droppedKeys = normalized.keys.length - keys.length;
     const logic = normalizeLogic(params?.logic);
 
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
+    const latest = await loadWritableBook(ctx);
+    if (!latest.ok) return errorResult(latest.error);
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
+    data = latest.data;
+    if (findLoreEntry(data, title)) return errorResult('TITLE_EXISTS');
+    if (getWritableBook(ctx) !== book) return errorResult('READ_REQUIRED', '创建位置已变化，请重新读取目录。');
+    if (latest.missing) {
+        const created = await createBook(ctx, book);
+        if (!created.ok) return errorResult(created.error);
+        if (created.book !== book) return errorResult('WRITE_FAILED', '实际书名与选项不一致，请重新选择。');
+        data = created.data;
+        if (findLoreEntry(data, title)) return errorResult('TITLE_EXISTS');
+    }
+
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
     // 守卫全过完了，才开缓冲区：被 READ_REQUIRED 挡住的写入不该留下一块空壳
     const drafted = ensureDraft(ctx, book, data);
     if (!drafted.ok) {
@@ -274,13 +293,14 @@ async function handleLoreAdd(params) {
     const written = await createLoreEntry(ctx, settings, book, data, { title, content, keys, logic });
     if (!written.ok) {
         console.debug(`${LOG} lore_add 失败`, written.error);
-        rollbackEmptyDraft(ctx);
+        rollbackEmptyDraft(ctx, book);
         return written;
     }
 
     rememberLoreBackup(ctx, {
         book,
         title,
+        uid: written.uid,
         action: 'created',
         layer: layerFor(ctx, book),
         before: '',
@@ -288,7 +308,7 @@ async function handleLoreAdd(params) {
         chars: written.content.length,
     });
     // 新建：正文就是模型自己写的，算读过
-    registerLoreWrite(ctx, book, title, written, { fullText: true });
+    registerLoreWrite(ctx, book, String(written.uid), written, { fullText: true });
     saveChat(ctx);
 
     const notes = [bookNote(ctx, book)];
@@ -314,6 +334,7 @@ async function handleLoreAdd(params) {
 
 async function handleLoreAppend(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -329,19 +350,13 @@ async function handleLoreAppend(params) {
         return errorResult('RESERVED_ENTRY');
     }
 
-    const loaded = await loadWritableBook(ctx);
-    if (!loaded.ok) {
-        return errorResult(loaded.error, loaded.hint);
-    }
-
-    const { book, data } = loaded;
-    const found = findLoreEntry(data, title);
-    if (!found) {
-        return errorResult('NOT_FOUND', `可写书「${book}」里没有「${title}」。先用 lore_list 看现有标题，或改用 lore_add 新建。`);
-    }
+    const loaded = await locateLoreEntry(ctx, title);
+    if (!loaded.ok) return errorResult(loaded.error);
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
+    const { book, data, found } = loaded;
 
     // 守卫：目录里见过这条标题就够 —— 追加不破坏原文，只要确认目标真实存在
-    if (!getReadHash(ctx, loreSeenKey(book, title))) {
+    if (!getReadHash(ctx, loreSeenKey(book, found.key))) {
         return errorResult('READ_REQUIRED', `本轮还没确认过「${title}」存在。先调用 lore_list（或带 pattern 的 lore_read）看到这条标题再追加。`);
     }
 
@@ -368,13 +383,14 @@ async function handleLoreAppend(params) {
     });
     if (!written.ok) {
         console.debug(`${LOG} lore_append 失败`, written.error);
-        rollbackEmptyDraft(ctx);
+        rollbackEmptyDraft(ctx, book);
         return written;
     }
 
     rememberLoreBackup(ctx, {
         book,
-        title,
+        title: entryTitle(found.entry),
+        uid: found.uid,
         action: 'rewritten',
         layer: layerFor(ctx, book),
         before,
@@ -382,7 +398,7 @@ async function handleLoreAppend(params) {
         chars: written.content.length,
     });
     // 追加：正文是插件拼的，模型没见过拼完的全文
-    registerLoreWrite(ctx, book, title, written, { fullText: false });
+    registerLoreWrite(ctx, book, found.key, written, { fullText: false });
     saveChat(ctx);
 
     const notes = [bookNote(ctx, book)];
@@ -395,7 +411,6 @@ async function handleLoreAppend(params) {
     }
 
     console.debug(`${LOG} lore_append`, {
-        book,
         title,
         addedChars: written.addedChars,
         addedKeys: written.addedKeys.length,
@@ -417,6 +432,7 @@ async function handleLoreAppend(params) {
 
 async function handleLoreReplace(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -437,20 +453,14 @@ async function handleLoreReplace(params) {
         return errorResult(compiled.error, compiled.hint);
     }
 
-    const loaded = await loadWritableBook(ctx);
-    if (!loaded.ok) {
-        return errorResult(loaded.error, loaded.hint);
-    }
-
-    const { book, data } = loaded;
-    const found = findLoreEntry(data, title);
-    if (!found) {
-        return errorResult('NOT_FOUND', `可写书「${book}」里没有「${title}」。先用 lore_list 看现有标题。`);
-    }
+    const loaded = await locateLoreEntry(ctx, title);
+    if (!loaded.ok) return errorResult(loaded.error);
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
+    const { book, data, found } = loaded;
 
     // 守卫：同一个 pattern 预读过。预读本身就是"看清会替换掉什么"，比任何叮嘱都有效
-    const patternKey = lorePatternKey(book, title, compiled.flags, compiled.source);
-    if (!canReplace(ctx, patternKey, loreReadKey(book, title), String(found.entry.content ?? ''))) {
+    const patternKey = lorePatternKey(book, found.key, compiled.flags, compiled.source);
+    if (!canReplace(ctx, patternKey, loreReadKey(book, found.key), String(found.entry.content ?? ''))) {
         return errorResult('READ_REQUIRED', `本轮还没看过「${title}」的正文。先 lore_read（带同一个 pattern 最省）确认会命中什么，再替换。`);
     }
 
@@ -480,13 +490,14 @@ async function handleLoreReplace(params) {
     });
     if (!written.ok) {
         console.debug(`${LOG} lore_replace 失败`, written.error);
-        rollbackEmptyDraft(ctx);
+        rollbackEmptyDraft(ctx, book);
         return written;
     }
 
     rememberLoreBackup(ctx, {
         book,
-        title,
+        title: entryTitle(found.entry),
+        uid: found.uid,
         action: 'rewritten',
         layer: layerFor(ctx, book),
         before: current,
@@ -494,11 +505,10 @@ async function handleLoreReplace(params) {
         chars: written.content.length,
     });
     // 替换：合成后的正文模型没读过
-    registerLoreWrite(ctx, book, title, written, { fullText: false });
+    registerLoreWrite(ctx, book, found.key, written, { fullText: false });
     saveChat(ctx);
 
     console.debug(`${LOG} lore_replace`, {
-        book,
         title,
         replaced: replaced.replaced,
         before: written.beforeChars,
@@ -520,6 +530,7 @@ async function handleLoreReplace(params) {
 
 async function handleLoreRewrite(params) {
     const ctx = getContext();
+    const currentScope = captureToolScope(ctx);
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
 
@@ -535,19 +546,13 @@ async function handleLoreRewrite(params) {
         return errorResult('RESERVED_ENTRY');
     }
 
-    const loaded = await loadWritableBook(ctx);
-    if (!loaded.ok) {
-        return errorResult(loaded.error, loaded.hint);
-    }
-
-    const { book, data } = loaded;
-    const found = findLoreEntry(data, title);
-    if (!found) {
-        return errorResult('NOT_FOUND', `可写书「${book}」里没有「${title}」。整段重写不会新建条目，要新建用 lore_add。`);
-    }
+    const loaded = await locateLoreEntry(ctx, title);
+    if (!loaded.ok) return errorResult(loaded.error);
+    if (!currentScope()) return errorResult('TOOL_UNAVAILABLE');
+    const { book, data, found } = loaded;
 
     const current = String(found.entry.content ?? '');
-    const recorded = getReadHash(ctx, loreReadKey(book, title));
+    const recorded = getReadHash(ctx, loreReadKey(book, found.key));
 
     if (!recorded) {
         return errorResult('READ_REQUIRED', `本轮还没读过「${title}」的全文。先 lore_read（不带 pattern）拿到完整正文，再整段重写。`);
@@ -575,13 +580,14 @@ async function handleLoreRewrite(params) {
     });
     if (!written.ok) {
         console.debug(`${LOG} lore_rewrite 失败`, written.error);
-        rollbackEmptyDraft(ctx);
+        rollbackEmptyDraft(ctx, book);
         return written;
     }
 
     rememberLoreBackup(ctx, {
         book,
-        title,
+        title: entryTitle(found.entry),
+        uid: found.uid,
         action: 'rewritten',
         layer: layerFor(ctx, book),
         before: current,
@@ -589,11 +595,10 @@ async function handleLoreRewrite(params) {
         chars: written.content.length,
     });
     // 整段重写：模型提交的就是全文
-    registerLoreWrite(ctx, book, title, written, { fullText: true });
+    registerLoreWrite(ctx, book, found.key, written, { fullText: true });
     saveChat(ctx);
 
     console.debug(`${LOG} lore_rewrite`, {
-        book,
         title,
         before: written.beforeChars,
         after: written.afterChars,

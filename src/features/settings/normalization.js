@@ -66,6 +66,7 @@ function normalizeLoreBackup(raw, index) {
         // 用随机数会让"刚点下恢复"和"重绘后面板拿到的 id"对不上
         id: typeof raw.id === 'string' && raw.id ? raw.id : `b${at}-${index}`,
         book: String(raw.book ?? ''),
+        uid: Number.isInteger(raw.uid) ? raw.uid : undefined,
         title: String(raw.title ?? ''),
         action,
         layer: raw.layer === 'draft' ? 'draft' : 'disk',
@@ -116,6 +117,9 @@ function normalizeDraft(raw) {
     const updated = Number(raw.updatedAt);
     raw.updatedAt = Number.isFinite(updated) && updated > 0 ? updated : raw.createdAt;
 
+    if (Array.isArray(raw.others)) {
+        raw.others = raw.others.map(normalizeDraft).filter(Boolean);
+    }
     return raw;
 }
 
