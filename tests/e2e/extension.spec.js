@@ -145,23 +145,98 @@ test('combines history and instructions in a private session with the requested 
     expect(result.chat).toHaveLength(2);
 });
 
-test('supports instructions without history when all description formats and custom cards are absent', async ({ page }) => {
+test('warns and blocks every learning entry without a description format, then resumes after selection', async ({ page }, testInfo) => {
     await page.locator('#thrive_badge').click();
     const panel = page.locator('#thrive_panel');
     await panel.locator('[data-thrive-action="toggle-more"]').click();
     await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await page.evaluate(() => {
+        window.__formatWarnings = [];
+        window.toastr = { warning: message => window.__formatWarnings.push(message) };
+        window.__host.state.chatMetadata.thrive.learn.baseline = 7;
+        window.__host.state.chatMetadata.thrive.learn.lastHash = 'original-hash';
+    });
     await panel.locator('[data-thrive-field="format-text"]').uncheck();
     await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.descFormats)).toEqual([]);
+    await expect(panel.getByRole('alert')).toContainText('所有学习均不生效');
+    await expect.poll(() => page.evaluate(() => window.__formatWarnings.length)).toBe(1);
+    expect(await page.evaluate(() => window.__formatWarnings[0])).toContain('至少选择一种');
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    await expect(panel.getByRole('alert')).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.screenshot({ path: testInfo.outputPath('no-description-format-warning-mobile.png') });
     await panel.locator('[data-thrive-action="open-teach"]').click();
     const dialog = page.getByRole('dialog', { name: '立即学习', exact: true });
     await dialog.locator('[data-field="teach-history"]').uncheck();
     await dialog.locator('[data-field="teach-text"]').fill('将雾港写入世界书');
     await dialog.locator('[data-act="teach-start"]').click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('[data-field="teach-text"]')).toHaveValue('将雾港写入世界书');
+    const blocked = await page.evaluate(async () => {
+        const ctx = window.__host.getContext();
+        ctx.chatMetadata.thrive.enabled = true;
+        ctx.extensionSettings.thrive.learnKeywords = '北境';
+        const commandResult = window.__host.state.commands.get('thrive')({}, 'learn');
+        await ctx.eventSource.emit(ctx.eventTypes.MESSAGE_RECEIVED, 1);
+        return {
+            commandResult,
+            status: window.__host.state.commands.get('thrive')({}, 'status'),
+            requests: window.__host.state.requests.length,
+            baseline: ctx.chatMetadata.thrive.learn.baseline,
+            hash: ctx.chatMetadata.thrive.learn.lastHash,
+        };
+    });
+    expect(blocked).toMatchObject({
+        commandResult: expect.stringContaining('所有学习均不生效'),
+        status: expect.stringContaining('学习不生效'),
+        requests: 0,
+        baseline: 7,
+        hash: 'original-hash',
+    });
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    await panel.locator('[data-thrive-field="format-plist"]').check();
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    await dialog.locator('[data-act="teach-start"]').click();
     await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.ok)).toBe(true);
     const request = await page.evaluate(() => window.__host.state.requests[0]);
-    expect(request.messages).toHaveLength(1);
-    expect(request.messages[0]).toMatchObject({ role: 'user', content: expect.stringMatching(/^将雾港写入世界书\n/) });
-    expect(request.payload.tools.every(tool => tool.function.name.startsWith('lore_'))).toBe(true);
+    expect(request.messages.at(-1)).toMatchObject({ role: 'user', content: expect.stringMatching(/^将雾港写入世界书\n/) });
+    expect(request.payload.tools.some(tool => tool.function.name.startsWith('plist_'))).toBe(true);
+    expect(await page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.baseline)).toBe(7);
+});
+
+test('stops active and queued learning when the last format is removed and warns on inactive card selections', async ({ page }) => {
+    await page.locator('#thrive_badge').click();
+    const panel = page.locator('#thrive_panel');
+    await panel.locator('[data-thrive-action="toggle-more"]').click();
+    await panel.locator('[data-thrive-field="storage"]').selectOption('worldbook');
+    await page.evaluate(() => {
+        window.__host.state.holdRequests = true;
+        window.__formatWarnings = [];
+        window.toastr = { warning: message => window.__formatWarnings.push(message) };
+    });
+    const dialog = page.getByRole('dialog', { name: '立即学习', exact: true });
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect.poll(() => page.evaluate(() => window.__host.state.requests.length)).toBe(1);
+    await panel.locator('[data-thrive-action="open-teach"]').click();
+    await dialog.locator('[data-act="teach-start"]').click();
+    await expect(panel.locator('.thrive-learn__queue')).toHaveText('排队 1');
+    await panel.locator('[data-thrive-field="format-text"]').uncheck();
+    await expect(panel.getByRole('alert')).toContainText('所有学习均不生效');
+    await expect.poll(() => page.evaluate(() => window.__host.state.chatMetadata.thrive.learn.lastRun?.stopped)).toBe('aborted');
+    await expect(panel.locator('.thrive-learn__queue')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__host.state.requests.length)).toBe(1);
+    await panel.locator('[data-thrive-field="format-plist"]').check();
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await panel.locator('[data-thrive-field="storage"]').selectOption('card');
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeChecked();
+    await expect(panel.locator('[data-thrive-field="format-plist"]')).toBeDisabled();
+    await expect(panel.getByRole('alert')).toContainText('角色卡存储需勾选自然文本');
+    expect(await page.evaluate(() => window.__formatWarnings.length)).toBe(2);
+    await panel.locator('[data-thrive-field="format-text"]').check();
+    await expect(panel.getByRole('alert')).toHaveCount(0);
 });
 
 test('keeps pasted images and the history choice in drafts and supports image-only learning', async ({ page }, testInfo) => {

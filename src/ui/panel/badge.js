@@ -147,8 +147,8 @@ function refreshBadge(ctx, settings, available) {
         return;
     }
 
-    // 没有对话时置灰：开关切过去也没有任何东西会生效
-    const usable = available;
+    const view = getLearningView(ctx, settings);
+    const usable = available && !view.blocked;
 
     const enabled = isEnabled(ctx);
     const running = getLearningRunning();
@@ -157,7 +157,7 @@ function refreshBadge(ctx, settings, available) {
     const patchPending = isUnresolved(getPatch(ctx)) ? 1 : 0;
 
     badge.classList.toggle('displayNone', !settings.showBadge);
-    // 没有对话就置灰
+    // 没有对话或可用描述方式时置灰，仍可点击徽章打开面板调整。
     badge.classList.toggle('thrive-badge--muted', !usable);
     badge.classList.toggle('thrive-badge--active', enabled && usable);
     badge.classList.toggle('thrive-badge--running', Boolean(running));
@@ -172,6 +172,8 @@ function refreshBadge(ctx, settings, available) {
     const lines = [];
     if (!available) {
         lines.push('请先打开一个对话');
+    } else if (view.blocked) {
+        lines.push(view.blocked);
     }
 
     // 正在学是当下最要紧的事实，放最前面；学不学得到的结果排在后面
@@ -202,7 +204,7 @@ function refreshBadge(ctx, settings, available) {
                 lines.push(`关键词 ${keywords.length} 个：${keywords.slice(0, 4).join(' / ')}${keywords.length > 4 ? ' …' : ''}`);
             }
             if (progress.interval <= 0 && keywords.length === 0) {
-                lines.push('还没配判据：只有手动「立刻学一次」会触发');
+                lines.push('还没配判据：只有手动「立即学习」会触发');
             }
         }
 

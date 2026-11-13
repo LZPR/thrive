@@ -206,6 +206,9 @@ export function startLearning(ctx, { reason = 'manual', teach = null, includeHis
     if (!isChatAvailable(ctx)) {
         return { ok: false, error: 'NO_CHAT', hint: '请先打开一个对话。' };
     }
+    if (getActiveDescFormats(ctx).length === 0) {
+        return { ok: false, error: 'NO_DESC_FORMAT', hint: hintFor('NO_DESC_FORMAT') };
+    }
 
     // 补充指令与图片在入队时定型，避免排队期间的草稿修改改变任务。
     const taught = buildTeachTarget(teach, { allowEmpty: includeHistory });
@@ -267,6 +270,11 @@ function launch(ctx, task) {
  * @returns {object}
  */
 function prepare(ctx, task) {
+    // 排队期间可能取消了全部描述方式，出队时也必须重新检查。
+    const descFormats = getActiveDescFormats(ctx);
+    if (descFormats.length === 0) {
+        return { ok: false, error: 'NO_DESC_FORMAT', hint: hintFor('NO_DESC_FORMAT') };
+    }
     const settings = ensureSettings(ctx);
     const limits = readLimits(settings);
     const target = task.includeHistory
@@ -277,7 +285,7 @@ function prepare(ctx, task) {
         return { ok: false, error: 'NO_TARGET', hint: '这个对话还没有可学的内容（没有可见消息）。' };
     }
 
-    const preset = buildPreset(settings, { target, descFormats: getActiveDescFormats(ctx) });
+    const preset = buildPreset(settings, { target, descFormats });
     if (task.includeHistory && target.trim()) {
         /*
          * 基线与哈希在**开始前**就写：跑到一半又来了新消息时，那几条不算进"已经学过的
@@ -437,6 +445,7 @@ export function isLearningRunning() {
  * @returns {{
  *   enabled: boolean, running: object|null, last: object|null,
  *   interval: number, since: number, remaining: number, keywordCount: number,
+ *   queued: number, blocked: string,
  * }}
  */
 export function getLearningView(ctx, settings) {
@@ -451,6 +460,7 @@ export function getLearningView(ctx, settings) {
         since: progress.since,
         remaining: progress.remaining,
         keywordCount: parseKeywords(settings.learnKeywords).length,
+        blocked: getActiveDescFormats(ctx).length === 0 ? hintFor('NO_DESC_FORMAT') : '',
         // 只数属于这个对话的：别的对话的任务出队时会被丢掉，没有理由显示在这儿
         queued: queue.filter(item => item.chatId === chatId).length,
     };

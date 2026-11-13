@@ -91,7 +91,7 @@ function renderPanel({
  * @param {ReturnType<typeof readLearnView>} view
  */
 function renderLearnSection(view, choice, characterName) {
-    const { enabled, running, last, usable, available, interval, remaining, keywordCount, queued } = view;
+    const { enabled, running, last, usable, available, interval, remaining, keywordCount, queued, blocked: formatWarning } = view;
     const characterDestination = `角色：${characterName || '未选择'}（${choice.storage === 'worldbook' ? '世界书条目' : '角色卡'}）`;
     const bookDestination = `世界书：${choice.book || '未选择'}`;
 
@@ -101,16 +101,17 @@ function renderLearnSection(view, choice, characterName) {
      */
     const hint = running
         ? '学习中…'
-        : !enabled
-            ? '未开启'
-            : interval > 0
-                ? `还差 ${remaining} 条`
-                : keywordCount > 0
-                    ? `${keywordCount} 个词`
-                    : '未配判据';
+        : formatWarning
+            ? '未选描述方式'
+            : !enabled
+                ? '未开启'
+                : interval > 0
+                    ? `还差 ${remaining} 条`
+                    : keywordCount > 0
+                        ? `${keywordCount} 个词`
+                        : '未配判据';
 
-    // 现在只剩一个"不可用"的原因：没有打开的对话
-    const blocked = !available ? '请先打开一个对话。' : '';
+    const blocked = !available ? '请先打开一个对话。' : formatWarning;
 
     const status = running
         ? running.reason === TRIGGER.TEACH
@@ -132,7 +133,7 @@ function renderLearnSection(view, choice, characterName) {
                     <span title="${escapeHtml(bookDestination)}">${escapeHtml(bookDestination)}</span>
                 </small>
             </div>
-            ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
+            ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn" role="alert">${escapeHtml(blocked)}</div>` : ''}
             <div class="thrive-learn${running ? ' is-running' : ''}">
                 <span class="thrive-learn__status" title="学习在独立会话里跑，结果只写进世界书与角色描述">
                     ${escapeHtml(status)}
@@ -256,7 +257,7 @@ function renderMoreRows({ learn, choice }) {
             </div>
 
             <fieldset class="thrive-more__formats">
-                <legend class="thrive-more__label">描述编辑方式 · 可多选</legend>
+                <legend class="thrive-more__label">描述编辑方式 · 至少选一种，可多选</legend>
                 <div class="thrive-more__format-options">${formats}</div>
                 <small class="thrive-hint">${choice.forced
                     ? '每种方式使用独立条目；仅向新会话提供已启用方式的工具和用途提示。'

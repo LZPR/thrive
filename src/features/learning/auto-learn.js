@@ -24,6 +24,7 @@ import {
     getLearn,
     isChatAvailable,
     isEnabled,
+    getActiveDescFormats,
     LEARN_BASELINE_NONE,
 } from '../settings/index.js';
 import { fnv1a } from '../../shared/util.js';
@@ -188,6 +189,10 @@ export function evaluateAuto(ctx, stage = 'assistant') {
 
     if (!isChatAvailable(ctx)) {
         result.reason = 'NO_CHAT';
+        return result;
+    }
+    if (getActiveDescFormats(ctx).length === 0) {
+        result.reason = 'NO_DESC_FORMAT';
         return result;
     }
 

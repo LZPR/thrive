@@ -89,9 +89,12 @@ export function describeStatus(ctx = getContext()) {
  */
 function describeLearnState(ctx, settings) {
     // 排队的那几场也算"正在学"的一部分：一次只跑一场，剩下的按顺序等
-    const queued = getLearningView(ctx, settings).queued;
+    const { queued, blocked } = getLearningView(ctx, settings);
     const tail = queued > 0 ? ` · 排队 ${queued}` : '';
 
+    if (blocked) {
+        return `学习不生效：${blocked}`;
+    }
     const running = getLearningRunning();
     if (running) {
         if (running.reason === TRIGGER.TEACH) {

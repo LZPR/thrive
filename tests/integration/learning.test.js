@@ -1,6 +1,6 @@
 import { beforeEach, it, expect, vi } from 'vitest';
 import { createContext } from '../helpers/context.js';
-import { ensureSettings, getLearn, getState } from '../../src/features/settings/index.js';
+import { ensureSettings, getLearn, getState, setDescFormats, setDescStorageMode } from '../../src/features/settings/index.js';
 
 const runner = vi.hoisted(() => ({
     busy: false,
@@ -35,6 +35,50 @@ beforeEach(() => {
 function context() {
     return createContext({ chat: [{ is_user: true, mes: '记住这个事实' }, { is_user: false, mes: '好的' }] });
 }
+
+it.each(['manual', 'interval', 'keyword', 'teach'])('blocks %s learning without description formats before changing progress or read registrations', reason => {
+    const ctx = context();
+    setDescFormats(ctx, []);
+    getLearn(ctx).baseline = 9;
+    getLearn(ctx).lastHash = 'original-hash';
+    getState(ctx).reads = { desc: 'previous-read' };
+    expect(startLearning(ctx, {
+        reason,
+        includeHistory: reason !== 'teach',
+        teach: { text: '补充指令', images: ['data:image/png;base64,AAAA'] },
+    })).toMatchObject({ ok: false, error: 'NO_DESC_FORMAT', hint: expect.stringContaining('所有学习均不生效') });
+    expect(getLearn(ctx)).toMatchObject({ baseline: 9, lastHash: 'original-hash' });
+    expect(getState(ctx).reads).toEqual({ desc: 'previous-read' });
+    expect(runner.runSession).not.toHaveBeenCalled();
+    expect(getLearningQueue()).toEqual([]);
+});
+
+it('requires an active format for the current storage and resumes after choosing one', async () => {
+    const ctx = context();
+    setDescFormats(ctx, ['plist']);
+    expect(startLearning(ctx)).toMatchObject({ ok: false, error: 'NO_DESC_FORMAT' });
+    setDescStorageMode(ctx, 'worldbook');
+    const started = startLearning(ctx);
+    expect(started.ok).toBe(true);
+    expect(runner.runSession).toHaveBeenCalledTimes(1);
+    runner.resolve({ ok: true });
+    await started.promise;
+});
+
+it('rechecks queued learning and refuses new queue entries after formats are cleared', async () => {
+    const ctx = context();
+    const started = startLearning(ctx, { includeHistory: false, teach: { text: '第一场' } });
+    expect(startLearning(ctx)).toMatchObject({ ok: true, queued: 1 });
+    getLearn(ctx).baseline = 9;
+    setDescFormats(ctx, []);
+    expect(startLearning(ctx)).toMatchObject({ ok: false, error: 'NO_DESC_FORMAT' });
+    expect(getLearningQueue()).toHaveLength(1);
+    runner.resolve({ ok: true });
+    await started.promise;
+    expect(runner.runSession).toHaveBeenCalledTimes(1);
+    expect(getLearningQueue()).toEqual([]);
+    expect(getLearn(ctx).baseline).toBe(9);
+});
 
 it('Professor leaves the chat-learning baseline unchanged and fixes its connection at launch', async () => {
     const ctx = context();

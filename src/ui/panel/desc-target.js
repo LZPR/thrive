@@ -17,6 +17,8 @@
 
 import { syncDescEntries } from '../../features/memory/desc.js';
 import { normalizeDescFormats } from '../../features/memory/desc-entry.js';
+import { clearLearningQueue, isLearningRunning, stopLearning } from '../../features/learning/learning.js';
+import { hintFor } from '../../shared/diagnostics.js';
 import { clearDraft, summarizeDraft } from '../../features/memory/draft.js';
 import { getPatch, isUnresolved } from '../../features/memory/patch.js';
 import {
@@ -25,6 +27,7 @@ import {
     setWritableBookSetting,
     getState,
     getDescFormats,
+    getActiveDescFormats,
     setDescFormats,
     saveChat,
 } from '../../features/settings/index.js';
@@ -119,7 +122,28 @@ export async function changeDescFormats(ctx, formats) {
     }
     if (ctx.getCurrentChatId?.() !== chatId) return { ok: false, changed: false };
     setDescFormats(ctx, next);
+    warnIfLearningBlocked(ctx);
     return { ok: true, changed: true };
+}
+
+/** 零种可用方式时暂停全部学习；保留空选择，让用户按自己的意图重新配置。 */
+function warnIfLearningBlocked(ctx) {
+    if (getActiveDescFormats(ctx).length > 0) {
+        return false;
+    }
+
+    if (isLearningRunning()) {
+        stopLearning();
+    } else {
+        clearLearningQueue();
+    }
+    const warning = hintFor('NO_DESC_FORMAT');
+    if (globalThis.toastr?.warning) {
+        globalThis.toastr.warning(warning);
+    } else {
+        toast(warning);
+    }
+    return true;
 }
 
 /**
@@ -213,12 +237,13 @@ async function switchToWorldbook(ctx) {
     if (ctx.getCurrentChatId?.() !== chatId) return { ok: false, changed: false };
 
     setDescStorageMode(ctx, 'worldbook');
+    const learningBlocked = warnIfLearningBlocked(ctx);
 
     // 未激活只说"去哪开"：这一刻用户已经决定换模式了，解释为什么、要不要处理角色卡上的旧描述
     // 都帮不上忙（ADR-046）
     if (isBookScanned(ctx, ensured.book) === false) {
         toast(`「${ensured.book}」还没有激活：到「世界书」面板勾选这本书`);
-    } else {
+    } else if (!learningBlocked) {
         toast('已切到世界书条目：每种已启用的描述方式各使用一条专属条目');
     }
 
@@ -245,6 +270,8 @@ async function switchToCard(ctx) {
     if (ctx.getCurrentChatId?.() !== chatId) return { ok: false, changed: false };
 
     setDescStorageMode(ctx, 'card');
-    toast('已切回角色卡存储；世界书里的描述条目已停用，内容保留。PLists / Ali:Chat 暂不生效');
+    if (!warnIfLearningBlocked(ctx)) {
+        toast('已切回角色卡存储；世界书里的描述条目已停用，内容保留。PLists / Ali:Chat 暂不生效');
+    }
     return { ok: true, changed: true };
 }

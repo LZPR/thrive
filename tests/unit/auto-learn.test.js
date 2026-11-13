@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { createContext } from '../helpers/context.js';
-import { getLearn } from '../../src/features/settings/index.js';
+import { getLearn, setDescFormats } from '../../src/features/settings/index.js';
 import { evaluateAuto, parseKeywords, countMessages, TRIGGER } from '../../src/features/learning/auto-learn.js';
 import { fnv1a } from '../../src/shared/util.js';
 
@@ -22,4 +22,16 @@ it('deduplicates keywords, triggers on keywords and suppresses an already-learne
     expect(evaluateAuto(ctx)).toMatchObject({ fire: true, reason: TRIGGER.KEYWORD });
     getLearn(ctx).lastHash = fnv1a('北境在南边');
     expect(evaluateAuto(ctx)).toMatchObject({ fire: false, reason: 'JUST_LEARNED' });
+});
+
+it('does not trigger or align the baseline when no description format is active', () => {
+    const ctx = createContext({ settings: { enabledByDefault: true, learnInterval: 1, learnKeywords: '北境' }, chat: [
+        { is_user: true, mes: '北境在南边' }, { is_user: false, mes: '好的' },
+    ] });
+    setDescFormats(ctx, []);
+    const baseline = getLearn(ctx).baseline;
+    expect(evaluateAuto(ctx)).toMatchObject({ fire: false, reason: 'NO_DESC_FORMAT' });
+    expect(getLearn(ctx).baseline).toBe(baseline);
+    setDescFormats(ctx, ['text']);
+    expect(evaluateAuto(ctx)).toMatchObject({ fire: true, reason: TRIGGER.KEYWORD });
 });
