@@ -574,23 +574,27 @@ body.thrive-panel-dragging {
     border-bottom: 1px solid var(--SmartThemeBorderColor);
 }
 
-/* 学习开关与当前写入落点并排，书名较长时小字自然换行。 */
+/* 学习开关与写入落点各占一半；角色、世界书分别一行，长名称悬停看全文。 */
 .thrive-modes__row {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: center;
     gap: 6px;
 }
 
-.thrive-modes__row .thrive-mode {
-    flex: 0 0 auto;
-}
-
 .thrive-modes__destination {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
     font-size: calc(var(--mainFontSize, 15px) * 0.72);
     line-height: 1.45;
-    overflow-wrap: anywhere;
     opacity: 0.65;
+}
+
+.thrive-modes__destination > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /*

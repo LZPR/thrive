@@ -92,8 +92,8 @@ function renderPanel({
  */
 function renderLearnSection(view, choice, characterName) {
     const { enabled, running, last, usable, available, interval, remaining, keywordCount, queued } = view;
-    const destination = `角色：${characterName || '未选择'}（${choice.storage === 'worldbook' ? '世界书条目' : '角色卡'}）`
-        + ` · 世界书：${choice.book || '未选择'}`;
+    const characterDestination = `角色：${characterName || '未选择'}（${choice.storage === 'worldbook' ? '世界书条目' : '角色卡'}）`;
+    const bookDestination = `世界书：${choice.book || '未选择'}`;
 
     /*
      * 第二行要跟着判据走：开了但一条判据都没有是最常见的空转状态，
@@ -127,7 +127,10 @@ function renderLearnSection(view, choice, characterName) {
         <section class="thrive-panel__section thrive-modes">
             <div class="thrive-modes__row">
                 ${renderLearnTile({ on: enabled, hint, usable, running })}
-                <small class="thrive-modes__destination" title="${escapeHtml(destination)}">${escapeHtml(destination)}</small>
+                <small class="thrive-modes__destination">
+                    <span title="${escapeHtml(characterDestination)}">${escapeHtml(characterDestination)}</span>
+                    <span title="${escapeHtml(bookDestination)}">${escapeHtml(bookDestination)}</span>
+                </small>
             </div>
             ${blocked ? `<div class="thrive-panel__notice thrive-panel__notice--warn">${escapeHtml(blocked)}</div>` : ''}
             <div class="thrive-learn${running ? ' is-running' : ''}">
